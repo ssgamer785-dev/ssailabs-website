@@ -125,6 +125,19 @@ app.get("/api/leads", (_req, res) => {
   res.json({ count: leads.length, leads });
 });
 
+// Baseline security headers. Netlify applies the same set via public/_headers;
+// this keeps parity when the Express build is served directly.
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader(
+    "Permissions-Policy",
+    "geolocation=(), microphone=(), camera=(), interest-cohort=()",
+  );
+  next();
+});
+
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -134,9 +147,32 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
+
+    // Vite emits content-hashed filenames under /assets, so they are safe to
+    // cache permanently. Everything else (HTML, robots.txt, sitemap.xml) must
+    // revalidate so a new deploy is picked up straight away.
+    app.use(
+      express.static(distPath, {
+        setHeaders: (res, filePath) => {
+          if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+            res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+          } else if (filePath.endsWith(".html")) {
+            res.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
+          } else {
+            res.setHeader("Cache-Control", "public, max-age=604800");
+          }
+        },
+      }),
+    );
+
+    // The site is a single page with in-page anchors (#services, #about,
+    // #start-project) rather than router paths, so unknown URLs are genuine
+    // 404s. Serving index.html with a 200 here would create soft 404s and let
+    // Google index unlimited duplicate copies of the homepage.
     app.get("*", (_req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+      res.status(404).sendFile(path.join(distPath, "404.html"), (err) => {
+        if (err) res.status(404).type("html").send("<h1>404 — Page not found</h1>");
+      });
     });
   }
 

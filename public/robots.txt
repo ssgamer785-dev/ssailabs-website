@@ -1,0 +1,36 @@
+# robots.txt for https://ssailabs.in/
+
+User-agent: *
+Allow: /
+Disallow: /api/
+
+# AI answer engines are an acquisition channel for this site, so they are
+# explicitly allowed rather than left to the wildcard rule above.
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+Sitemap: https://ssailabs.in/sitemap.xml

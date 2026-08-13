@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ssailabs.in is currently a single-page site: navigation targets (#services,
+  #about, #start-project) are in-page anchors, not separate documents, so the
+  sitemap intentionally lists one URL. Add an entry here for every new route
+  that gets its own HTML document.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://ssailabs.in/</loc>
+    <lastmod>2026-08-13</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>

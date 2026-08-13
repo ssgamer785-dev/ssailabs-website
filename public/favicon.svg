@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="S.S AI LABS">
+  <defs>
+    <radialGradient id="glow" cx="72%" cy="22%" r="70%">
+      <stop offset="0%" stop-color="#a855f7"/>
+      <stop offset="100%" stop-color="#0a0a0a"/>
+    </radialGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#glow)"/>
+  <rect x="2" y="2" width="60" height="60" rx="12" fill="none" stroke="#c084fc" stroke-width="3"/>
+  <text x="32" y="41" text-anchor="middle" font-family="Syne, 'Space Grotesk', Arial, sans-serif"
+        font-size="24" font-weight="700" fill="#f5f5f5">S.S</text>
+</svg>
