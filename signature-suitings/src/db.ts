@@ -172,6 +172,58 @@ const DEMO_PURGE_FLAG = "sig_suit_demo_data_purged_v1";
 export const ARCHIVED_TAG = "Archived";
 
 /**
+ * Short collision-resistant suffix for generated identifiers.
+ *
+ * Ids used to be plain `${prefix}_${Date.now()}`, which collide whenever two records are
+ * created in the same millisecond — routine when placing an order writes an order, an
+ * invoice and a measurement in one tick, or during bulk saves.
+ */
+export function uid(): string {
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `${Date.now().toString(36)}${rand}`;
+}
+
+/** Local YYYYMMDD/YYMMDD helpers for human-facing document numbers. */
+function localDateParts(d: Date = new Date()) {
+  const yy = String(d.getFullYear()).slice(2);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return { yy, mm, dd, ymd: `${yy}${mm}${dd}` };
+}
+
+/**
+ * Builds the next free document number of the form PREFIX-YYMMDD-NNNN.
+ *
+ * `orderNumber` and `invoiceNumber` are UNIQUE columns, and the previous scheme
+ * (`ORD-${Date.now().toString().slice(-6)}`) used the last six digits of the epoch
+ * millisecond — a value that repeats every 16.7 minutes. Two orders taken a quarter of an
+ * hour apart could therefore be handed the same number, and the second one's save would be
+ * rejected by the database for good. This counts what already exists for today and skips any
+ * number already taken.
+ */
+export function nextDocumentNumber(prefix: string, existing: Iterable<string>): string {
+  const { ymd } = localDateParts();
+  const stem = `${prefix}-${ymd}-`;
+  const taken = new Set<string>();
+  let highest = 0;
+  for (const value of existing) {
+    if (!value) continue;
+    taken.add(value);
+    if (value.startsWith(stem)) {
+      const n = parseInt(value.slice(stem.length), 10);
+      if (!isNaN(n) && n > highest) highest = n;
+    }
+  }
+  let seq = highest + 1;
+  let candidate = `${stem}${String(seq).padStart(4, "0")}`;
+  while (taken.has(candidate) && seq < 100000) {
+    seq++;
+    candidate = `${stem}${String(seq).padStart(4, "0")}`;
+  }
+  return candidate;
+}
+
+/**
  * Attendance is one record per worker per day, so its id is derived from those two values
  * rather than being random. Two devices marking the same worker present on the same date now
  * produce the same id and upsert over each other instead of creating duplicate rows.
@@ -521,12 +573,13 @@ export class TailorDatabase {
   // Deleted-record registry: table -> { recordId -> deletedAtEpochMs }
   private tombstones: TombstoneMap = {};
 
+  /**
+   * Resolves once every queued cloud write has settled. Drains repeatedly, because awaiting
+   * the queue yields to the event loop and more writes may be chained on in the meantime —
+   * returning after a single await could report completion while work is still outstanding.
+   */
   public async waitForSync(): Promise<void> {
-    try {
-      await this.supabaseQueue;
-    } catch (e) {
-      console.warn("waitForSync queue resolved with error:", e);
-    }
+    await this.flushSupabaseQueue();
   }
 
   /**
@@ -831,18 +884,63 @@ export class TailorDatabase {
     saveEncrypted("salaries", this.salaries);
   }
 
-  // Flush and reset background write queue to prevent race conditions during sync/restore
+  /**
+   * Drains the background write queue.
+   *
+   * This used to finish by assigning `this.supabaseQueue = Promise.resolve()`. That detached
+   * any write still in flight: a later waitForSync()/confirmSaved() awaited the fresh empty
+   * promise and reported "saved" while the real upsert was still travelling. Because
+   * initializeSupabaseSync() calls this on entry — and a realtime reconnect triggers a
+   * catch-up sync at unpredictable moments — a record saved at the wrong instant could be
+   * reported as saved yet never reach Supabase.
+   *
+   * It now simply drains, looping until no new work was chained on while awaiting.
+   */
   public async flushSupabaseQueue(): Promise<void> {
-    try {
-      await this.supabaseQueue;
-    } catch (e) {
-      // ignore previous queue errors
-    }
-    this.supabaseQueue = Promise.resolve();
+    let previous: Promise<any>;
+    let guard = 0;
+    do {
+      previous = this.supabaseQueue;
+      try {
+        await previous;
+      } catch (e) {
+        // Individual writes handle their own errors; never let one reject the drain.
+      }
+      guard++;
+    } while (this.supabaseQueue !== previous && guard < 50);
   }
 
   // --- SUPABASE INTUITIVE LIVE SYNCHRONIZER & AUTO-MIGRATOR ---
-  public async initializeSupabaseSync(forceOverwriteSupabase: boolean = false) {
+  /**
+   * Reentrancy guard. Sync is triggered from several places at once — app start, login, tab
+   * focus, and the catch-up that follows a realtime reconnect. Two overlapping runs each
+   * rebuild every table from their own snapshot and then assign the result over the shared
+   * state, so the slower one silently reverts whatever the faster one merged.
+   */
+  private syncInFlight: Promise<void> | null = null;
+
+  public async initializeSupabaseSync(forceOverwriteSupabase: boolean = false): Promise<void> {
+    // Wait for any run already in progress. A plain background sync then has nothing left to
+    // do; a forced (restore) sync still has to run, but only once the other has finished.
+    if (this.syncInFlight) {
+      try {
+        await this.syncInFlight;
+      } catch (e) {
+        // The in-flight run reports its own errors.
+      }
+      if (!forceOverwriteSupabase) return;
+    }
+
+    const run = this.runSupabaseSync(forceOverwriteSupabase);
+    this.syncInFlight = run.catch(() => undefined);
+    try {
+      await run;
+    } finally {
+      this.syncInFlight = null;
+    }
+  }
+
+  private async runSupabaseSync(forceOverwriteSupabase: boolean = false) {
     if (!isSupabaseConfigured) {
       console.log("Supabase is not configured yet. Running on LocalStorage Cache.");
       return;
@@ -2333,7 +2431,7 @@ export class TailorDatabase {
   public addGarmentCategory(category: Omit<GarmentCategory, "id">): GarmentCategory {
     const newCategory: GarmentCategory = {
       ...category,
-      id: `cat_${Date.now()}`
+      id: `cat_${uid()}`
     };
     this.garmentCategories.push(newCategory);
     this.saveKeyLocal("garmentCategories", this.garmentCategories);
@@ -2361,7 +2459,7 @@ export class TailorDatabase {
   public addMeasurementTemplate(template: Omit<MeasurementTemplate, "id" | "createdAt" | "updatedAt">): MeasurementTemplate {
     const newTmpl: MeasurementTemplate = {
       ...template,
-      id: `tmpl_${Date.now()}`,
+      id: `tmpl_${uid()}`,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -2394,7 +2492,7 @@ export class TailorDatabase {
   public addGarmentCatalogItem(item: Omit<GarmentCatalogItem, "id">): GarmentCatalogItem {
     const newItem: GarmentCatalogItem = {
       ...item,
-      id: `g_${Date.now()}`
+      id: `g_${uid()}`
     };
     this.garmentCatalog.push(newItem);
     this.saveKeyLocal("garmentCatalog", this.garmentCatalog);
@@ -2422,7 +2520,7 @@ export class TailorDatabase {
   public addUser(user: Omit<User, "id">): User {
     const newUser: User = {
       ...user,
-      id: `usr_${Date.now()}`
+      id: `usr_${uid()}`
     };
     this.users.push(newUser);
     this.saveKeyLocal("users", this.users);
@@ -2449,14 +2547,16 @@ export class TailorDatabase {
     return this.customers.find(c => c.qrCodeId === qrId);
   }
   public addCustomer(cust: Omit<Customer, "id" | "customerSince" | "totalOrdersCount" | "outstandingBalance" | "qrCodeId" | "memoryNotes" | "preferenceTags">): Customer {
-    const id = `cust_${Date.now()}`;
+    const id = `cust_${uid()}`;
     const newCustomer: Customer = {
       ...cust,
       id,
       customerSince: new Date().toISOString(),
       totalOrdersCount: 0,
       outstandingBalance: 0,
-      qrCodeId: `qr_${cust.fullName.toLowerCase().replace(/\s+/g, "_")}_${cust.mobileNumber.slice(-5)}`,
+      // UNIQUE column. Built from the record id so two customers who share a name and a
+      // mobile number (family members, which the portal supports) cannot collide.
+      qrCodeId: `qr_${cust.fullName.toLowerCase().replace(/\s+/g, "_").slice(0, 24)}_${id.slice(5)}`,
       memoryNotes: [],
       preferenceTags: ["First Time Customer"]
     };
@@ -2729,7 +2829,7 @@ export class TailorDatabase {
       if (!meas.remarks && latestMeas.remarks) meas.remarks = latestMeas.remarks;
     }
 
-    const id = `meas_${Date.now()}`;
+    const id = `meas_${uid()}`;
     const versionDate = new Date().toISOString();
     const slipNumber = `SS-${String(this.measurements.length + 1).padStart(4, "0")}`;
 
@@ -2868,7 +2968,11 @@ export class TailorDatabase {
    *   - passing no amounts (a status change) only refreshes the derived balance.
    */
   public syncInvoiceForOrder(order: Order, totalAmount?: number, advancePaid?: number) {
-    let existingInvoice = this.invoices.find(i => i.linkedOrderId === order.id);
+    // Only the order's OWN invoice. A completed trial/fitting also stores the order id on
+    // its charge invoice, so an unqualified match could pick up the trial invoice and
+    // overwrite it with the order's totals — destroying the trial charge and orphaning the
+    // real order invoice.
+    let existingInvoice = this.findOrderInvoice(order.id);
 
     if (existingInvoice) {
       const recordedPayments = Array.isArray(existingInvoice.payments) ? existingInvoice.payments : [];
@@ -2957,8 +3061,8 @@ export class TailorDatabase {
         throw new Error("Strict Transaction Error: paidDeposit (advance) cannot exceed totalAmount.");
       }
 
-      const id = order.linkedInvoiceId || `inv_${Date.now()}`;
-      const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
+      const id = order.linkedInvoiceId || `inv_${uid()}`;
+      const invoiceNumber = nextDocumentNumber("INV", this.invoices.map(i => i.invoiceNumber));
       const invoiceDate = order.orderDate || new Date().toISOString();
       const balanceDue = Math.max(0, finalTotal - finalAdvance);
       
@@ -3028,12 +3132,12 @@ export class TailorDatabase {
       throw new Error("Strict Transaction Error: advancePaid (paid deposit) cannot exceed totalAmount.");
     }
 
-    const id = `ord_${Date.now()}`;
-    const orderNumber = `ORD-${Date.now().toString().slice(-6)}`;
+    const id = `ord_${uid()}`;
+    const orderNumber = nextDocumentNumber("ORD", this.orders.map(o => o.orderNumber));
     const orderDate = new Date().toISOString();
 
     // Pre-calculate linkedInvoiceId (required since totalAmount is valid and present)
-    const preAllocatedInvoiceId = `inv_${Date.now()}`;
+    const preAllocatedInvoiceId = `inv_${uid()}`;
 
     // Ensure garmentLineItems and garmentTypes are populated and bidirectionally synced
     let garmentLineItems: GarmentLineItem[] = order.garmentLineItems || [];
@@ -3253,7 +3357,8 @@ export class TailorDatabase {
       return { success: false, error: { message: `Order with ID "${orderId}" not found in local memory state.` } };
     }
 
-    const existingInvoice = this.invoices.find(i => i.linkedOrderId === orderId) || (existingOrder.linkedInvoiceId ? this.invoices.find(i => i.id === existingOrder.linkedInvoiceId) : undefined);
+    const existingInvoice = this.findOrderInvoice(orderId)
+      || (existingOrder.linkedInvoiceId ? this.invoices.find(i => i.id === existingOrder.linkedInvoiceId) : undefined);
 
     // Calculate sum of recorded payments
     const advancePaid = existingInvoice?.payments && existingInvoice.payments.length > 0
@@ -3308,11 +3413,11 @@ export class TailorDatabase {
         : (existingOrder.statusHistory || [])
     };
 
-    const invoiceId = existingInvoice?.id || `inv_${Date.now()}`;
+    const invoiceId = existingInvoice?.id || `inv_${uid()}`;
     const updatedInvoice: Invoice = {
       id: invoiceId,
       customerId: updatedOrder.customerId,
-      invoiceNumber: existingInvoice?.invoiceNumber || `INV-${Date.now().toString().slice(-6)}`,
+      invoiceNumber: existingInvoice?.invoiceNumber || nextDocumentNumber("INV", this.invoices.map(i => i.invoiceNumber)),
       invoiceDate: existingInvoice?.invoiceDate || new Date().toISOString(),
       linkedOrderId: orderId,
       lineItems,
@@ -3432,7 +3537,7 @@ export class TailorDatabase {
       };
     }
 
-    const invoices = this.invoices.filter(inv => inv.linkedOrderId === id);
+    const invoices = this.invoices.filter(inv => inv.linkedOrderId === id && !inv.linkedAppointmentId);
     let recordedPayments = 0;
     let paidAmount = 0;
     invoices.forEach(inv => {
@@ -3471,12 +3576,14 @@ export class TailorDatabase {
 
     const trialIds = this.trials.filter(t => t.orderId === id).map(t => t.id);
     const alterationIds = this.alterations.filter(alt => alt.orderId === id).map(alt => alt.id);
-    const invoiceIds = this.invoices.filter(inv => inv.linkedOrderId === id).map(inv => inv.id);
+    // Delete only the order's own invoice. A trial/fitting invoice belongs to its
+    // appointment, which still exists; the database nulls its linkedOrderId for us.
+    const invoiceIds = this.invoices.filter(inv => inv.linkedOrderId === id && !inv.linkedAppointmentId).map(inv => inv.id);
 
     this.orders = this.orders.filter(o => o.id !== id);
     this.trials = this.trials.filter(t => t.orderId !== id);
     this.alterations = this.alterations.filter(alt => alt.orderId !== id);
-    this.invoices = this.invoices.filter(i => i.linkedOrderId !== id);
+    this.invoices = this.invoices.filter(i => !invoiceIds.includes(i.id));
 
     this.saveKeyLocal("orders", this.orders);
     this.saveKeyLocal("trials", this.trials);
@@ -3509,7 +3616,7 @@ export class TailorDatabase {
   }
 
   public addTrial(trial: Omit<Trial, "id">): Trial {
-    const id = `trial_${Date.now()}`;
+    const id = `trial_${uid()}`;
     const newTrial: Trial = { ...trial, id };
     this.trials.push(newTrial);
     this.saveKeyLocal("trials", this.trials);
@@ -3524,7 +3631,7 @@ export class TailorDatabase {
   }
 
   public addAlteration(alt: Omit<Alteration, "id">): Alteration {
-    const id = `alt_${Date.now()}`;
+    const id = `alt_${uid()}`;
     const newAlt: Alteration = { ...alt, id };
     this.alterations.push(newAlt);
     this.saveKeyLocal("alterations", this.alterations);
@@ -3544,8 +3651,16 @@ export class TailorDatabase {
   public getInvoiceById(id: string): Invoice | undefined {
     return this.invoices.find(i => i.id === id);
   }
+  /**
+   * The invoice raised for an order itself, excluding trial/fitting charge invoices.
+   * Those carry the same linkedOrderId but belong to an appointment.
+   */
+  private findOrderInvoice(orderId: string): Invoice | undefined {
+    return this.invoices.find(i => i.linkedOrderId === orderId && !i.linkedAppointmentId);
+  }
+
   public getInvoiceByOrderId(orderId: string): Invoice | undefined {
-    return this.invoices.find(i => i.linkedOrderId === orderId);
+    return this.findOrderInvoice(orderId);
   }
 
   public addInvoice(inv: Omit<Invoice, "id" | "invoiceNumber" | "invoiceDate" | "balanceDue" | "paymentStatus" | "payments"> & { advancePaid: number; paymentMode?: string }): Invoice {
@@ -3564,8 +3679,8 @@ export class TailorDatabase {
       throw new Error("Strict Validation Error: advancePaid (paidDeposit) cannot exceed grandTotal (totalAmount).");
     }
 
-    const id = `inv_${Date.now()}`;
-    const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
+    const id = `inv_${uid()}`;
+    const invoiceNumber = nextDocumentNumber("INV", this.invoices.map(i => i.invoiceNumber));
     const invoiceDate = new Date().toISOString();
     const balanceDue = Math.max(0, inv.grandTotal - finalAdvance);
     
@@ -3726,7 +3841,7 @@ export class TailorDatabase {
     return this.appointments.filter(a => a.customerId === customerId);
   }
   public addAppointment(appt: Omit<Appointment, "id">): Appointment {
-    const id = `appt_${Date.now()}`;
+    const id = `appt_${uid()}`;
     const newAppt: Appointment = {
       ...appt,
       id
@@ -3809,8 +3924,8 @@ export class TailorDatabase {
           this.pushSingleToSupabase("invoices", updated);
         }
       } else {
-        const id = `inv_${Date.now()}`;
-        const invoiceNumber = `INV-FIT-${Date.now().toString().slice(-6)}`;
+        const id = `inv_${uid()}`;
+        const invoiceNumber = nextDocumentNumber("INV-FIT", this.invoices.map(i => i.invoiceNumber));
         const invoiceDate = new Date().toISOString();
         const payments = paymentStatus === "Paid"
           ? [{ amount: trialCharge, date: invoiceDate, mode: "Cash" as const, recordedBy: "Fitting Center" }]
@@ -3868,7 +3983,7 @@ export class TailorDatabase {
     return [...this.expenses].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }
   public addExpense(exp: Omit<Expense, "id">): Expense {
-    const id = `exp_${Date.now()}`;
+    const id = `exp_${uid()}`;
     const newExpense: Expense = {
       ...exp,
       id
@@ -3917,7 +4032,7 @@ export class TailorDatabase {
     return this.workers.filter(w => w.active);
   }
   public addWorker(worker: Omit<Worker, "id">): Worker {
-    const id = `worker_${Date.now()}`;
+    const id = `worker_${uid()}`;
     const newWorker: Worker = { ...worker, id };
     this.workers.push(newWorker);
     this.saveKeyLocal("workers", this.workers);
@@ -4159,7 +4274,7 @@ export class TailorDatabase {
     return this.advances.filter(a => a.workerId === workerId && !a.repaid);
   }
   public addAdvance(advance: Omit<WorkerAdvance, "id" | "repaid">): WorkerAdvance {
-    const id = `adv_${Date.now()}`;
+    const id = `adv_${uid()}`;
     const newAdvance: WorkerAdvance = { ...advance, id, repaid: false };
     this.advances.push(newAdvance);
     this.saveKeyLocal("advances", this.advances);
@@ -4207,7 +4322,7 @@ export class TailorDatabase {
     }
   }
   public addSalaryPayout(payout: Omit<WorkerSalaryPayout, "id">): WorkerSalaryPayout {
-    const id = `sal_${Date.now()}`;
+    const id = `sal_${uid()}`;
     const newPayout: WorkerSalaryPayout = { ...payout, id };
     this.salaries.push(newPayout);
     this.saveKeyLocal("salaries", this.salaries);

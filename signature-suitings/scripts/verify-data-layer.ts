@@ -193,6 +193,61 @@ async function main() {
   check("restore does not duplicate customers", db2.getCustomers().length === 1, `got ${db2.getCustomers().length}`);
   check("restore does not duplicate invoices", db2.getInvoices().length === 1, `got ${db2.getInvoices().length}`);
 
+
+  console.log("=== N. UNIQUE-COLUMN COLLISION GUARDS (regression) ===");
+  // customers.qrCodeId, orders.orderNumber and invoices.invoiceNumber are UNIQUE in the
+  // database. Generators that collide make the save fail permanently in the cloud.
+  const twinA = db2.addCustomer({ fullName: "Ravi Kumar", mobileNumber: "9876543210", preferredFabricBrands: [] } as any);
+  const twinB = db2.addCustomer({ fullName: "Ravi Kumar", mobileNumber: "9876543210", preferredFabricBrands: [] } as any);
+  check("same name + same mobile produce distinct customer ids", twinA.id !== twinB.id);
+  check("same name + same mobile produce distinct qrCodeId", twinA.qrCodeId !== twinB.qrCodeId,
+    `${twinA.qrCodeId} vs ${twinB.qrCodeId}`);
+
+  const rapidIds = new Set<string>();
+  const rapidQr = new Set<string>();
+  for (let i = 0; i < 60; i++) {
+    const c = db2.addCustomer({ fullName: "Bulk Client", mobileNumber: "9000011122", preferredFabricBrands: [] } as any);
+    rapidIds.add(c.id); rapidQr.add(c.qrCodeId);
+  }
+  check("60 same-tick customers all have unique ids", rapidIds.size === 60, `got ${rapidIds.size}`);
+  check("60 same-tick customers all have unique qrCodeIds", rapidQr.size === 60, `got ${rapidQr.size}`);
+
+  const orderNums = new Set<string>();
+  const invoiceNums = new Set<string>();
+  for (let i = 0; i < 40; i++) {
+    const o = db2.addOrder({ customerId: twinA.id, garmentTypes: ["Shirt"], garmentLineItems: [],
+      linkedMeasurementVersionId: "", fabricDetails: "", expectedDeliveryDate: "2026-12-01",
+      status: "Pending", notes: "" } as any, 1000, 0);
+    orderNums.add(o.orderNumber);
+    const inv = db2.getInvoiceByOrderId(o.id);
+    if (inv) invoiceNums.add(inv.invoiceNumber);
+  }
+  check("40 rapid orders all have unique order numbers", orderNums.size === 40, `got ${orderNums.size}`);
+  check("40 rapid invoices all have unique invoice numbers", invoiceNums.size === 40, `got ${invoiceNums.size}`);
+
+  console.log("=== O. ORDER INVOICE vs TRIAL INVOICE (regression) ===");
+  const oi = db2.addOrder({ customerId: twinB.id, garmentTypes: ["Coat"], garmentLineItems: [],
+    linkedMeasurementVersionId: "", fabricDetails: "", expectedDeliveryDate: "2026-12-05",
+    status: "Pending", notes: "" } as any, 20000, 5000);
+  const orderInvoice = db2.getInvoiceByOrderId(oi.id)!;
+  const ap = db2.addAppointment({ customerId: twinB.id, type: "Trial", dateTime: new Date().toISOString(),
+    status: "Completed", notes: "", orderId: oi.id, appointmentType: "Trial Fitting",
+    appointmentDate: "2026-12-01", appointmentTime: "10:00", trialCharge: 500, paymentStatus: "Paid" } as any);
+  const trialInvoice = db2.getInvoices().find((i: any) => i.linkedAppointmentId === ap.id);
+  check("trial charge produced its own invoice", Boolean(trialInvoice));
+  check("getInvoiceByOrderId returns the ORDER invoice, not the trial one",
+    db2.getInvoiceByOrderId(oi.id)?.id === orderInvoice.id,
+    `${db2.getInvoiceByOrderId(oi.id)?.id} vs ${orderInvoice.id}`);
+  check("order invoice keeps its own total", db2.getInvoiceByOrderId(oi.id)?.grandTotal === 20000,
+    String(db2.getInvoiceByOrderId(oi.id)?.grandTotal));
+  db2.updateOrderStatus(oi.id, "Stitching", "Tester");
+  check("status change did not overwrite the trial invoice",
+    db2.getInvoices().find((i: any) => i.id === trialInvoice!.id)?.grandTotal === 500,
+    String(db2.getInvoices().find((i: any) => i.id === trialInvoice!.id)?.grandTotal));
+  check("status change did not corrupt the order invoice",
+    db2.getInvoiceByOrderId(oi.id)?.grandTotal === 20000);
+  check("order advance still recorded", db2.getInvoiceByOrderId(oi.id)?.payments.length === 1);
+
   console.log("\n" + results.join("\n"));
   console.log(`\n================ ${pass} passed, ${fail} failed ================`);
   if (fail > 0) process.exitCode = 1;
