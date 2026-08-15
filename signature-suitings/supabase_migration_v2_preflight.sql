@@ -165,7 +165,9 @@ SELECT 1 AS seq, '1. Required tables' AS check_name,
   CASE WHEN (SELECT count(*) FROM missing_tables)=0 THEN 'OK' ELSE 'BLOCKER' END AS status,
   CASE WHEN (SELECT count(*) FROM missing_tables)=0
        THEN 'All 14 required tables exist.'
-       ELSE (SELECT count(*)||' table(s) MISSING: '||string_agg(t,', ')||'. Run supabase_schema.sql first.'
+       ELSE (SELECT count(*)||' table(s) MISSING: '||string_agg(t,', ')
+             ||'. STOP: run supabase_setup_base.sql FIRST. supabase_migration_v2.sql contains only '
+             ||'ALTER and CREATE INDEX statements and cannot create a table.'
              FROM missing_tables) END AS detail
 
 UNION ALL
@@ -216,8 +218,12 @@ FROM (
 UNION ALL
 -- ---------- 2d. SCHEMA DRIFT ----------------------------------------
 SELECT 5, '2d. Existing app columns',
-  CASE WHEN (SELECT count(*) FROM missing_expected)=0 THEN 'OK' ELSE 'BLOCKER' END,
-  CASE WHEN (SELECT count(*) FROM missing_expected)=0
+  CASE WHEN (SELECT count(*) FROM missing_tables) > 0 THEN 'BLOCKER'
+       WHEN (SELECT count(*) FROM missing_expected)=0 THEN 'OK' ELSE 'BLOCKER' END,
+  CASE WHEN (SELECT count(*) FROM missing_tables) > 0
+       THEN 'Not assessable: ' || (SELECT count(*) FROM missing_tables)
+            || ' table(s) do not exist yet. Run supabase_setup_base.sql first, then re-run this preflight.'
+       WHEN (SELECT count(*) FROM missing_expected)=0
        THEN 'All columns the application reads and writes are present.'
        ELSE (SELECT count(*)||' expected column(s) MISSING (schema has drifted; the app is already '
              ||'impaired regardless of this migration): '||string_agg(tbl||'.'||col, ', ')
@@ -385,15 +391,18 @@ SELECT 21, '10. Idempotency', 'OK',
 UNION ALL
 -- ---------- VERDICT -------------------------------------------------
 SELECT 22, '>>> VERDICT <<<',
-  CASE WHEN (SELECT count(*) FROM missing_tables) > 0
-         OR (SELECT count(*) FROM missing_expected) > 0
+  CASE WHEN (SELECT count(*) FROM missing_tables) > 0 THEN 'RUN BASE FIRST'
+       WHEN (SELECT count(*) FROM missing_expected) > 0
          OR (SELECT count(*) FROM fk_to_attendance) > 0
          OR COALESCE((SELECT reserved_prefix FROM att),0) > 0
          OR (SELECT keep FROM att) IS NULL
          OR (SELECT keep FROM att) <> (SELECT keep_keys FROM att)
        THEN 'BLOCKER' ELSE 'SAFE TO RUN' END,
   CASE WHEN (SELECT count(*) FROM missing_tables) > 0
-         OR (SELECT count(*) FROM missing_expected) > 0
+       THEN 'STAGE 1 NOT DONE. This database has no application tables yet. Run '
+            || 'supabase_setup_base.sql first, then re-run this preflight. Do NOT run '
+            || 'supabase_migration_v2.sql yet - it only ALTERs tables and would fail on every statement.'
+       WHEN (SELECT count(*) FROM missing_expected) > 0
          OR (SELECT count(*) FROM fk_to_attendance) > 0
          OR COALESCE((SELECT reserved_prefix FROM att),0) > 0
          OR (SELECT keep FROM att) IS NULL
