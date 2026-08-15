@@ -124,15 +124,30 @@ WHERE id IN (SELECT id FROM ranked WHERE rn > 1);
 --
 -- Rows and their data are preserved; only the id text changes. Nothing in
 -- the database has a foreign key to attendance.id, so this is safe.
--- STEP 3a guarantees the new ids are unique.
+-- STEP 3a guarantees the final ids are unique.
+--
+-- The rename runs in two phases. A single UPDATE would fail if any row's
+-- current id happened to equal another row's target id: PostgreSQL checks
+-- the primary key per row, so a transient collision mid-statement aborts
+-- with "duplicate key value violates unique constraint attendance_pkey"
+-- even though the final state would have been valid. Parking the affected
+-- rows under a temporary id first makes the rename order-independent.
 -- ---------------------------------------------------------------------
+
+-- Phase 1: park rows that need renaming under a guaranteed-unique temp id
+-- (ctid is unique per live row).
 UPDATE attendance
-SET id = 'att_' || regexp_replace(COALESCE("workerId", 'unknown'), '[^a-zA-Z0-9_-]', '', 'g')
-                || '_' || regexp_replace(COALESCE(date, ''), '[^0-9-]', '', 'g')
+SET id = '__mig_' || ctid::text
 WHERE id IS DISTINCT FROM (
   'att_' || regexp_replace(COALESCE("workerId", 'unknown'), '[^a-zA-Z0-9_-]', '', 'g')
          || '_' || regexp_replace(COALESCE(date, ''), '[^0-9-]', '', 'g')
 );
+
+-- Phase 2: move them to their canonical id.
+UPDATE attendance
+SET id = 'att_' || regexp_replace(COALESCE("workerId", 'unknown'), '[^a-zA-Z0-9_-]', '', 'g')
+                || '_' || regexp_replace(COALESCE(date, ''), '[^0-9-]', '', 'g')
+WHERE id LIKE '__mig_%';
 
 
 -- ---------------------------------------------------------------------
