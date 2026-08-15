@@ -1,0 +1,118 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+:root {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --text-primary: #111111;
+  --text-secondary: #3F3F3F;
+  --text-muted: #6B6B6B;
+}
+
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-serif: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  
+  --color-navy: #0A0A0A;
+  --color-navy-light: #171717;
+  --color-navy-hover: #000000;
+  --color-gold: #C9A24B;
+  --color-gold-light: #E8D5A3;
+  --color-cream: #FAF7F0;
+  --color-light: #E5E0D5;
+  --color-charcoal: #111111;
+  --color-muted-grey: #3F3F3F;
+  --color-text-primary: #111111;
+  --color-text-secondary: #3F3F3F;
+  --color-text-muted: #6B6B6B;
+}
+
+/* Enforce Inter globally across all HTML elements */
+*, ::before, ::after {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+html, body, button, input, select, textarea, optgroup, table, th, td, h1, h2, h3, h4, h5, h6, p, span, div, a, label {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+}
+
+/* Print Utilities for Fabrication Slips & Invoices */
+@media print {
+  body {
+    background: #FFFFFF !important;
+    color: #000000 !important;
+  }
+  .print\:hidden {
+    display: none !important;
+  }
+  #print-paper-slip, #print-tax-invoice {
+    border: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleUp {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-scale-up {
+  animation: scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Global Butter-Smooth Scrolling Config (120fps/Inertial touch performance) */
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Target all overflow scrolling nodes for maximum fluidity, sub-pixel rendering, and momentum */
+body, 
+.overflow-y-auto, 
+.overflow-auto, 
+[class*="overflow-y-"], 
+[class*="overflow-"] {
+  scroll-behavior: smooth !important;
+  -webkit-overflow-scrolling: touch !important; /* iOS Inertial scrolling */
+  will-change: scroll-position; /* Hint browser to optimize scroll threads */
+}
+
+/* Customized thin premium scrollbar for high-res screens */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(201, 162, 75, 0.2); /* elegant thin gold accent thumb */
+  border-radius: 99px;
+  transition: background 0.3s ease;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(201, 162, 75, 0.55);
+}
+
