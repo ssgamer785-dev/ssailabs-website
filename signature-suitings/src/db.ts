@@ -149,7 +149,7 @@ export const safeRemoveItem = (key: string): void => {
 };
 
 const SCHEMA_COLUMNS: Record<string, string[]> = {
-  config: ['id', 'shopName', 'tagline', 'address', 'phone1', 'phone2', 'logoUrl', 'gstEnabled', 'gstNumber', 'gstPercent', 'currencySymbol', 'garmentTypesConfig', 'measurementFieldsConfig', 'garmentCategories', 'garmentCatalog', 'measurementTemplates', 'updated_at'],
+  config: ['id', 'shopName', 'tagline', 'address', 'phone1', 'phone2', 'logoUrl', 'gstEnabled', 'gstNumber', 'gstPercent', 'currencySymbol', 'garmentTypesConfig', 'measurementFieldsConfig', 'garmentCategories', 'garmentCatalog', 'measurementTemplates', 'autoBackupFrequency', 'lastAutoBackupTimestamp', 'updated_at'],
   users: ['id', 'name', 'role', 'email', 'phone', 'active', 'photoUrl', 'created_at', 'updated_at'],
   customers: ['id', 'fullName', 'mobileNumber', 'alternateNumber', 'address', 'email', 'dob', 'preferredFabricBrands', 'generalNotes', 'customerSince', 'totalOrdersCount', 'outstandingBalance', 'qrCodeId', 'photoUrl', 'memoryNotes', 'preferenceTags', 'created_at', 'updated_at'],
   measurements: ['id', 'customerId', 'versionDate', 'slipNumber', 'tryOnDate', 'deliveryDate', 'coatIndoWestern', 'pent', 'vest', 'shirtKurta', 'designNotes', 'fabricSelected', 'liningChoice', 'remarks', 'createdBy', 'changesSincePrevious', 'created_at', 'updated_at'],
@@ -1153,6 +1153,46 @@ export class TailorDatabase {
               notes: stripEmbeddedTags(att.notes) || att.notes || ""
             };
           });
+
+          // Collapse rows that describe the same worker on the same day.
+          //
+          // Attendance is unique per worker/date in the database. A local cache written
+          // before that rule existed can hold a row with a legacy random id while the cloud
+          // holds the same day under the normalised id; pushing the local one would violate
+          // the unique index and stick in the outbox forever. Keep the record whose id
+          // matches the canonical form (that is the row the database holds), otherwise the
+          // most recently updated one, and tombstone the loser so it is not re-uploaded.
+          const byWorkerDate = new Map<string, any>();
+          for (const att of mergedList) {
+            if (!att || !att.workerId || !att.date) continue;
+            const key = `${att.workerId}|${att.date}`;
+            const existing = byWorkerDate.get(key);
+            if (!existing) {
+              byWorkerDate.set(key, att);
+              continue;
+            }
+            const canonical = attendanceRecordId(att.workerId, att.date);
+            const attIsCanonical = att.id === canonical;
+            const existingIsCanonical = existing.id === canonical;
+
+            let winner = existing;
+            if (attIsCanonical && !existingIsCanonical) {
+              winner = att;
+            } else if (attIsCanonical === existingIsCanonical) {
+              const attTime = this.getRecordTimestamp(att) ?? 0;
+              const existingTime = this.getRecordTimestamp(existing) ?? 0;
+              if (attTime > existingTime) winner = att;
+            }
+
+            const loser = winner === att ? existing : att;
+            this.markDeleted("attendance", loser.id);
+            byWorkerDate.set(key, winner);
+          }
+          const deduped = Array.from(byWorkerDate.values());
+          if (deduped.length !== mergedList.length) {
+            console.warn(`[Attendance] Collapsed ${mergedList.length - deduped.length} duplicate day record(s).`);
+            mergedList = deduped;
+          }
         }
 
         // Format workers properly
