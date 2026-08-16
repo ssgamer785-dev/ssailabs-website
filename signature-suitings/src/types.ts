@@ -54,6 +54,66 @@ export interface GarmentPent {
   serialNumber?: string;
 }
 
+/**
+ * The seven measurements taken for every lower-body garment — pant, pent, trouser, chinos.
+ * This is the single source of truth: every form, summary, printout and portal view builds
+ * its pant fields from this list, so they cannot drift apart again. Order is the order they
+ * are shown in.
+ *
+ * Only pant-family garments use this. Coat, indo-western, vest, shirt and kurta keep their
+ * own separate field sets.
+ */
+export const PANT_MEASUREMENT_FIELDS: ReadonlyArray<{ key: keyof GarmentPent; label: string }> = [
+  { key: "length", label: "Length" },
+  { key: "waist", label: "Waist" },
+  { key: "hips", label: "Hips" },
+  { key: "inlength", label: "Inlength" },
+  { key: "patt", label: "Patt" },
+  { key: "knee", label: "Knee" },
+  { key: "bottom", label: "Bottom" }
+];
+
+/** True when a garment name refers to a lower-body pant/trouser garment. */
+export function isPantGarment(name?: string): boolean {
+  const n = (name || "").toLowerCase();
+  return n.includes("pent") || n.includes("pant") || n.includes("trouser") ||
+         n.includes("chino") || n.includes("pajama") || n.includes("pyjama") ||
+         n.includes("salwar");
+}
+
+/**
+ * Normalises a stored pant measurement onto the seven standard keys.
+ *
+ * Older records and template-driven line items used other names for the same measurement
+ * (inseam for inlength, thigh for patt, seat for hips). Those are mapped across so historic
+ * size cards stay readable. Anything unrecognised is preserved untouched rather than dropped,
+ * so no historical data is silently lost.
+ */
+export function normalizePantMeasurement(raw: any): GarmentPent {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const pick = (...keys: string[]): string => {
+    for (const k of keys) {
+      const v = src[k];
+      if (v !== undefined && v !== null && String(v).trim() !== "") return String(v);
+    }
+    return "";
+  };
+  const normalized: any = {
+    length: pick("length", "pentLength", "len", "pantLength"),
+    waist: pick("waist", "pentWaist"),
+    hips: pick("hips", "hip", "pentHips", "seat"),
+    inlength: pick("inlength", "inLength", "pentInlength", "inseam", "inSeam"),
+    patt: pick("patt", "pentPatt", "thigh"),
+    knee: pick("knee", "pentKnee"),
+    bottom: pick("bottom", "pentBottom", "bottomWidth")
+  };
+  // Carry over anything else already stored (serialNumber, legacy extras) without loss.
+  for (const key of Object.keys(src)) {
+    if (!(key in normalized)) normalized[key] = src[key];
+  }
+  return normalized as GarmentPent;
+}
+
 export interface GarmentVest {
   length: string;
   chest: string;

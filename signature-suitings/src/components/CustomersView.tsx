@@ -34,7 +34,7 @@ import {
   Camera
 } from "lucide-react";
 import { QRCodeSVG as QRCode } from "qrcode.react";
-import { Customer, Measurement, Order, Invoice, Trial, Alteration, MemoryNote } from "../types";
+import { Customer, Measurement, Order, Invoice, Trial, Alteration, MemoryNote, PANT_MEASUREMENT_FIELDS, normalizePantMeasurement } from "../types";
 import { db, stripEmbeddedTags } from "../db";
 import ConfirmModal from "./ConfirmModal";
 import EditOrderModal from "./EditOrderModal";
@@ -1020,10 +1020,10 @@ export default function CustomersView({
                               <div className="bg-white p-3 rounded-xl border border-light/60 space-y-1">
                                 <p className="font-bold text-navy border-b border-light pb-1 uppercase tracking-wider text-[10px]">Pent</p>
                                 <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[11px] pt-1 text-charcoal">
-                                  <div>Waist: <b>{m.pent.waist}"</b></div>
-                                  <div>Hips: <b>{m.pent.hips}"</b></div>
-                                  <div>Thigh: <b>{m.pent.patt}"</b></div>
-                                  <div>Bottom: <b>{m.pent.bottom}"</b></div>
+                                  {PANT_MEASUREMENT_FIELDS.map(f => {
+                                    const value = (normalizePantMeasurement(m.pent) as any)[f.key];
+                                    return <div key={f.key}>{f.label}: <b>{value || "-"}</b></div>;
+                                  })}
                                 </div>
                               </div>
 

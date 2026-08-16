@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from "react";
 import { db } from "../db";
-import { GarmentLineItem, Measurement, Customer } from "../types";
+import { GarmentLineItem, Measurement, Customer, normalizePantMeasurement } from "../types";
 import { Ruler, CheckCircle, Copy, Save, X, Sparkles, Check, ChevronRight, AlertCircle } from "lucide-react";
 
 interface Props {
@@ -46,8 +46,10 @@ export const GarmentMeasurementDrawer: React.FC<Props> = ({
   const [coatModa, setCoatModa] = useState("");
 
   // Pent
+  const [pentLength, setPentLength] = useState("");
   const [pentWaist, setPentWaist] = useState("");
   const [pentHips, setPentHips] = useState("");
+  const [pentInlength, setPentInlength] = useState("");
   const [pentPatt, setPentPatt] = useState("");
   const [pentKnee, setPentKnee] = useState("");
   const [pentBottom, setPentBottom] = useState("");
@@ -113,11 +115,16 @@ export const GarmentMeasurementDrawer: React.FC<Props> = ({
 
     // Pent
     const p = mv.pent || {};
-    setPentWaist(p.waist || mv.pentWaist || "");
-    setPentHips(p.hips || mv.pentHips || mv.hips || "");
-    setPentPatt(p.patt || mv.pentPatt || mv.patt || "");
-    setPentKnee(p.knee || mv.pentKnee || mv.knee || "");
-    setPentBottom(p.bottom || mv.pentBottom || mv.bottom || "");
+    // Merge whatever the line item carries with the linked size card, then normalise onto
+    // the seven standard keys so legacy names (inseam, thigh, seat) still load.
+    const np = normalizePantMeasurement({ ...mv, ...p });
+    setPentLength(np.length || "");
+    setPentWaist(np.waist || "");
+    setPentHips(np.hips || "");
+    setPentInlength(np.inlength || "");
+    setPentPatt(np.patt || "");
+    setPentKnee(np.knee || "");
+    setPentBottom(np.bottom || "");
 
     // Vest
     const v = mv.vest || {};
@@ -202,7 +209,7 @@ export const GarmentMeasurementDrawer: React.FC<Props> = ({
   const isAnyValueFilled = () => {
     return [
       coatLength, coatChest, coatWaist, coatNeck, coatTira, coatHb, coatCback, coatArms, coatBicep, coatFront, coatModa,
-      pentWaist, pentHips, pentPatt, pentKnee, pentBottom,
+      pentLength, pentWaist, pentHips, pentInlength, pentPatt, pentKnee, pentBottom,
       vestLength, vestChest, vestWaist, vestHip, vestTira, vestNeck,
       shirtLength, shirtChest, shirtWaist, shirtHip, shirtTira, shirtArms, shirtNeck, shirtCback, shirtFront, shirtModa, shirtBicep,
       designNotes, fabricSelected, liningChoice, remarks
@@ -216,7 +223,8 @@ export const GarmentMeasurementDrawer: React.FC<Props> = ({
         length: coatLength, chest: coatChest, waist: coatWaist, neck: coatNeck, tira: coatTira, hb: coatHb, cback: coatCback, arms: coatArms, bicep: coatBicep, front: coatFront, moda: coatModa
       },
       pent: {
-        waist: pentWaist, hips: pentHips, patt: pentPatt, bottom: pentBottom, knee: pentKnee
+        length: pentLength, waist: pentWaist, hips: pentHips, inlength: pentInlength,
+        patt: pentPatt, knee: pentKnee, bottom: pentBottom
       },
       vest: {
         length: vestLength, chest: vestChest, waist: vestWaist, hip: vestHip, tira: vestTira, neck: vestNeck
@@ -231,7 +239,7 @@ export const GarmentMeasurementDrawer: React.FC<Props> = ({
 
       // Flat aliases for quick access
       coatLength, coatChest, coatWaist, coatNeck, coatTira, coatHb, coatCback, coatArms, coatBicep, coatFront, coatModa,
-      pentWaist, pentHips, pentPatt, pentKnee, pentBottom,
+      pentLength, pentWaist, pentHips, pentInlength, pentPatt, pentKnee, pentBottom,
       vestLength, vestChest, vestWaist, vestHip, vestTira, vestNeck,
       shirtLength, shirtChest, shirtWaist, shirtHip, shirtTira, shirtArms, shirtNeck, shirtCback, shirtFront, shirtModa, shirtBicep
     };
@@ -422,11 +430,13 @@ export const GarmentMeasurementDrawer: React.FC<Props> = ({
               </h3>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs">
                 {[
+                  { label: "Length", state: pentLength, setState: setPentLength, prev: previousMeas?.pent?.length },
                   { label: "Waist", state: pentWaist, setState: setPentWaist, prev: previousMeas?.pent?.waist },
                   { label: "Hips", state: pentHips, setState: setPentHips, prev: previousMeas?.pent?.hips },
-                  { label: "Patt (Thigh)", state: pentPatt, setState: setPentPatt, prev: previousMeas?.pent?.patt },
+                  { label: "Inlength", state: pentInlength, setState: setPentInlength, prev: previousMeas?.pent?.inlength },
+                  { label: "Patt", state: pentPatt, setState: setPentPatt, prev: previousMeas?.pent?.patt },
                   { label: "Knee", state: pentKnee, setState: setPentKnee, prev: previousMeas?.pent?.knee },
-                  { label: "Bottom Width", state: pentBottom, setState: setPentBottom, prev: previousMeas?.pent?.bottom }
+                  { label: "Bottom", state: pentBottom, setState: setPentBottom, prev: previousMeas?.pent?.bottom }
                 ].map((f, idx) => {
                   const differs = f.prev && f.state && f.prev !== f.state;
                   return (

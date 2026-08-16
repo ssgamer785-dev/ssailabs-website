@@ -16,7 +16,6 @@ import {
   CalendarDays,
   CheckCircle,
   AlertTriangle,
-  MapPin,
   TrendingUp,
   X,
   Search,
@@ -26,14 +25,7 @@ import {
   Phone,
   ExternalLink,
   CheckSquare,
-  Database,
-  UploadCloud,
   Printer,
-  Scissors,
-  Tag,
-  Clock,
-  CreditCard,
-  Layers,
   Receipt
 } from "lucide-react";
 import { Customer, Order, Invoice, Appointment } from "../types";
@@ -55,7 +47,6 @@ export default function DashboardView({ onNavigate, onOpenQuickAction, currentUs
     appointments: db.getAppointments(),
     expenses: db.getExpenses(),
     measurements: db.getAllMeasurements(),
-    attendance: db.getAttendance(),
     workers: db.getWorkers(),
   });
 
@@ -67,7 +58,6 @@ export default function DashboardView({ onNavigate, onOpenQuickAction, currentUs
       appointments: db.getAppointments(),
       expenses: db.getExpenses(),
       measurements: db.getAllMeasurements(),
-      attendance: db.getAttendance(),
       workers: db.getWorkers(),
     });
   };
@@ -81,7 +71,6 @@ export default function DashboardView({ onNavigate, onOpenQuickAction, currentUs
         appointments: db.getAppointments(),
         expenses: db.getExpenses(),
         measurements: db.getAllMeasurements(),
-        attendance: db.getAttendance(),
         workers: db.getWorkers(),
       });
     });
@@ -360,10 +349,12 @@ export default function DashboardView({ onNavigate, onOpenQuickAction, currentUs
         if (file.name.endsWith(".json") || text.trim().startsWith("{")) {
           const parsed = JSON.parse(text);
           const result = await db.restoreBackupData(parsed);
-          if (result.success) {
+          // Report what the cloud database confirmed it holds, not what the file claimed.
+          if (result.success && result.cloudVerified) {
+            const c = result.tableCounts || {};
             setRestoreStatus({
               success: true,
-              message: `Showroom Database Restored! Recovered ${parsed.customers?.length || 0} customer files, ${parsed.orders?.length || 0} bespoke orders, and ${parsed.invoices?.length || 0} financial records successfully.`
+              message: `Showroom database restored and confirmed in the cloud: ${c.customers ?? 0} customers, ${c.orders ?? 0} orders, ${c.invoices ?? 0} bills.`
             });
             refreshDb();
           } else {
@@ -389,10 +380,11 @@ export default function DashboardView({ onNavigate, onOpenQuickAction, currentUs
                 parsed = JSON.parse(decodedJson);
               }
               const result = await db.restoreBackupData(parsed);
-              if (result.success) {
+              if (result.success && result.cloudVerified) {
+                const c = result.tableCounts || {};
                 setRestoreStatus({
                   success: true,
-                  message: `Showroom Database Restored from Excel Backup! Recovered ${parsed.customers?.length || 0} customer files, ${parsed.orders?.length || 0} bespoke orders, and ${parsed.invoices?.length || 0} financial records successfully.`
+                  message: `Showroom database restored from the Excel backup and confirmed in the cloud: ${c.customers ?? 0} customers, ${c.orders ?? 0} orders, ${c.invoices ?? 0} bills.`
                 });
                 refreshDb();
               } else {
@@ -1016,44 +1008,6 @@ export default function DashboardView({ onNavigate, onOpenQuickAction, currentUs
   // Normalized local today date string (YYYY-MM-DD based on local system time)
   const todayStr = getLocalDateString();
 
-  // Evaluate attendance and metrics using normalized local today string
-  const targetDateForAttendance = todayStr;
-  
-  // Find active workers
-  const activeWorkersList = dbState.workers.filter(w => w.active);
-  
-  // Get today's attendance records
-  const todayAttendanceRecords = dbState.attendance.filter(r => r.date === targetDateForAttendance);
-  
-  // Today's check-ins: checkInTime is present
-  const todaysCheckIns = todayAttendanceRecords.filter(r => r.checkInTime).length;
-  
-  // Today's check-outs: checkOutTime is present
-  const todaysCheckOuts = todayAttendanceRecords.filter(r => r.checkOutTime).length;
-  
-  // Workers present: status is "Present" or "Checked In" or "Checked Out"
-  const workersPresent = todayAttendanceRecords.filter(r => r.status === "Present" || r.status === "Checked In" || r.status === "Checked Out").length;
-  
-  // Workers absent: status is "Absent" (or active workers minus workers present)
-  const workersAbsent = Math.max(0, activeWorkersList.length - workersPresent);
-
-  // Today's completed trial fittings (status === "Completed" and scheduled date is today)
-  const todayCompletedAppointments = dbState.appointments.filter(appt => {
-    const isCompleted = appt.status === "Completed";
-    const apptDateStr = appt.appointmentDate || (appt.dateTime ? appt.dateTime.split("T")[0] : "");
-    return isCompleted && apptDateStr === targetDateForAttendance;
-  });
-
-  // Today's trial income (trialCharge sum for completed trials today with paymentStatus === "Paid")
-  const todayTrialIncome = todayCompletedAppointments
-    .filter(appt => appt.paymentStatus === "Paid")
-    .reduce((sum, appt) => sum + (appt.trialCharge || 0), 0);
-
-  // Pending trial payments (trialCharge sum of completed trials that are unpaid)
-  const pendingTrialPayments = dbState.appointments
-    .filter(appt => appt.status === "Completed" && appt.paymentStatus !== "Paid")
-    .reduce((sum, appt) => sum + (appt.trialCharge || 0), 0);
-
   // Active orders (not delivered)
   const activeOrders = dbState.orders.filter(o => o.status !== "Delivered");
   
@@ -1088,63 +1042,6 @@ export default function DashboardView({ onNavigate, onOpenQuickAction, currentUs
   const todayDeliveries = dbState.orders.filter(o => {
     return o.expectedDeliveryDate === todayStr;
   });
-
-  // Recent activity logs compiled from orders history & invoices payments
-  const recentActivities: {
-    id: string;
-    type: "order_status" | "payment_received" | "new_customer" | "appt_created";
-    title: string;
-    subtitle: string;
-    timestamp: string;
-    badgeColor: string;
-  }[] = [];
-
-  // 1. Gather status history
-  dbState.orders.forEach(o => {
-    const cust = dbState.customers.find(c => c.id === o.customerId);
-    o.statusHistory.forEach(h => {
-      recentActivities.push({
-        id: `act_sh_${o.id}_${h.status}_${h.timestamp}`,
-        type: "order_status",
-        title: `${cust?.fullName || "Customer"}'s order updated`,
-        subtitle: `Moved order ${o.orderNumber} to "${h.status}" status (by ${h.updatedBy})`,
-        timestamp: h.timestamp,
-        badgeColor: h.status === "Delivered" ? "bg-green-100 text-green-800 border-green-200" : "bg-amber-100 text-amber-800 border-amber-200"
-      });
-    });
-  });
-
-  // 2. Gather payments
-  dbState.invoices.forEach(inv => {
-    const cust = dbState.customers.find(c => c.id === inv.customerId);
-    inv.payments.forEach((pay, idx) => {
-      recentActivities.push({
-        id: `act_p_${inv.id}_${idx}`,
-        type: "payment_received",
-        title: `Payment Received via ${pay.mode}`,
-        subtitle: `₹${pay.amount.toLocaleString()} recorded for ${cust?.fullName || "Customer"} (Invoice ${inv.invoiceNumber})`,
-        timestamp: pay.date,
-        badgeColor: "bg-emerald-100 text-emerald-800 border-emerald-200"
-      });
-    });
-  });
-
-  // 3. Gather new customers
-  dbState.customers.forEach(c => {
-    recentActivities.push({
-      id: `act_nc_${c.id}`,
-      type: "new_customer",
-      title: "New Customer Registered",
-      subtitle: `${c.fullName} joined Signature Suitings with ${c.preferenceTags.length} preferences learned`,
-      timestamp: c.customerSince,
-      badgeColor: "bg-blue-100 text-blue-800 border-blue-200"
-    });
-  });
-
-  // Sort activities newest first
-  const sortedActivities = recentActivities
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-    .slice(0, 5);
 
   // Quick Action triggers
   const triggerQuickAction = (action: string) => {
@@ -1263,53 +1160,6 @@ export default function DashboardView({ onNavigate, onOpenQuickAction, currentUs
           </div>
           <p className="text-muted-grey text-xs mt-4 font-medium uppercase tracking-wider">Today's Appointments</p>
           <h3 className="text-2xl font-bold text-navy mt-1 font-serif">{todayAppts.length}</h3>
-        </div>
-      </div>
-
-      {/* STAFF ATTENDANCE & TRIAL FITTINGS DAILY BOARD */}
-      <div className="bg-white rounded-3xl border border-light p-6 shadow-sm space-y-4 animate-fade-in">
-        <div className="flex items-center gap-2 pb-2 border-b border-light">
-          <div className="bg-cream text-navy p-2 rounded-xl">
-            <Users className="w-4 h-4 text-gold" />
-          </div>
-          <div>
-            <h3 className="text-sm font-serif font-bold text-navy uppercase tracking-wider">
-              Staff & Fitting Trials (Daily Board)
-            </h3>
-            <p className="text-[10px] text-muted-grey mt-0.5">Real-time attendance checkpoints and completed fitting trial ledger</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          <div className="bg-cream/25 p-4 rounded-2xl border border-light text-center flex flex-col justify-between">
-            <span className="text-[9px] uppercase font-bold text-muted-grey tracking-wider">Today's Check-ins</span>
-            <p className="text-2xl font-serif font-black text-navy mt-1.5">{todaysCheckIns}</p>
-          </div>
-          
-          <div className="bg-cream/25 p-4 rounded-2xl border border-light text-center flex flex-col justify-between">
-            <span className="text-[9px] uppercase font-bold text-muted-grey tracking-wider">Today's Check-outs</span>
-            <p className="text-2xl font-serif font-black text-navy mt-1.5">{todaysCheckOuts}</p>
-          </div>
-
-          <div className="bg-emerald-50/20 p-4 rounded-2xl border border-emerald-100/60 text-center flex flex-col justify-between">
-            <span className="text-[9px] uppercase font-bold text-emerald-800 tracking-wider">Workers Present</span>
-            <p className="text-2xl font-serif font-black text-emerald-900 mt-1.5">{workersPresent}</p>
-          </div>
-
-          <div className="bg-rose-50/20 p-4 rounded-2xl border border-rose-100/60 text-center flex flex-col justify-between">
-            <span className="text-[9px] uppercase font-bold text-rose-800 tracking-wider">Workers Absent</span>
-            <p className="text-2xl font-serif font-black text-rose-900 mt-1.5">{workersAbsent}</p>
-          </div>
-
-          <div className="bg-green-50/30 p-4 rounded-2xl border border-green-100/60 text-center flex flex-col justify-between">
-            <span className="text-[9px] uppercase font-bold text-green-800 tracking-wider">Today's Trial Income</span>
-            <p className="text-xl font-serif font-black text-green-900 mt-1.5">₹{todayTrialIncome.toLocaleString("en-IN")}</p>
-          </div>
-
-          <div className="bg-amber-50/30 p-4 rounded-2xl border border-amber-100/60 text-center flex flex-col justify-between">
-            <span className="text-[9px] uppercase font-bold text-amber-800 tracking-wider">Pending Trial Payments</span>
-            <p className="text-xl font-serif font-black text-amber-900 mt-1.5">₹{pendingTrialPayments.toLocaleString("en-IN")}</p>
-          </div>
         </div>
       </div>
 
@@ -1459,52 +1309,11 @@ export default function DashboardView({ onNavigate, onOpenQuickAction, currentUs
           </div>
         )}
       </div>
-      {/* Main Content Dashboard Split */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      {/* Scheduling & Quick Actions */}
+      <div className="grid grid-cols-1 gap-8">
         
-        {/* Left Column (60% width): Recent Activity */}
-        <div className="lg:col-span-7 bg-white rounded-3xl border border-light shadow-sm p-6 space-y-6">
-          <div className="flex justify-between items-center border-b border-light pb-4">
-            <div>
-              <h2 className="text-xl font-serif font-bold text-navy">Recent Activity Feed</h2>
-              <p className="text-muted-grey text-xs mt-0.5">Real-time showroom operational logs</p>
-            </div>
-            <span className="text-xs font-semibold text-gold bg-cream px-3 py-1 rounded-full border border-gold/15">
-              Live Updates
-            </span>
-          </div>
-
-          <div className="space-y-6">
-            {sortedActivities.length === 0 ? (
-              <div className="py-12 text-center text-muted-grey">
-                No recent activity recorded today.
-              </div>
-            ) : (
-              sortedActivities.map((act) => (
-                <div key={act.id} className="flex gap-4 items-start group">
-                  <div className="mt-1 flex-shrink-0 w-2.5 h-2.5 rounded-full bg-gold border border-white ring-4 ring-cream group-hover:scale-125 transition-transform" />
-                  <div className="space-y-1 flex-1">
-                    <div className="flex flex-wrap justify-between items-center gap-1.5">
-                      <span className="font-sans font-semibold text-sm text-charcoal group-hover:text-navy transition-colors">
-                        {act.title}
-                      </span>
-                      <span className="text-xs text-muted-grey">
-                        {new Date(act.timestamp).toLocaleTimeString("en-IN", {
-                          hour: "2-digit",
-                          minute: "2-digit"
-                        })}
-                      </span>
-                    </div>
-                    <p className="text-muted-grey text-xs leading-relaxed">{act.subtitle}</p>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
         {/* Right Column (40% width): Mini Calendar + Quick Actions */}
-        <div className="lg:col-span-5 space-y-8">
+        <div className="lg:col-span-12 space-y-8">
           
           {/* Mini Calendar Widget */}
           <div className="bg-white rounded-3xl border border-light shadow-sm p-6 space-y-4">

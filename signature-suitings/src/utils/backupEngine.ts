@@ -197,6 +197,47 @@ export async function createFullBackupZip(
   const shopConfig = db.getShopConfig();
   const rawBackup = db.getBackupData();
 
+  // EXPORT AUDIT. The backup is generated from in-memory state, which is only trustworthy if
+  // it agrees with the cloud database. Compare the two before writing the file, so a backup
+  // can never quietly ship fewer customers (or orders, or invoices) than the shop actually
+  // has. Refuses to produce a file rather than hand over an incomplete one.
+  if (isSupabaseConfigured) {
+    if (onProgress) onProgress("Verifying export against the cloud database...");
+    const auditTables: Array<[string, any[]]> = [
+      ["customers", rawBackup.customers || []],
+      ["orders", rawBackup.orders || []],
+      ["invoices", rawBackup.invoices || []],
+      ["measurements", rawBackup.measurements || []],
+      ["workers", rawBackup.workers || []],
+      ["appointments", rawBackup.appointments || []],
+      ["expenses", rawBackup.expenses || []],
+      ["attendance", rawBackup.attendance || []],
+      ["advances", rawBackup.advances || []],
+      ["salaries", rawBackup.salaries || []],
+      ["trials", rawBackup.trials || []],
+      ["alterations", rawBackup.alterations || []],
+      ["users", rawBackup.users || []]
+    ];
+    const shortfalls: string[] = [];
+    for (const [table, rows] of auditTables) {
+      const { count, error } = await supabase.from(table).select("id", { count: "exact", head: true });
+      if (error) {
+        throw new Error(
+          `Backup cancelled: could not read '${table}' from the cloud database to check the export (${error.message}). No file was created.`
+        );
+      }
+      if (typeof count === "number" && rows.length < count) {
+        shortfalls.push(`${table} (${rows.length} in the file vs ${count} in the database)`);
+      }
+    }
+    if (shortfalls.length > 0) {
+      throw new Error(
+        `Backup cancelled: the export is missing records for ${shortfalls.join(", ")}. ` +
+        `Reload the page so the app resyncs with the cloud database, then export again. No file was created.`
+      );
+    }
+  }
+
   const zip = new JSZip();
   const filesFolder = zip.folder("files");
 
@@ -871,6 +912,15 @@ export async function executeRestoreOperation(
   if (!restoreResult.success) {
     throw new Error(restoreResult.error || "Database restoration failed during execution.");
   }
+  // A restore is only real once the rows have been read back out of the cloud database.
+  // Without this the caller could report success for data that never left the browser.
+  if (!restoreResult.cloudVerified) {
+    throw new Error(
+      restoreResult.error ||
+      "Restore could not be confirmed against the cloud database. Nothing has been reported as restored."
+    );
+  }
+  const verifiedCounts = restoreResult.tableCounts || {};
 
   // Step 12: Restoring & Uploading Actual Supabase Storage Files
   let storageBackedUpCount = 0;
@@ -974,7 +1024,13 @@ export async function executeRestoreOperation(
       backupPayload.config.logoUrl = normalizePhotoUrl(backupPayload.config.logoUrl);
     }
 
-    await db.restoreBackupData(backupPayload);
+    const reSyncResult = await db.restoreBackupData(backupPayload);
+    if (!reSyncResult.success || !reSyncResult.cloudVerified) {
+      throw new Error(
+        reSyncResult.error ||
+        "Photo links were updated but the follow-up save to the cloud database could not be confirmed."
+      );
+    }
   }
 
   await new Promise((r) => setTimeout(r, 300));
@@ -991,9 +1047,9 @@ export async function executeRestoreOperation(
     integrityNotes.push("Restored to local offline cache (Supabase is not configured).");
   }
 
-  integrityNotes.push(`Verified ${backupPayload.customers.length} customer records.`);
-  integrityNotes.push(`Verified ${backupPayload.orders.length} order records.`);
-  integrityNotes.push(`Verified ${backupPayload.invoices.length} invoice records.`);
+  integrityNotes.push(`Confirmed ${verifiedCounts.customers ?? backupPayload.customers.length} customer records in the cloud database.`);
+  integrityNotes.push(`Confirmed ${verifiedCounts.orders ?? backupPayload.orders.length} order records in the cloud database.`);
+  integrityNotes.push(`Confirmed ${verifiedCounts.invoices ?? backupPayload.invoices.length} invoice records in the cloud database.`);
 
   if (storageBackedUpCount > 0) {
     if (failedStorageFiles.length === 0 && storageVerifiedCount === storageBackedUpCount) {
@@ -1008,18 +1064,20 @@ export async function executeRestoreOperation(
   const report: RestoreSuccessReport = {
     timestamp: new Date().toLocaleString("en-IN"),
     preRestoreBackupFilename: preRestoreFilename,
+    // Counts confirmed present in the cloud database after the restore, not the counts the
+    // backup file claimed. Reporting the file's numbers would hide a partial restore.
     recordCounts: {
-      customers: backupPayload.customers.length,
-      orders: backupPayload.orders.length,
-      measurements: backupPayload.measurements.length,
-      invoices: backupPayload.invoices.length,
+      customers: verifiedCounts.customers ?? backupPayload.customers.length,
+      orders: verifiedCounts.orders ?? backupPayload.orders.length,
+      measurements: verifiedCounts.measurements ?? backupPayload.measurements.length,
+      invoices: verifiedCounts.invoices ?? backupPayload.invoices.length,
       payments: totalPayments,
-      appointments: backupPayload.appointments.length,
-      expenses: backupPayload.expenses.length,
-      workers: backupPayload.workers.length,
-      attendance: backupPayload.attendance.length,
-      advances: backupPayload.advances.length,
-      salaries: backupPayload.salaries.length
+      appointments: verifiedCounts.appointments ?? backupPayload.appointments.length,
+      expenses: verifiedCounts.expenses ?? backupPayload.expenses.length,
+      workers: verifiedCounts.workers ?? backupPayload.workers.length,
+      attendance: verifiedCounts.attendance ?? backupPayload.attendance.length,
+      advances: verifiedCounts.advances ?? backupPayload.advances.length,
+      salaries: verifiedCounts.salaries ?? backupPayload.salaries.length
     },
     storageCounts: {
       backedUp: storageBackedUpCount,

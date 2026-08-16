@@ -185,7 +185,14 @@ async function main() {
 
   console.log("=== M. RESTORE FROM BACKUP ===");
   const restoreRes = await db2.restoreBackupData(JSON.parse(JSON.stringify(backup)));
-  check("restore reports success", restoreRes.success === true, restoreRes.error || "");
+  // This suite runs with the cloud database switched off. A restore that only reached this
+  // browser must NOT report success — otherwise the shop is told its data is safe when a
+  // cache clear would end it. It should still load the records into memory so work continues.
+  check("restore refuses to claim success without a cloud database", restoreRes.success === false);
+  check("restore says so in plain language",
+    /cloud database is not configured/i.test(restoreRes.error || ""), restoreRes.error || "");
+  check("restore reports it was not cloud-verified", restoreRes.cloudVerified === false);
+  check("restore still loaded the records into memory", db2.getCustomers().length > 0);
   check("restore recovers customer", Boolean(db2.getCustomerById(originalId)));
   check("restore recovers order", Boolean(db2.getOrderById(order.id)));
   check("restore recovers payments", db2.getInvoiceByOrderId(order.id)!.payments.length === 2);
@@ -247,6 +254,61 @@ async function main() {
   check("status change did not corrupt the order invoice",
     db2.getInvoiceByOrderId(oi.id)?.grandTotal === 20000);
   check("order advance still recorded", db2.getInvoiceByOrderId(oi.id)?.payments.length === 1);
+
+
+  console.log("=== TEST C. PANT MEASUREMENT: exactly 7 fields, save/edit/persist ===");
+  const { PANT_MEASUREMENT_FIELDS, normalizePantMeasurement } = await import("../src/types.ts");
+  check("canonical pant field list has exactly 7 entries", PANT_MEASUREMENT_FIELDS.length === 7,
+    `got ${PANT_MEASUREMENT_FIELDS.length}`);
+  check("canonical pant labels are the required seven",
+    PANT_MEASUREMENT_FIELDS.map((f: any) => f.label).join(",") === "Length,Waist,Hips,Inlength,Patt,Knee,Bottom",
+    PANT_MEASUREMENT_FIELDS.map((f: any) => f.label).join(","));
+
+  const pantCust = db2.addCustomer({ fullName: "Pant Test", mobileNumber: "9333444555", preferredFabricBrands: [] } as any);
+  const pantVals = { length: "40", waist: "34", hips: "38", inlength: "31", patt: "24", knee: "17", bottom: "15" };
+  const pm = db2.saveMeasurement({ customerId: pantCust.id, tryOnDate: "2026-09-01", deliveryDate: "2026-09-10",
+    coatIndoWestern: {} as any, pent: { ...pantVals } as any, vest: {} as any, shirtKurta: {} as any,
+    designNotes: "", fabricSelected: "", liningChoice: "", remarks: "", createdBy: "T" } as any);
+  const savedPent: any = db2.getMeasurementById(pm.id)!.pent;
+  let allSeven = true;
+  for (const f of PANT_MEASUREMENT_FIELDS) {
+    if (String(savedPent[f.key] ?? "") !== (pantVals as any)[f.key]) allSeven = false;
+  }
+  check("all 7 pant values saved correctly", allSeven, JSON.stringify(savedPent));
+
+  // Edit every value, save as a new version, confirm all seven changed
+  const edited = { length: "41", waist: "35", hips: "39", inlength: "32", patt: "25", knee: "18", bottom: "16" };
+  const pm2 = db2.saveMeasurement({ customerId: pantCust.id, tryOnDate: "2026-10-01", deliveryDate: "2026-10-10",
+    coatIndoWestern: {} as any, pent: { ...edited } as any, vest: {} as any, shirtKurta: {} as any,
+    designNotes: "", fabricSelected: "", liningChoice: "", remarks: "", createdBy: "T" } as any);
+  const editedPent: any = db2.getMeasurementById(pm2.id)!.pent;
+  let allEdited = true;
+  for (const f of PANT_MEASUREMENT_FIELDS) {
+    if (String(editedPent[f.key] ?? "") !== (edited as any)[f.key]) allEdited = false;
+  }
+  check("all 7 pant values edited correctly", allEdited, JSON.stringify(editedPent));
+  check("editing created a new version, original preserved",
+    String(db2.getMeasurementById(pm.id)!.pent.waist) === "34");
+
+  // Legacy field names must still load into the standard seven
+  const legacy = normalizePantMeasurement({ waist: "36", seat: "40", thigh: "26", inseam: "30", len: "42", knee: "19", bottomWidth: "14" });
+  check("legacy 'seat' maps to hips", legacy.hips === "40", legacy.hips);
+  check("legacy 'thigh' maps to patt", legacy.patt === "26", legacy.patt);
+  check("legacy 'inseam' maps to inlength", legacy.inlength === "30", String(legacy.inlength));
+  check("legacy 'len' maps to length", legacy.length === "42", String(legacy.length));
+  check("legacy 'bottomWidth' maps to bottom", legacy.bottom === "14", legacy.bottom);
+  const preserved = normalizePantMeasurement({ waist: "34", someHistoricField: "keep-me" });
+  check("unrecognised historical fields are preserved, not deleted",
+    (preserved as any).someHistoricField === "keep-me");
+
+  // Order linkage uses the same measurement
+  const pantOrder = db2.addOrder({ customerId: pantCust.id, garmentTypes: ["Pent"], garmentLineItems: [],
+    linkedMeasurementVersionId: pm2.id, fabricDetails: "", expectedDeliveryDate: "2026-11-01",
+    status: "Pending", notes: "" } as any, 5000, 0);
+  check("order links to the same pant measurement",
+    db2.getOrderById(pantOrder.id)?.linkedMeasurementVersionId === pm2.id);
+  check("customer history exposes both pant versions", db2.getMeasurements(pantCust.id).length === 2,
+    String(db2.getMeasurements(pantCust.id).length));
 
   console.log("\n" + results.join("\n"));
   console.log(`\n================ ${pass} passed, ${fail} failed ================`);

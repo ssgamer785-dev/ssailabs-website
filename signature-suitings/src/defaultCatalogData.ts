@@ -119,105 +119,12 @@ export const defaultMeasurementTemplates: MeasurementTemplate[] = [
     updatedAt: new Date().toISOString(),
     fields: [
       { id: "f_p_len", fieldName: "Length", shortName: "LEN", unit: "Inches", inputType: "Number", required: true, displayOrder: 1, active: true },
-      { id: "f_p_inlen", fieldName: "Inseam / Inlength", shortName: "INSEAM", unit: "Inches", inputType: "Number", required: false, displayOrder: 2, active: true },
-      { id: "f_p_crotch", fieldName: "Crotch / Latak", shortName: "CROTCH", unit: "Inches", inputType: "Number", required: false, displayOrder: 3, active: true },
-      { id: "f_p_waist", fieldName: "Waist", shortName: "WAIST", unit: "Inches", inputType: "Number", required: true, displayOrder: 4, active: true },
-      { id: "f_p_hips", fieldName: "Hip / Seat", shortName: "HIP", unit: "Inches", inputType: "Number", required: true, displayOrder: 5, active: true },
-      { id: "f_p_thigh", fieldName: "Thigh / Patt", shortName: "THIGH", unit: "Inches", inputType: "Number", required: true, displayOrder: 6, active: true },
-      { id: "f_p_knee", fieldName: "Knee", shortName: "KNEE", unit: "Inches", inputType: "Number", required: false, displayOrder: 7, active: true },
-      { id: "f_p_bottom", fieldName: "Bottom", shortName: "BOTTOM", unit: "Inches", inputType: "Number", required: true, displayOrder: 8, active: true },
-      {
-        id: "f_p_legstance",
-        fieldName: "Leg Stance / Body Shape",
-        shortName: "LEG SHAPE",
-        unit: "",
-        inputType: "Visual Selector",
-        required: false,
-        displayOrder: 9,
-        active: true,
-        options: [
-          { label: "Normal", value: "Normal", iconOrVisual: "🚶" },
-          { label: "Knock Knees", value: "Knock Knees", iconOrVisual: "🦵" },
-          { label: "Bow Legs", value: "Bow Legs", iconOrVisual: "👖" }
-        ]
-      },
-      {
-        id: "f_p_fit",
-        fieldName: "Fit Preference",
-        shortName: "FIT",
-        unit: "",
-        inputType: "Visual Selector",
-        required: false,
-        displayOrder: 10,
-        active: true,
-        options: [
-          { label: "Slim Fit", value: "Slim Fit", iconOrVisual: "⚡" },
-          { label: "Regular Fit", value: "Regular Fit", iconOrVisual: "👔" },
-          { label: "Relaxed Fit", value: "Relaxed Fit", iconOrVisual: "✨" }
-        ]
-      },
-      {
-        id: "f_p_belt",
-        fieldName: "Belt Type",
-        shortName: "BELT",
-        unit: "",
-        inputType: "Dropdown",
-        required: false,
-        displayOrder: 11,
-        active: true,
-        options: [
-          { label: "Regular Belt Loops", value: "Regular Belt Loops" },
-          { label: "Extended Gurkha Belt", value: "Extended Gurkha Belt" },
-          { label: "Side Adjusters (No Belt Loops)", value: "Side Adjusters" },
-          { label: "Elasticated Comfort Waistband", value: "Elasticated Waistband" }
-        ]
-      },
-      {
-        id: "f_p_pleat",
-        fieldName: "Pleat Style",
-        shortName: "PLEAT",
-        unit: "",
-        inputType: "Dropdown",
-        required: false,
-        displayOrder: 12,
-        active: true,
-        options: [
-          { label: "Flat Front (No Pleat)", value: "Flat Front" },
-          { label: "Single Forward Pleat", value: "Single Pleat" },
-          { label: "Double Reverse Pleats", value: "Double Pleats" }
-        ]
-      },
-      {
-        id: "f_p_pocket",
-        fieldName: "Pocket Style",
-        shortName: "POCKET",
-        unit: "",
-        inputType: "Dropdown",
-        required: false,
-        displayOrder: 13,
-        active: true,
-        options: [
-          { label: "Cross Slant Pocket", value: "Cross Pocket" },
-          { label: "Straight Seam Pocket", value: "Straight Pocket" },
-          { label: "Frog Mouth Pocket", value: "Frog Mouth Pocket" }
-        ]
-      },
-      {
-        id: "f_p_backpocket",
-        fieldName: "Back Pocket",
-        shortName: "BACK POCKET",
-        unit: "",
-        inputType: "Dropdown",
-        required: false,
-        displayOrder: 14,
-        active: true,
-        options: [
-          { label: "Double Bone Buttoned", value: "Double Bone" },
-          { label: "Single Bone Pocket", value: "Single Bone" },
-          { label: "Flap Back Pocket", value: "Flap Pocket" },
-          { label: "No Back Pocket", value: "None" }
-        ]
-      }
+      { id: "f_p_waist", fieldName: "Waist", shortName: "WAIST", unit: "Inches", inputType: "Number", required: true, displayOrder: 2, active: true },
+      { id: "f_p_hips", fieldName: "Hips", shortName: "HIPS", unit: "Inches", inputType: "Number", required: true, displayOrder: 3, active: true },
+      { id: "f_p_inlen", fieldName: "Inlength", shortName: "INLEN", unit: "Inches", inputType: "Number", required: false, displayOrder: 4, active: true },
+      { id: "f_p_thigh", fieldName: "Patt", shortName: "PATT", unit: "Inches", inputType: "Number", required: true, displayOrder: 5, active: true },
+      { id: "f_p_knee", fieldName: "Knee", shortName: "KNEE", unit: "Inches", inputType: "Number", required: false, displayOrder: 6, active: true },
+      { id: "f_p_bottom", fieldName: "Bottom", shortName: "BOTTOM", unit: "Inches", inputType: "Number", required: true, displayOrder: 7, active: true }
     ]
   },
   {

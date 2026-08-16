@@ -28,7 +28,7 @@ import {
   ChevronDown
 } from "lucide-react";
 import { QRCodeSVG as QRCode } from "qrcode.react";
-import { Customer, Order, Measurement, OrderStatus } from "../types";
+import { Customer, Order, Measurement, OrderStatus, PANT_MEASUREMENT_FIELDS, normalizePantMeasurement } from "../types";
 import { db } from "../db";
 import ConfirmModal from "./ConfirmModal";
 
@@ -861,12 +861,10 @@ export default function ClientPortalView({ initialCustomerId, onClearInitialCust
                           <Scissors className="w-3.5 h-3.5 text-gold" />
                         </div>
                         <div className="p-3.5 font-mono grid grid-cols-2 gap-2 text-charcoal bg-white">
-                          {currentMeasurement.pent.waist && <p>Waist: <b>{currentMeasurement.pent.waist}&quot;</b></p>}
-                          {currentMeasurement.pent.hips && <p>Hips: <b>{currentMeasurement.pent.hips}&quot;</b></p>}
-                          {currentMeasurement.pent.length && <p>Length: <b>{currentMeasurement.pent.length}&quot;</b></p>}
-                          {currentMeasurement.pent.patt && <p>Patt (Thigh): <b>{currentMeasurement.pent.patt}&quot;</b></p>}
-                          {currentMeasurement.pent.knee && <p>Knee: <b>{currentMeasurement.pent.knee}&quot;</b></p>}
-                          {currentMeasurement.pent.bottom && <p>Bottom: <b>{currentMeasurement.pent.bottom}&quot;</b></p>}
+                          {PANT_MEASUREMENT_FIELDS.map(f => {
+                            const value = (normalizePantMeasurement(currentMeasurement.pent) as any)[f.key];
+                            return value ? <p key={f.key}>{f.label}: <b>{value}&quot;</b></p> : null;
+                          })}
                         </div>
                       </div>
                     )}

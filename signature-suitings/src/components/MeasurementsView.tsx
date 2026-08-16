@@ -16,7 +16,7 @@ import {
   Sparkles,
   Scissors
 } from "lucide-react";
-import { Customer, Measurement } from "../types";
+import { Customer, Measurement, normalizePantMeasurement } from "../types";
 import { db, stripEmbeddedTags } from "../db";
 import ConfirmModal from "./ConfirmModal";
 
@@ -76,8 +76,10 @@ export default function MeasurementsView({
   const [coatModa, setCoatModa] = useState("");
 
   // Pent
+  const [pentLength, setPentLength] = useState("");
   const [pentWaist, setPentWaist] = useState("");
   const [pentHips, setPentHips] = useState("");
+  const [pentInlength, setPentInlength] = useState("");
   const [pentPatt, setPentPatt] = useState("");
   const [pentBottom, setPentBottom] = useState("");
   const [pentKnee, setPentKnee] = useState("");
@@ -154,12 +156,16 @@ export default function MeasurementsView({
     setCoatFront(source.coatIndoWestern.front || "");
     setCoatModa(source.coatIndoWestern.moda || "");
 
-    // Set Pent
-    setPentWaist(source.pent.waist);
-    setPentHips(source.pent.hips);
-    setPentPatt(source.pent.patt);
-    setPentBottom(source.pent.bottom);
-    setPentKnee(source.pent.knee || "");
+    // Set Pent. Normalised so size cards saved under older field names (inseam, thigh,
+    // seat) still populate the standard seven boxes instead of appearing blank.
+    const normPent = normalizePantMeasurement(source.pent);
+    setPentLength(normPent.length || "");
+    setPentWaist(normPent.waist || "");
+    setPentHips(normPent.hips || "");
+    setPentInlength(normPent.inlength || "");
+    setPentPatt(normPent.patt || "");
+    setPentKnee(normPent.knee || "");
+    setPentBottom(normPent.bottom || "");
 
     // Set Vest
     setVestLength(source.vest.length);
@@ -322,7 +328,8 @@ export default function MeasurementsView({
         length: coatLength, chest: coatChest, waist: coatWaist, neck: coatNeck, tira: coatTira, hb: coatHb, cback: coatCback, arms: coatArms, bicep: coatBicep, front: coatFront, moda: coatModa, serialNumber: serialNumber
       },
       pent: {
-        waist: pentWaist, hips: pentHips, patt: pentPatt, bottom: pentBottom, knee: pentKnee, serialNumber: serialNumber
+        length: pentLength, waist: pentWaist, hips: pentHips, inlength: pentInlength,
+        patt: pentPatt, knee: pentKnee, bottom: pentBottom, serialNumber: serialNumber
       },
       vest: {
         length: vestLength, chest: vestChest, waist: vestWaist, hip: vestHip, tira: vestTira, neck: vestNeck, serialNumber: serialNumber
@@ -536,11 +543,13 @@ export default function MeasurementsView({
               <h3 className="text-sm font-serif font-bold text-navy uppercase tracking-wider mb-2">Trouser / Pent Configurations</h3>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
                 {[
+                  { label: "Length", state: pentLength, setState: setPentLength, prev: previousMeas?.pent?.length },
                   { label: "Waist", state: pentWaist, setState: setPentWaist, prev: previousMeas?.pent?.waist },
                   { label: "Hips", state: pentHips, setState: setPentHips, prev: previousMeas?.pent?.hips },
-                  { label: "Patt (Thigh)", state: pentPatt, setState: setPentPatt, prev: previousMeas?.pent?.patt },
+                  { label: "Inlength", state: pentInlength, setState: setPentInlength, prev: previousMeas?.pent?.inlength },
+                  { label: "Patt", state: pentPatt, setState: setPentPatt, prev: previousMeas?.pent?.patt },
                   { label: "Knee", state: pentKnee, setState: setPentKnee, prev: previousMeas?.pent?.knee },
-                  { label: "Bottom Width", state: pentBottom, setState: setPentBottom, prev: previousMeas?.pent?.bottom }
+                  { label: "Bottom", state: pentBottom, setState: setPentBottom, prev: previousMeas?.pent?.bottom }
                 ].map((f, idx) => {
                   const differs = f.prev && f.state && f.prev !== f.state;
                   return (
@@ -827,11 +836,13 @@ export default function MeasurementsView({
                   <div className="border border-charcoal/75 rounded-lg overflow-hidden">
                     <div className="bg-charcoal/10 p-1.5 text-center font-bold uppercase tracking-wider font-serif text-[10px] border-b border-charcoal">Trouser / Pent Sizes</div>
                     <div className="grid grid-cols-5 gap-1 p-2 font-mono text-[10px]">
+                      <div>Length: <b>{pentLength || "-"}</b></div>
                       <div>Waist: <b>{pentWaist || "-"}</b></div>
                       <div>Hips: <b>{pentHips || "-"}</b></div>
+                      <div>Inlength: <b>{pentInlength || "-"}</b></div>
                       <div>Patt: <b>{pentPatt || "-"}</b></div>
                       <div>Knee: <b>{pentKnee || "-"}</b></div>
-                      <div>Btm: <b>{pentBottom || "-"}</b></div>
+                      <div>Bottom: <b>{pentBottom || "-"}</b></div>
                     </div>
                   </div>
                 </div>

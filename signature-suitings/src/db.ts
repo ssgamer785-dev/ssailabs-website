@@ -250,6 +250,21 @@ const OUTBOX_KEY = "sig_suit_pending_writes_v1";
 const OUTBOX_MAX_ENTRIES = 2000;
 const OUTBOX_RETRY_MS = 20000;
 
+/**
+ * Result of a restore. `success` alone is not enough to trust: `cloudVerified` states whether
+ * the restored rows were read back out of Supabase and confirmed, which is the only condition
+ * under which the data survives a refresh on another machine or after a cache clear.
+ */
+export interface RestoreOutcome {
+  success: boolean;
+  cloudVerified?: boolean;
+  error?: string;
+  /** Rows actually present in Supabase per table after the restore. */
+  tableCounts?: Record<string, number>;
+  /** Cache keys that could not be written locally (browser storage full). */
+  cacheFailures?: string[];
+}
+
 export interface PendingWrite {
   op: "upsert" | "delete";
   table: string;
@@ -856,9 +871,19 @@ export class TailorDatabase {
     this.triggerSyncChange();
   }
 
-  private saveAllLocal() {
+  /**
+   * Writes the whole cache. Returns the keys that could NOT be written.
+   *
+   * safeSetItem swallows QuotaExceededError and returns false, and this used to discard that
+   * result — so a cache that was silently too large to write looked identical to a healthy
+   * one. After a restore that mattered: the data was on screen, the cache write had failed,
+   * and the next refresh loaded the old cache instead. Callers can now see the failure.
+   */
+  private saveAllLocal(): string[] {
+    const failed: string[] = [];
     const saveEncrypted = (key: string, val: any) => {
-      safeSetItem(`sig_suit_${key}`, obfuscateData(JSON.stringify(val)));
+      const ok = safeSetItem(`sig_suit_${key}`, obfuscateData(JSON.stringify(val)));
+      if (!ok) failed.push(key);
     };
     saveEncrypted("config", {
       ...this.config,
@@ -882,6 +907,7 @@ export class TailorDatabase {
     saveEncrypted("attendance", this.attendance);
     saveEncrypted("advances", this.advances);
     saveEncrypted("salaries", this.salaries);
+    return failed;
   }
 
   /**
@@ -2279,6 +2305,95 @@ export class TailorDatabase {
     }
   }
 
+  /** Row counts currently held in memory, per business table. */
+  private localTableCounts(): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (const table of BUSINESS_TABLES) {
+      const key = this.tableStateKey(table);
+      const list = key ? (this as any)[key] : null;
+      counts[table] = Array.isArray(list) ? list.length : 0;
+    }
+    return counts;
+  }
+
+  /**
+   * Reads every business table back out of Supabase and rebuilds in-memory state and the
+   * local cache from those rows, so what the user sees after a restore is literally what the
+   * database holds rather than what we hoped we wrote.
+   *
+   * Runs while isRestoring is still true, deliberately: it bypasses the normal merge (which
+   * would try to reconcile against the pre-restore cache) and simply adopts the cloud rows as
+   * the truth. Any table that fails to read, or that comes back with fewer rows than we just
+   * restored, is reported as a problem rather than being silently accepted.
+   */
+  private async hydrateFromSupabaseAuthoritative(): Promise<{
+    ok: boolean;
+    counts: Record<string, number>;
+    problems: string[];
+    cacheFailures: string[];
+  }> {
+    const expected = this.localTableCounts();
+    const counts: Record<string, number> = {};
+    const problems: string[] = [];
+
+    for (const table of BUSINESS_TABLES) {
+      const stateKey = this.tableStateKey(table);
+      if (!stateKey) continue;
+
+      const { data, error } = await supabase.from(table).select("*");
+
+      if (error) {
+        problems.push(`${table} could not be read back (${error.message})`);
+        counts[table] = expected[table] ?? 0;
+        continue;
+      }
+
+      const rows = Array.isArray(data) ? data : [];
+      counts[table] = rows.length;
+
+      // A short read means rows did not land. Never overwrite good in-memory state with it.
+      if (rows.length < (expected[table] ?? 0)) {
+        problems.push(`${table}: expected ${expected[table]} record(s), the database returned ${rows.length}`);
+        continue;
+      }
+
+      (this as any)[stateKey] = rows.map(row => this.hydrateRecordFromSupabase(table, row));
+    }
+
+    // Config comes back separately; it is a single row, not a collection.
+    try {
+      const { data: cfg, error: cfgErr } = await supabase.from("config").select("*");
+      if (!cfgErr && Array.isArray(cfg) && cfg.length > 0) {
+        const hydrated = this.hydrateRecordFromSupabase("config", cfg[0]);
+        const { id, updated_at, ...rest } = hydrated as any;
+        this.config = { ...this.config, ...rest };
+        if (Array.isArray(rest.garmentCategories) && rest.garmentCategories.length > 0) {
+          this.garmentCategories = rest.garmentCategories;
+        }
+        if (Array.isArray(rest.garmentCatalog) && rest.garmentCatalog.length > 0) {
+          this.garmentCatalog = rest.garmentCatalog;
+        }
+        if (Array.isArray(rest.measurementTemplates) && rest.measurementTemplates.length > 0) {
+          this.measurementTemplates = rest.measurementTemplates;
+        }
+      }
+    } catch (e) {
+      problems.push("config could not be read back");
+    }
+
+    // Rewrite the cache from the authoritative rows, and surface it if that write fails —
+    // a cache that silently did not persist is what makes restored data vanish on refresh.
+    const cacheFailures = this.saveAllLocal();
+    if (cacheFailures.length > 0) {
+      problems.push(
+        `the offline copy could not be written for: ${cacheFailures.join(", ")} (browser storage is full)`
+      );
+    }
+
+    this.triggerSyncChange();
+    return { ok: problems.length === 0, counts, problems, cacheFailures };
+  }
+
   // --- DATABASE BACKUP & RESTORE ---
   public getBackupData() {
     return {
@@ -2312,7 +2427,7 @@ export class TailorDatabase {
     };
   }
 
-  public async restoreBackupData(backup: any): Promise<{ success: boolean; error?: string }> {
+  public async restoreBackupData(backup: any): Promise<RestoreOutcome> {
     // RESTORATION BARRIER STEP 1: Freeze normal synchronization and background mutations
     this.isRestoring = true;
 
@@ -2379,21 +2494,56 @@ export class TailorDatabase {
       this.saveAllLocal();
       this.recalculateAllBalances();
 
-      // RESTORATION BARRIER STEP 4: Force Overwrite Supabase tables with restored backup
-      if (isSupabaseConfigured) {
-        await this.initializeSupabaseSync(true);
+      // RESTORATION BARRIER STEP 4: Force Overwrite Supabase tables with restored backup.
+      // Throws (caught below) if any table fails to clear, upsert, or verify by count.
+      if (!isSupabaseConfigured) {
+        // Nothing reached the cloud. Reporting success here would be a lie: the data lives
+        // only in this browser, and clearing the cache would be the end of it.
+        const cacheFailures = this.saveAllLocal();
+        return {
+          success: false,
+          cloudVerified: false,
+          error: "Restored into this browser only. The cloud database is not configured, so nothing was saved permanently. Connect Supabase and restore again.",
+          tableCounts: this.localTableCounts(),
+          cacheFailures
+        };
       }
 
-      // RESTORATION BARRIER STEP 5: Re-sync fresh state directly from Supabase to guarantee in-memory cache matches remote database
-      if (isSupabaseConfigured) {
-        await this.initializeSupabaseSync(false);
+      await this.initializeSupabaseSync(true);
+      await this.flushSupabaseQueue();
+
+      // RESTORATION BARRIER STEP 5: read the restored rows back OUT of Supabase and rebuild
+      // in-memory state and the cache from them.
+      //
+      // This previously called initializeSupabaseSync(false), which returns immediately while
+      // isRestoring is true - so it never ran. The restore finished without ever confirming
+      // that what is on screen matches what the database actually holds.
+      const verification = await this.hydrateFromSupabaseAuthoritative();
+
+      if (!verification.ok) {
+        return {
+          success: false,
+          cloudVerified: false,
+          error: `Restore could not be confirmed against the cloud database: ${verification.problems.join("; ")}`,
+          tableCounts: verification.counts,
+          cacheFailures: verification.cacheFailures
+        };
       }
 
       await this.flushSupabaseQueue();
-      return { success: true };
+      return {
+        success: true,
+        cloudVerified: true,
+        tableCounts: verification.counts,
+        cacheFailures: verification.cacheFailures
+      };
     } catch (e: any) {
       console.error("Critical failure during restoreBackupData:", e);
-      return { success: false, error: e.message || "An unknown error occurred during database restoration" };
+      return {
+        success: false,
+        cloudVerified: false,
+        error: e.message || "An unknown error occurred during database restoration"
+      };
     } finally {
       // RESTORATION BARRIER STEP 6: Unfreeze normal synchronization
       this.isRestoring = false;
