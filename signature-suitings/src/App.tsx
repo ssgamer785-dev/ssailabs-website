@@ -29,7 +29,8 @@ import {
   EyeOff,
   Camera,
   User,
-  Plus
+  Plus,
+  Trash2
 } from "lucide-react";
 
 // Views
@@ -44,6 +45,7 @@ import ClientPortalView from "./components/ClientPortalView";
 import BackupView from "./components/BackupView";
 import WorkersView from "./components/WorkersView";
 import ProfileView from "./components/ProfileView";
+import TrashView from "./components/TrashView";
 import AttendanceKiosk from "./components/AttendanceKiosk";
 import LoginScreen from "./components/LoginScreen";
 import { supabase, isSupabaseConfigured, uploadImage } from "./supabase";
@@ -52,7 +54,7 @@ import SignatureLogo from "./components/SignatureLogo";
 import { Customer, Measurement, Order, Invoice } from "./types";
 import { db, safeSetItem, safeRemoveItem } from "./db";
 
-type ActivePage = "dashboard" | "customers" | "measurements" | "orders" | "trials" | "billing" | "finance" | "client-portal" | "backup" | "workers" | "profile" | "attendance-kiosk";
+type ActivePage = "dashboard" | "customers" | "measurements" | "orders" | "trials" | "billing" | "finance" | "client-portal" | "backup" | "workers" | "profile" | "attendance-kiosk" | "trash";
 
 // Counter passphrases for switching between Admin and Staff mode on a shared showroom
 // terminal. Overridable at build time so the shop can change them without editing source.
@@ -303,6 +305,14 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showSyncDiagnostics, setShowSyncDiagnostics] = useState(false);
 
+  // Identify the operator to the data layer so deletions and restores are attributed.
+  useEffect(() => {
+    const match = currentUserEmail
+      ? db.getAllUsersIncludingInactive().find(u => u.email === currentUserEmail)
+      : undefined;
+    db.setCurrentActor(match?.name || currentUserEmail || (userRole === "Admin" ? "Showroom Owner" : "Showroom Staff"), userRole);
+  }, [currentUserEmail, userRole]);
+
   // Synchronize UI whenever Supabase Database synchronizes in the background
   const [dbVersion, setDbVersion] = useState(0);
   const [syncHealth, setSyncHealth] = useState(() => db.getSyncHealth());
@@ -507,9 +517,14 @@ export default function App() {
             { id: "billing", label: "Billings & Ledger", icon: Receipt },
             { id: "finance", label: "Finances & Charts", icon: TrendingUp },
             { id: "backup", label: "Backup & Recovery", icon: Database },
+            { id: "trash", label: "Trash", icon: Trash2 },
             { id: "profile", label: "My Profile", icon: User },
           ].filter((item) => {
             if (item.id === "workers" && userRole !== "Admin") {
+              return false;
+            }
+            // Trash holds deleted business records; owner only.
+            if (item.id === "trash" && userRole !== "Admin") {
               return false;
             }
             return true;
@@ -736,7 +751,7 @@ export default function App() {
           )}
 
           {/* ROLE BASED EXCLUSIVE PAGE BLOCK (Section 10.1 Access controls) */}
-          {(activePage === "finance" || activePage === "workers") && userRole === "Staff" ? (
+          {(activePage === "finance" || activePage === "workers" || activePage === "trash") && userRole === "Staff" ? (
             <div className="bg-white rounded-3xl border border-light p-12 text-center max-w-md mx-auto space-y-4 shadow-sm animate-scale-up font-sans text-xs">
               <div className="inline-flex bg-rose-50 text-red-600 p-4 rounded-full border border-rose-100">
                 <ShieldAlert className="w-8 h-8" />
@@ -848,6 +863,10 @@ export default function App() {
                   initialCustomerId={routeCustomerId}
                   onClearInitialCustomer={() => setRouteCustomerId(undefined)}
                 />
+              )}
+
+              {activePage === "trash" && (
+                <TrashView userRole={userRole} />
               )}
 
               {activePage === "profile" && (

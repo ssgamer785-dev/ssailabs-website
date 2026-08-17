@@ -576,16 +576,17 @@ export default function OrdersView({
     const impact = db.getOrderDeletionImpact(id);
     if (!impact.exists) return;
 
-    const runDelete = (force: boolean) => {
+    const runDelete = async (force: boolean) => {
       try {
-        db.deleteOrder(id, { force });
+        const res = await db.deleteOrder(id, { force });
+        if (!res.success) throw new Error(res.error || "Could not move this order to Trash.");
         refreshDb();
         if (selectedOrderId === id) setSelectedOrderId(null);
         setConfirmModal(prev => ({ ...prev, isOpen: false }));
       } catch (err: any) {
         setConfirmModal({
           isOpen: true,
-          title: "Order Not Deleted",
+          title: "Order Not Moved to Trash",
           message: err?.message || "This order could not be deleted.",
           confirmLabel: "OK",
           cancelLabel: "Cancel",
@@ -601,7 +602,7 @@ export default function OrdersView({
         isOpen: true,
         title: "This Order Has Payments",
         message: `${impact.reason}\n\nContinue only if this order was booked in error and the money was never actually taken.`,
-        confirmLabel: "Delete Anyway",
+        confirmLabel: "Move to Trash Anyway",
         cancelLabel: "Keep Order",
         variant: "danger",
         onConfirm: () => runDelete(true),
@@ -612,9 +613,9 @@ export default function OrdersView({
 
     setConfirmModal({
       isOpen: true,
-      title: "Delete Order",
-      message: `Delete Order ${num} permanently? Its bill${impact.invoices === 1 ? "" : "s"} and any trial records go with it. No payments have been received against this order.`,
-      confirmLabel: "Delete Order",
+      title: "Move Order to Trash?",
+      message: `Move Order ${num} to Trash? Its bill and any trial records move with it, and the whole job can be restored together from Trash.`,
+      confirmLabel: "Move to Trash",
       cancelLabel: "Cancel",
       variant: "danger",
       onConfirm: () => runDelete(false),

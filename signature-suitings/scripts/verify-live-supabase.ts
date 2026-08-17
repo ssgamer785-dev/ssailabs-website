@@ -67,10 +67,14 @@ async function main(){
 
   const c2 = db.addCustomer({ fullName:'Temp Walkin', mobileNumber:'9111000111', preferredFabricBrands:[] } as any);
   await db.waitForSync();
-  db.deleteCustomer(c2.id);
+  const delRes = await db.deleteCustomer(c2.id);
   await db.waitForSync();
+  check('DELETE reported success', delRes.success===true, delRes.error);
   check('DELETE removed row from Supabase', !(await raw('customers')).some((r:any)=>r.id===c2.id));
   check('DELETE tombstoned locally', db.isDeleted('customers', c2.id));
+  // Soft delete: the row must be recoverable from the cloud bin, not merely gone.
+  check('DELETE snapshotted into the Supabase bin',
+    (await raw('trash')).some((r:any)=>r.recordType==='customers' && r.recordId===c2.id));
 
   sec('2. MEASUREMENTS — save / versioning');
   const m1 = db.saveMeasurement({ customerId:c1.id, tryOnDate:'2026-09-01', deliveryDate:'2026-09-10',
@@ -156,10 +160,10 @@ async function main(){
   check('order count rolled up', Number(custRow?.totalOrdersCount)===1, String(custRow?.totalOrdersCount));
 
   sec('7. DELETE SAFETY on paid records');
-  let custDelBlocked=false; try { db.deleteCustomer(c1.id); } catch { custDelBlocked=true; }
+  let custDelBlocked=false; try { await db.deleteCustomer(c1.id); } catch { custDelBlocked=true; }
   check('customer with payments cannot be deleted', custDelBlocked);
   check('customer still in Supabase', (await raw('customers')).some((r:any)=>r.id===c1.id));
-  let ordDelBlocked=false; try { db.deleteOrder(o1.id); } catch { ordDelBlocked=true; }
+  let ordDelBlocked=false; try { await db.deleteOrder(o1.id); } catch { ordDelBlocked=true; }
   check('order with payments cannot be deleted', ordDelBlocked);
   check('order still in Supabase', (await raw('orders')).some((r:any)=>r.id===o1.id));
 

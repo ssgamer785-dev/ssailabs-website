@@ -394,21 +394,22 @@ export default function CustomersView({
 
     setConfirmModal({
       isOpen: true,
-      title: "Delete Customer Profile",
-      message: `Delete ${name} permanently?${linkedText} No payments have been recorded against this customer, so nothing financial will be lost. This cannot be undone.`,
-      confirmLabel: "Delete Customer",
+      title: "Move Customer to Trash?",
+      message: `Move ${name} to Trash?${linkedText} They will be moved to Trash and can be restored. Nothing is permanently deleted.`,
+      confirmLabel: "Move to Trash",
       cancelLabel: "Cancel",
       variant: "danger",
-      onConfirm: () => {
+      onConfirm: async () => {
         try {
-          db.deleteCustomer(id);
+          const res = await db.deleteCustomer(id);
+          if (!res.success) throw new Error(res.error || "Could not move this customer to Trash.");
           refreshDb();
           if (selectedCustomerId === id) setSelectedCustomerId(null);
           setConfirmModal(prev => ({ ...prev, isOpen: false }));
         } catch (err: any) {
           setConfirmModal({
             isOpen: true,
-            title: "Customer Not Deleted",
+            title: "Customer Not Moved to Trash",
             message: err?.message || "This customer could not be deleted.",
             confirmLabel: "OK",
             variant: "warning",

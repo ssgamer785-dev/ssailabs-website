@@ -77,6 +77,7 @@ export interface RestoreSuccessReport {
     attendance: number;
     advances: number;
     salaries: number;
+    trash: number;
   };
   storageCounts?: {
     backedUp: number;
@@ -216,7 +217,8 @@ export async function createFullBackupZip(
       ["salaries", rawBackup.salaries || []],
       ["trials", rawBackup.trials || []],
       ["alterations", rawBackup.alterations || []],
-      ["users", rawBackup.users || []]
+      ["users", rawBackup.users || []],
+      ["trash", rawBackup.trash || []]
     ];
     const shortfalls: string[] = [];
     for (const [table, rows] of auditTables) {
@@ -357,7 +359,10 @@ export async function createFullBackupZip(
     workers: workers.length,
     attendance: (rawBackup.attendance || []).length,
     advances: (rawBackup.advances || []).length,
-    salaries: (rawBackup.salaries || []).length
+    salaries: (rawBackup.salaries || []).length,
+    // The bin: deletion metadata (deletedBy/deletedByRole/reason/deleted_at) and batch
+    // grouping travel with each entry, so a restore can put related deletions back together.
+    trash: (rawBackup.trash || []).length
   };
 
   if (onProgress) onProgress("Generating table JSON payloads...");
@@ -377,6 +382,8 @@ export async function createFullBackupZip(
   zip.file("attendance.json", JSON.stringify(rawBackup.attendance || [], null, 2));
   zip.file("advances.json", JSON.stringify(rawBackup.advances || [], null, 2));
   zip.file("salaries.json", JSON.stringify(rawBackup.salaries || [], null, 2));
+  // The bin, complete with deletion metadata and batch ids, so a restore brings it back too.
+  zip.file("trash.json", JSON.stringify(rawBackup.trash || [], null, 2));
 
   // Garment catalog, categories and measurement templates are configuration the showroom
   // builds up over time. They are written as their own files so a restore recovers them even
@@ -531,6 +538,7 @@ export async function parseAndValidateBackupFile(
         "attendance",
         "advances",
         "salaries",
+        "trash",
         "garmentCategories",
         "garmentCatalog",
         "measurementTemplates"
@@ -684,7 +692,8 @@ export async function parseAndValidateBackupFile(
         workers: Array.isArray(parsed.workers) ? parsed.workers : [],
         attendance: Array.isArray(parsed.attendance) ? parsed.attendance : [],
         advances: Array.isArray(parsed.advances) ? parsed.advances : [],
-        salaries: Array.isArray(parsed.salaries) ? parsed.salaries : []
+        salaries: Array.isArray(parsed.salaries) ? parsed.salaries : [],
+        trash: Array.isArray(parsed.trash) ? parsed.trash : []
       };
 
       return {
@@ -779,7 +788,8 @@ export async function parseAndValidateBackupFile(
         workers: Array.isArray(parsed.workers) ? parsed.workers : [],
         attendance: Array.isArray(parsed.attendance) ? parsed.attendance : [],
         advances: Array.isArray(parsed.advances) ? parsed.advances : [],
-        salaries: Array.isArray(parsed.salaries) ? parsed.salaries : []
+        salaries: Array.isArray(parsed.salaries) ? parsed.salaries : [],
+        trash: Array.isArray(parsed.trash) ? parsed.trash : []
       };
 
       return {
@@ -866,6 +876,7 @@ export async function executeRestoreOperation(
     attendance: tablesData.attendance || [],
     advances: tablesData.advances || [],
     salaries: tablesData.salaries || [],
+    trash: tablesData.trash || [],
     // Configuration collections; fall back to whatever the config blob carried so older
     // archives (which had no dedicated files) still restore their catalog.
     garmentCategories: tablesData.garmentCategories || configData?.garmentCategories || [],
@@ -1050,6 +1061,7 @@ export async function executeRestoreOperation(
   integrityNotes.push(`Confirmed ${verifiedCounts.customers ?? backupPayload.customers.length} customer records in the cloud database.`);
   integrityNotes.push(`Confirmed ${verifiedCounts.orders ?? backupPayload.orders.length} order records in the cloud database.`);
   integrityNotes.push(`Confirmed ${verifiedCounts.invoices ?? backupPayload.invoices.length} invoice records in the cloud database.`);
+  integrityNotes.push(`Confirmed ${verifiedCounts.trash ?? backupPayload.trash.length} bin (Trash) record(s) in the cloud database.`);
 
   if (storageBackedUpCount > 0) {
     if (failedStorageFiles.length === 0 && storageVerifiedCount === storageBackedUpCount) {
@@ -1077,7 +1089,8 @@ export async function executeRestoreOperation(
       workers: verifiedCounts.workers ?? backupPayload.workers.length,
       attendance: verifiedCounts.attendance ?? backupPayload.attendance.length,
       advances: verifiedCounts.advances ?? backupPayload.advances.length,
-      salaries: verifiedCounts.salaries ?? backupPayload.salaries.length
+      salaries: verifiedCounts.salaries ?? backupPayload.salaries.length,
+      trash: verifiedCounts.trash ?? backupPayload.trash.length
     },
     storageCounts: {
       backedUp: storageBackedUpCount,

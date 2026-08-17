@@ -312,7 +312,8 @@ export default function EditOrderModal({ orderId, isOpen, onClose, onSuccess }: 
     setSaveError(null);
 
     try {
-      db.deleteOrder(orderId, { force });
+      const res = await db.deleteOrder(orderId, { force });
+      if (!res.success) throw new Error(res.error || "Could not move this order to Trash.");
       setDeleteSuccessMsg(true);
       setTimeout(() => {
         onSuccess?.();
@@ -468,7 +469,7 @@ export default function EditOrderModal({ orderId, isOpen, onClose, onSuccess }: 
               {deleteSuccessMsg && (
                 <div className="p-3 bg-red-50 border border-red-300 rounded-xl text-xs text-red-800 font-bold flex items-center gap-2">
                   <Trash2 className="w-4 h-4 text-red-600 shrink-0" />
-                  <span>Order deleted.</span>
+                  <span>Order moved to Trash.</span>
                 </div>
               )}
 
@@ -477,7 +478,7 @@ export default function EditOrderModal({ orderId, isOpen, onClose, onSuccess }: 
                 const hasPayments = Boolean(impact && !impact.safeToDelete);
                 return (
                   <div className="p-4 bg-red-50 border-2 border-red-200 rounded-2xl text-xs space-y-2 text-red-900">
-                    <p className="font-bold text-red-800">Delete this order permanently?</p>
+                    <p className="font-bold text-red-800">Move this order to Trash?</p>
                     {hasPayments ? (
                       <p className="leading-relaxed">
                         ₹{impact!.paidAmount.toLocaleString("en-IN")} has already been received against this
@@ -486,7 +487,7 @@ export default function EditOrderModal({ orderId, isOpen, onClose, onSuccess }: 
                       </p>
                     ) : (
                       <p className="leading-relaxed">
-                        The order and its bill will be removed. No payments have been received against it.
+                        The order and its bill move to Trash and can be restored. Nothing is permanently deleted.
                       </p>
                     )}
                     <div className="flex items-center gap-3 pt-1">
@@ -496,7 +497,7 @@ export default function EditOrderModal({ orderId, isOpen, onClose, onSuccess }: 
                         disabled={isDeletingOrder}
                         className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-1.5 rounded-xl text-xs cursor-pointer disabled:opacity-60"
                       >
-                        {isDeletingOrder ? "Deleting..." : hasPayments ? "Delete Order & Payments" : "Yes, Delete Order"}
+                        {isDeletingOrder ? "Moving..." : hasPayments ? "Move Order & Payments to Trash" : "Yes, Move to Trash"}
                       </button>
                       <button
                         type="button"

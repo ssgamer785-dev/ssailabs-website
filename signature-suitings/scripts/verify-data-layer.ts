@@ -101,7 +101,7 @@ async function main() {
 
   console.log("=== G. DELETE SAFETY ===");
   let custDeleteBlocked = false;
-  try { db.deleteCustomer(cust.id); } catch { custDeleteBlocked = true; }
+  try { await db.deleteCustomer(cust.id); } catch { custDeleteBlocked = true; }
   check("customer with payments cannot be deleted", custDeleteBlocked);
   check("customer still present after blocked delete", Boolean(db.getCustomerById(cust.id)));
   const impact = db.getCustomerDeletionImpact(cust.id);
@@ -114,16 +114,19 @@ async function main() {
   check("archive preserves invoice", Boolean(db.getInvoiceByOrderId(order.id)));
 
   let orderDeleteBlocked = false;
-  try { db.deleteOrder(order.id); } catch { orderDeleteBlocked = true; }
+  try { await db.deleteOrder(order.id); } catch { orderDeleteBlocked = true; }
   check("order with payments cannot be deleted casually", orderDeleteBlocked);
   check("order survives blocked delete", Boolean(db.getOrderById(order.id)));
 
   console.log("=== H. SAFE DELETE PATH + TOMBSTONE ===");
   const cust2 = db.addCustomer({ fullName: "Walk In", mobileNumber: "9111222333", preferredFabricBrands: [] } as any);
   const cust2Id = cust2.id;
-  db.deleteCustomer(cust2Id);
+  const softDel = await db.deleteCustomer(cust2Id);
+  check("delete reports success", softDel.success === true, softDel.error);
   check("customer with no money is deleted", db.getCustomerById(cust2Id) === undefined);
   check("tombstone written", db.isDeleted("customers", cust2Id));
+  // Deletes are now soft: the record leaves its table but is retained in the bin.
+  check("record retained in Trash", db.getTrashEntries().some(e => e.recordType === "customers" && e.recordId === cust2Id));
 
   console.log("=== I. REFRESH / RESTART SIMULATION ===");
   const persisted = storage.snapshot();

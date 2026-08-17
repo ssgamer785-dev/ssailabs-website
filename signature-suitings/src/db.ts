@@ -162,6 +162,8 @@ const SCHEMA_COLUMNS: Record<string, string[]> = {
   workers: ['id', 'name', 'mobileNumber', 'address', 'role', 'dailyWages', 'monthlySalary', 'active', 'joiningDate', 'photoUrl', 'created_at', 'updated_at'],
   attendance: ['id', 'workerId', 'date', 'status', 'notes', 'created_at', 'updated_at'],
   advances: ['id', 'workerId', 'amount', 'date', 'notes', 'repaid', 'repayDate', 'created_at', 'updated_at'],
+  trash: ['id', 'recordType', 'recordId', 'batchId', 'isPrimary', 'payload', 'displayName', 'displayMeta', 'deletedBy', 'deletedByRole', 'reason', 'deleted_at', 'created_at'],
+  audit_log: ['id', 'action', 'recordType', 'recordId', 'batchId', 'actorName', 'actorRole', 'summary', 'details', 'created_at'],
   salaries: ['id', 'workerId', 'month', 'calculatedSalary', 'presents', 'halfDays', 'absents', 'paidLeavesUsed', 'advanceDeductions', 'bonus', 'netPaid', 'paymentDate', 'notes', 'created_at', 'updated_at']
 };
 
@@ -263,6 +265,55 @@ export interface RestoreOutcome {
   tableCounts?: Record<string, number>;
   /** Cache keys that could not be written locally (browser storage full). */
   cacheFailures?: string[];
+}
+
+/** How long a deleted record stays recoverable before it may be purged. */
+export const TRASH_RETENTION_DAYS = 180;
+
+/** Business tables whose records can be sent to the bin. */
+export const TRASHABLE_TABLES = [
+  "customers", "orders", "measurements", "invoices",
+  "appointments", "trials", "alterations", "expenses"
+] as const;
+
+export interface TrashEntry {
+  id: string;
+  recordType: string;
+  recordId: string;
+  batchId: string;
+  isPrimary: boolean;
+  payload: any;
+  displayName: string;
+  displayMeta: string;
+  deletedBy: string;
+  deletedByRole?: string;
+  reason?: string;
+  /** Written by the database, never the browser. Drives the retention window. */
+  deleted_at: string;
+  created_at: string;
+}
+
+export interface AuditEntry {
+  id: string;
+  action: "delete" | "restore" | "permanent_delete" | "purge";
+  recordType?: string;
+  recordId?: string;
+  batchId?: string;
+  actorName?: string;
+  actorRole?: string;
+  summary?: string;
+  details?: any;
+  created_at: string;
+}
+
+export interface TrashOperationResult {
+  success: boolean;
+  error?: string;
+  /** True only once Supabase has confirmed the write. */
+  cloudVerified?: boolean;
+  batchId?: string;
+  affected?: number;
+  entries?: TrashEntry[];
 }
 
 export interface PendingWrite {
@@ -710,7 +761,8 @@ export class TailorDatabase {
       workers: "workers",
       attendance: "attendance",
       advances: "advances",
-      salaries: "salaries"
+      salaries: "salaries",
+      trash: "trash"
     };
     return map[table] || null;
   }
@@ -813,6 +865,7 @@ export class TailorDatabase {
       };
     });
 
+    this.trash = loadKey<TrashEntry[]>("trash", []);
     this.appointments = loadKey("appointments", []);
     this.expenses = loadKey("expenses", []);
     this.workers = loadKey("workers", []);
@@ -907,6 +960,7 @@ export class TailorDatabase {
     saveEncrypted("attendance", this.attendance);
     saveEncrypted("advances", this.advances);
     saveEncrypted("salaries", this.salaries);
+    saveEncrypted("trash", this.trash);
     return failed;
   }
 
@@ -992,6 +1046,7 @@ export class TailorDatabase {
         console.log("Force Overwriting Supabase tables with restored local backup...");
         // 1. Delete all tables in reverse dependency order to prevent foreign key errors:
         const tablesToDeleteInOrder = [
+          "trash",
           "invoices",
           "trials",
           "alterations",
@@ -1383,6 +1438,38 @@ export class TailorDatabase {
       await syncTable("alterations", this.alterations, "alterations");
       await syncTable("invoices", this.invoices, "invoices");
 
+      // The bin does not go through syncTable's two-way merge — it is cloud-authoritative
+      // and gets re-read wholesale by refreshTrashFromCloud() below on every normal sync.
+      // But on a restore, a backup's trash entries only exist locally at this point; if they
+      // are never pushed, that re-read finds nothing (or stale pre-restore rows) and silently
+      // wipes them back out. deleted_at is included explicitly here (unlike a live delete)
+      // so a record trashed months ago keeps its real age instead of restarting its retention
+      // clock at the moment of restore.
+      if (forceOverwriteSupabase && this.trash.length > 0) {
+        console.log(`Force-restoring ${this.trash.length} trash record(s) to Supabase...`);
+        // A restored backup is a file the browser read from disk, not data this process
+        // produced — an imported .backup/.json could be hand-edited or from an older
+        // export. Fill any row missing these NOT NULL columns before the batch goes out,
+        // so one incomplete entry can never turn the whole array into the kind of
+        // heterogeneous batch that makes PostgREST send NULL for a missing key instead
+        // of letting the column default apply.
+        const safeTrash = this.trash.map(t => ({
+          ...t,
+          deleted_at: t.deleted_at || t.created_at || new Date().toISOString(),
+          created_at: t.created_at || t.deleted_at || new Date().toISOString()
+        }));
+        const CHUNK_SIZE = 100;
+        for (let i = 0; i < safeTrash.length; i += CHUNK_SIZE) {
+          const chunk = safeTrash.slice(i, i + CHUNK_SIZE);
+          const { error: trashUpsertError } = await safeUpsertSupabaseTable("trash", chunk as any);
+          if (trashUpsertError) {
+            console.error(`Error force-upserting trash: ${trashUpsertError.message}`);
+            this.syncErrors.push(`trash: ${trashUpsertError.message}`);
+            throw new Error(`Failed restoring 'trash': ${trashUpsertError.message}`);
+          }
+        }
+      }
+
       // POST-RESTORATION VERIFICATION AUDIT
       if (forceOverwriteSupabase) {
         console.log("Performing Post-Restoration Supabase Verification Audit...");
@@ -1400,7 +1487,8 @@ export class TailorDatabase {
           { name: "orders", expected: this.orders.length },
           { name: "trials", expected: this.trials.length },
           { name: "alterations", expected: this.alterations.length },
-          { name: "invoices", expected: this.invoices.length }
+          { name: "invoices", expected: this.invoices.length },
+          { name: "trash", expected: this.trash.length }
         ];
 
         const verificationErrors: string[] = [];
@@ -1425,6 +1513,8 @@ export class TailorDatabase {
       this.recalculateAllBalances();
       if (this.syncErrors.length === 0) {
         console.log("Supabase Database Sync Successfully Completed!");
+        // The bin lives in its own table and is not part of the table merge above.
+        await this.refreshTrashFromCloud();
         this.setupRealtimeSubscription();
       } else {
         console.warn("Supabase database sync completed with errors. Using local backup for failed tables.");
@@ -2394,6 +2484,411 @@ export class TailorDatabase {
     return { ok: problems.length === 0, counts, problems, cacheFailures };
   }
 
+  // =====================================================================
+  // TRASH / SOFT DELETE
+  //
+  // A deleted record is moved OUT of its table and stored in `trash` as a
+  // complete snapshot. Nothing in the rest of the application needed changing as
+  // a result: every screen, statistic and report keeps reading its own table, and
+  // a binned record is simply no longer there, so it cannot be counted by mistake.
+  //
+  // Records removed by one action share a batchId and come back together, which is
+  // what stops a restored customer arriving without their orders.
+  // =====================================================================
+
+  /** In-memory mirror of the bin. Supabase remains authoritative. */
+  private trash: TrashEntry[] = [];
+
+  private currentActor: { name: string; role: string } = { name: "Unknown user", role: "Staff" };
+
+  /** Called by the app shell so deletions record who performed them. */
+  public setCurrentActor(name: string, role: string) {
+    this.currentActor = { name: name || "Unknown user", role: role || "Staff" };
+  }
+
+  public getCurrentActor() {
+    return { ...this.currentActor };
+  }
+
+  /** Everything currently in the bin, newest first. */
+  public getTrashEntries(): TrashEntry[] {
+    return [...this.trash].sort(
+      (a, b) => new Date(b.deleted_at).getTime() - new Date(a.deleted_at).getTime()
+    );
+  }
+
+  /** The user-facing rows of the Trash screen: one line per deletion, not per record. */
+  public getTrashGroups(): Array<{
+    batchId: string;
+    primary: TrashEntry;
+    related: TrashEntry[];
+    totalRecords: number;
+    deletedAt: string;
+    expiresAt: string;
+    daysRemaining: number;
+    eligibleForPurge: boolean;
+  }> {
+    const byBatch = new Map<string, TrashEntry[]>();
+    for (const entry of this.trash) {
+      if (!byBatch.has(entry.batchId)) byBatch.set(entry.batchId, []);
+      byBatch.get(entry.batchId)!.push(entry);
+    }
+
+    const groups = [];
+    for (const [batchId, entries] of byBatch) {
+      const primary = entries.find(e => e.isPrimary) || entries[0];
+      if (!primary) continue;
+      const deletedAt = primary.deleted_at;
+      const deletedMs = new Date(deletedAt).getTime();
+      const expiresMs = deletedMs + TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+      const daysRemaining = Math.ceil((expiresMs - Date.now()) / (24 * 60 * 60 * 1000));
+      groups.push({
+        batchId,
+        primary,
+        related: entries.filter(e => e !== primary),
+        totalRecords: entries.length,
+        deletedAt,
+        expiresAt: new Date(expiresMs).toISOString(),
+        daysRemaining,
+        // Advisory only. The actual purge is decided by the database.
+        eligibleForPurge: daysRemaining <= 0
+      });
+    }
+    return groups.sort((a, b) => new Date(b.deletedAt).getTime() - new Date(a.deletedAt).getTime());
+  }
+
+  private describeRecord(type: string, record: any): { name: string; meta: string } {
+    switch (type) {
+      case "customers":
+        return { name: record.fullName || "Customer", meta: record.mobileNumber || "" };
+      case "orders": {
+        const cust = this.customers.find(c => c.id === record.customerId);
+        return {
+          name: record.orderNumber || "Order",
+          meta: [cust?.fullName, (record.garmentTypes || []).join(", ")].filter(Boolean).join(" • ")
+        };
+      }
+      case "invoices":
+        return { name: record.invoiceNumber || "Bill", meta: `₹${Number(record.grandTotal || 0).toLocaleString("en-IN")}` };
+      case "measurements":
+        return { name: `Size card ${record.slipNumber || ""}`.trim(), meta: record.versionDate ? new Date(record.versionDate).toLocaleDateString("en-IN") : "" };
+      case "appointments":
+        return { name: record.appointmentType || record.type || "Appointment", meta: record.appointmentDate || "" };
+      case "trials":
+        return { name: "Trial", meta: record.trialDate || "" };
+      case "alterations":
+        return { name: "Alteration", meta: record.description || "" };
+      case "expenses":
+        return { name: record.category || "Expense", meta: `₹${Number(record.amount || 0).toLocaleString("en-IN")}` };
+      default:
+        return { name: record.id || type, meta: "" };
+    }
+  }
+
+  private async writeAudit(
+    action: AuditEntry["action"],
+    payload: { recordType?: string; recordId?: string; batchId?: string; summary: string; details?: any }
+  ) {
+    const entry: AuditEntry = {
+      id: `aud_${uid()}`,
+      action,
+      recordType: payload.recordType,
+      recordId: payload.recordId,
+      batchId: payload.batchId,
+      actorName: this.currentActor.name,
+      actorRole: this.currentActor.role,
+      summary: payload.summary,
+      details: payload.details || {},
+      created_at: new Date().toISOString()
+    };
+    if (!isSupabaseConfigured) return;
+    try {
+      await supabase.from("audit_log").insert(entry as any);
+    } catch (e) {
+      console.warn("[Audit] Could not record entry:", e);
+    }
+  }
+
+  public async getAuditLog(limit: number = 200): Promise<AuditEntry[]> {
+    if (!isSupabaseConfigured) return [];
+    const { data, error } = await supabase
+      .from("audit_log").select("*").order("created_at", { ascending: false }).limit(limit);
+    if (error) return [];
+    return (data || []) as AuditEntry[];
+  }
+
+  /**
+   * Collects a record and everything that would be destroyed alongside it, so the
+   * whole set can be snapshotted before any row is removed.
+   */
+  private collectDeletionGroup(type: string, id: string): Array<{ type: string; record: any }> {
+    const group: Array<{ type: string; record: any }> = [];
+    const push = (t: string, r: any) => { if (r) group.push({ type: t, record: JSON.parse(JSON.stringify(r)) }); };
+
+    if (type === "customers") {
+      const customer = this.customers.find(c => c.id === id);
+      if (!customer) return group;
+      push("customers", customer);
+      const orderIds = new Set(this.orders.filter(o => o.customerId === id).map(o => o.id));
+      this.measurements.filter(m => m.customerId === id).forEach(m => push("measurements", m));
+      this.orders.filter(o => o.customerId === id).forEach(o => push("orders", o));
+      this.invoices.filter(i => i.customerId === id || (i.linkedOrderId && orderIds.has(i.linkedOrderId))).forEach(i => push("invoices", i));
+      this.appointments.filter(a => a.customerId === id).forEach(a => push("appointments", a));
+      this.trials.filter(t => t.customerId === id || orderIds.has(t.orderId)).forEach(t => push("trials", t));
+      this.alterations.filter(a => a.customerId === id || orderIds.has(a.orderId)).forEach(a => push("alterations", a));
+      return group;
+    }
+
+    if (type === "orders") {
+      const order = this.orders.find(o => o.id === id);
+      if (!order) return group;
+      push("orders", order);
+      this.invoices.filter(i => i.linkedOrderId === id && !i.linkedAppointmentId).forEach(i => push("invoices", i));
+      this.trials.filter(t => t.orderId === id).forEach(t => push("trials", t));
+      this.alterations.filter(a => a.orderId === id).forEach(a => push("alterations", a));
+      return group;
+    }
+
+    const singleTable = this.tableStateKey(type);
+    if (singleTable) {
+      const list = (this as any)[singleTable];
+      if (Array.isArray(list)) push(type, list.find((r: any) => r && r.id === id));
+    }
+    return group;
+  }
+
+  /**
+   * Moves a record — and everything deleted with it — into the bin.
+   *
+   * The snapshot is written to Supabase and confirmed BEFORE the original rows are
+   * removed. If the bin write fails, nothing is deleted, so a failure can never
+   * lose the record.
+   */
+  public async moveToTrash(
+    type: string, id: string, options: { reason?: string } = {}
+  ): Promise<TrashOperationResult> {
+    const group = this.collectDeletionGroup(type, id);
+    if (group.length === 0) {
+      return { success: false, error: "That record no longer exists." };
+    }
+
+    const batchId = `batch_${uid()}`;
+    const nowIso = new Date().toISOString();
+    const entries: TrashEntry[] = group.map(({ type: t, record }) => {
+      const d = this.describeRecord(t, record);
+      return {
+        id: `trash_${uid()}`,
+        recordType: t,
+        recordId: record.id,
+        batchId,
+        isPrimary: t === type && record.id === id,
+        payload: record,
+        displayName: d.name,
+        displayMeta: d.meta,
+        deletedBy: this.currentActor.name,
+        deletedByRole: this.currentActor.role,
+        reason: options.reason,
+        deleted_at: nowIso,
+        created_at: nowIso
+      };
+    });
+
+    if (isSupabaseConfigured) {
+      // deleted_at and created_at are intentionally omitted so the DATABASE stamps them.
+      // The retention window must not depend on this machine's clock. Both keys are
+      // stripped together (not just one) — a batch where every row in the same insert
+      // omits a NOT NULL column lets the column default apply uniformly; leaving one
+      // present and the other absent is what previously left created_at unset in memory.
+      const payload = entries.map(({ deleted_at, created_at, ...rest }) => rest);
+      const { data, error } = await supabase.from("trash").insert(payload as any).select();
+      if (error) {
+        return {
+          success: false,
+          cloudVerified: false,
+          error: `Nothing was deleted — the item could not be moved to the bin (${error.message}).`
+        };
+      }
+      // Adopt the database's timestamps, so every entry in this.trash always carries
+      // both — never just one — from the moment it exists in memory. An entry missing
+      // created_at while a sibling has it is exactly what turns a later bulk upsert
+      // (restore) into a heterogeneous batch: PostgREST fills the missing key with an
+      // explicit NULL for that row instead of letting the column default apply.
+      if (Array.isArray(data)) {
+        for (const row of data as any[]) {
+          const match = entries.find(e => e.id === row.id);
+          if (match) {
+            if (row.deleted_at) match.deleted_at = row.deleted_at;
+            if (row.created_at) match.created_at = row.created_at;
+          }
+        }
+      }
+    }
+
+    // Snapshot is safe; now remove the originals from their tables.
+    for (const { type: t, record } of group) {
+      const stateKey = this.tableStateKey(t);
+      if (!stateKey) continue;
+      (this as any)[stateKey] = ((this as any)[stateKey] as any[]).filter(r => !(r && r.id === record.id));
+      this.deleteFromSupabase(t, record.id);
+    }
+
+    this.trash.push(...entries);
+    this.saveAllLocal();
+    this.saveKeyLocal("trash", this.trash);
+    this.recalculateAllBalances();
+    await this.waitForSync();
+
+    const primary = entries.find(e => e.isPrimary)!;
+    await this.writeAudit("delete", {
+      recordType: type, recordId: id, batchId,
+      summary: `${primary.displayName} moved to the bin with ${entries.length - 1} related record(s)`,
+      details: { records: entries.map(e => ({ type: e.recordType, id: e.recordId })) }
+    });
+
+    this.triggerSyncChange();
+    return { success: true, cloudVerified: isSupabaseConfigured, batchId, affected: entries.length, entries };
+  }
+
+  /**
+   * Puts a deletion group back.
+   *
+   * Rows are written to Supabase in foreign-key order, then read straight back out
+   * to confirm they are really there before the bin entries are cleared and the
+   * screen is told the restore worked.
+   */
+  public async restoreFromTrash(
+    batchId: string, options: { relatedRecords?: boolean } = {}
+  ): Promise<TrashOperationResult> {
+    const includeRelated = options.relatedRecords !== false;
+    const all = this.trash.filter(e => e.batchId === batchId);
+    if (all.length === 0) return { success: false, error: "That bin entry no longer exists." };
+
+    const entries = includeRelated ? all : all.filter(e => e.isPrimary);
+    if (entries.length === 0) return { success: false, error: "Nothing to restore." };
+
+    // Parents before children, or the database rejects the foreign keys.
+    const order = ["customers", "workers", "users", "expenses", "measurements",
+                   "appointments", "orders", "trials", "alterations", "invoices"];
+    const sorted = [...entries].sort(
+      (a, b) => (order.indexOf(a.recordType) + 1 || 99) - (order.indexOf(b.recordType) + 1 || 99)
+    );
+
+    for (const entry of sorted) {
+      // The record was deliberately removed once; lift that so it is not re-deleted.
+      this.clearTombstone(entry.recordType, entry.recordId);
+      const stateKey = this.tableStateKey(entry.recordType);
+      if (!stateKey) continue;
+      const list = (this as any)[stateKey] as any[];
+      if (!list.some(r => r && r.id === entry.recordId)) list.push(entry.payload);
+    }
+
+    if (isSupabaseConfigured) {
+      for (const entry of sorted) {
+        const { error } = await safeUpsertSupabaseTable(entry.recordType, entry.payload);
+        if (error) {
+          return {
+            success: false, cloudVerified: false,
+            error: `Restore stopped: ${entry.displayName} could not be written back (${error.message}). Nothing was removed from the bin.`
+          };
+        }
+      }
+      await this.waitForSync();
+
+      // Confirm against the database before reporting success.
+      for (const entry of sorted) {
+        const { data, error } = await supabase
+          .from(entry.recordType).select("id").eq("id", entry.recordId).limit(1);
+        if (error || !Array.isArray(data) || data.length === 0) {
+          return {
+            success: false, cloudVerified: false,
+            error: `Restore could not be confirmed for ${entry.displayName}. It has been left in the bin.`
+          };
+        }
+      }
+    }
+
+    const restoredIds = new Set(sorted.map(e => e.id));
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.from("trash").delete().in("id", Array.from(restoredIds));
+      if (error) {
+        return { success: false, cloudVerified: false, error: `Records were restored but the bin could not be tidied (${error.message}).` };
+      }
+    }
+    this.trash = this.trash.filter(e => !restoredIds.has(e.id));
+
+    this.saveAllLocal();
+    this.saveKeyLocal("trash", this.trash);
+    this.recalculateAllBalances();
+
+    const primary = all.find(e => e.isPrimary) || sorted[0];
+    await this.writeAudit("restore", {
+      recordType: primary.recordType, recordId: primary.recordId, batchId,
+      summary: `${primary.displayName} restored with ${sorted.length - 1} related record(s)`,
+      details: { records: sorted.map(e => ({ type: e.recordType, id: e.recordId })) }
+    });
+
+    this.triggerSyncChange();
+    return { success: true, cloudVerified: isSupabaseConfigured, batchId, affected: sorted.length };
+  }
+
+  /** Removes a deletion group from the bin for good. Irreversible. */
+  public async permanentlyDelete(batchId: string): Promise<TrashOperationResult> {
+    const entries = this.trash.filter(e => e.batchId === batchId);
+    if (entries.length === 0) return { success: false, error: "That bin entry no longer exists." };
+
+    const primary = entries.find(e => e.isPrimary) || entries[0];
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.from("trash").delete().eq("batchId", batchId);
+      if (error) {
+        return { success: false, cloudVerified: false, error: `Could not delete permanently (${error.message}). Nothing was removed.` };
+      }
+    }
+    this.trash = this.trash.filter(e => e.batchId !== batchId);
+    this.saveKeyLocal("trash", this.trash);
+
+    await this.writeAudit("permanent_delete", {
+      recordType: primary.recordType, recordId: primary.recordId, batchId,
+      summary: `${primary.displayName} and ${entries.length - 1} related record(s) permanently deleted`,
+      details: { records: entries.map(e => ({ type: e.recordType, id: e.recordId })) }
+    });
+
+    this.triggerSyncChange();
+    return { success: true, cloudVerified: isSupabaseConfigured, batchId, affected: entries.length };
+  }
+
+  /**
+   * Asks the DATABASE to remove bin entries older than the retention period.
+   *
+   * The cutoff is computed inside Postgres from its own clock against the
+   * deleted_at it wrote itself, so nothing here — a wrong system date, edited
+   * local storage — can bring the six months forward. The function also refuses
+   * any retention shorter than 180 days.
+   */
+  public async purgeExpiredTrash(): Promise<{ success: boolean; purged: number; error?: string }> {
+    if (!isSupabaseConfigured) {
+      return { success: false, purged: 0, error: "The cloud database is not connected." };
+    }
+    const { data, error } = await supabase.rpc("purge_expired_trash", { retention_days: TRASH_RETENTION_DAYS });
+    if (error) return { success: false, purged: 0, error: error.message };
+    const row = Array.isArray(data) ? data[0] : data;
+    const purged = Number(row?.purged_count ?? 0);
+    if (purged > 0) await this.refreshTrashFromCloud();
+    return { success: true, purged };
+  }
+
+  /** Reloads the bin from Supabase, which is the authority for its contents. */
+  public async refreshTrashFromCloud(): Promise<void> {
+    if (!isSupabaseConfigured) return;
+    const { data, error } = await supabase.from("trash").select("*");
+    if (error) {
+      console.warn("[Trash] Could not read the bin:", error.message);
+      return;
+    }
+    this.trash = (data || []) as TrashEntry[];
+    this.saveKeyLocal("trash", this.trash);
+    this.triggerSyncChange();
+  }
+
   // --- DATABASE BACKUP & RESTORE ---
   public getBackupData() {
     return {
@@ -2411,6 +2906,9 @@ export class TailorDatabase {
       garmentCategories: this.garmentCategories,
       measurementTemplates: this.measurementTemplates,
       garmentCatalog: this.garmentCatalog,
+      // Binned records travel with the backup, complete with their deletion
+      // metadata and batch ids, so a restored backup still has its bin.
+      trash: this.trash,
       users: this.users,
       customers: this.customers,
       measurements: this.measurements,
@@ -2461,6 +2959,7 @@ export class TailorDatabase {
       if (Array.isArray(backup.attendance)) this.attendance = backup.attendance;
       if (Array.isArray(backup.advances)) this.advances = backup.advances;
       if (Array.isArray(backup.salaries)) this.salaries = backup.salaries;
+      if (Array.isArray(backup.trash)) this.trash = backup.trash;
 
       // Catalog, templates and categories are held outside `config` at runtime. Restoring
       // config alone used to leave the showroom with an empty garment catalog, so pull them
@@ -2823,12 +3322,25 @@ export class TailorDatabase {
    * local state too — previously they were only deleted in Supabase, so the next merge
    * re-uploaded the orphans.
    */
-  public deleteCustomer(id: string, options: { force?: boolean } = {}) {
+  /**
+   * Sends a customer to the bin along with everything that belongs to them.
+   *
+   * Nothing is destroyed: the records are snapshotted into `trash` first and can be
+   * restored as a group. The financial guard still applies, so a customer with
+   * recorded payments needs an explicit confirmation before even a reversible
+   * delete, and archiving remains the gentler option.
+   */
+  public async deleteCustomer(id: string, options: { force?: boolean } = {}): Promise<TrashOperationResult> {
     const impact = this.getCustomerDeletionImpact(id);
-    if (!impact.exists) return;
+    if (!impact.exists) return { success: false, error: "That customer no longer exists." };
     if (!impact.safeToDelete && !options.force) {
       throw new Error(impact.reason || "This customer cannot be deleted safely.");
     }
+    return this.moveToTrash("customers", id);
+  }
+
+  /** Physically removes a customer and their records. Only reachable from the bin. */
+  private hardDeleteCustomer(id: string) {
 
     const measurementIds = this.measurements.filter(m => m.customerId === id).map(m => m.id);
     const orderIds = this.orders.filter(o => o.customerId === id).map(o => o.id);
@@ -3717,12 +4229,21 @@ export class TailorDatabase {
    * Blocks by default when payments have been received against it; pass `force` to override
    * after the user has explicitly confirmed.
    */
-  public deleteOrder(id: string, options: { force?: boolean } = {}) {
+  /**
+   * Sends an order to the bin with its bill, trials and alterations, so the whole
+   * job can be brought back exactly as it was.
+   */
+  public async deleteOrder(id: string, options: { force?: boolean } = {}): Promise<TrashOperationResult> {
     const impact = this.getOrderDeletionImpact(id);
-    if (!impact.exists) return;
+    if (!impact.exists) return { success: false, error: "That order no longer exists." };
     if (!impact.safeToDelete && !options.force) {
       throw new Error(impact.reason || "This order cannot be deleted safely.");
     }
+    return this.moveToTrash("orders", id);
+  }
+
+  /** Physically removes an order and its linked records. Only reachable from the bin. */
+  private hardDeleteOrder(id: string) {
 
     const trialIds = this.trials.filter(t => t.orderId === id).map(t => t.id);
     const alterationIds = this.alterations.filter(alt => alt.orderId === id).map(alt => alt.id);
