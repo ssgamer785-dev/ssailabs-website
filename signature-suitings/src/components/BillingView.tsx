@@ -272,7 +272,7 @@ export default function BillingView({ initialCustomerId, initialOrderId }: Billi
     <div className="space-y-6 font-sans text-xs">
       
       {/* HEADER CARD */}
-      <div className="bg-white rounded-3xl border border-light shadow-sm p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 animate-fade-in">
+      <div className="bg-white rounded-3xl border border-light shadow-sm p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 animate-fade-in print:hidden">
         <div>
           <h1 className="text-2xl font-serif text-navy font-bold flex items-center gap-2">
             <Receipt className="w-5.5 h-5.5 text-gold" />
@@ -295,7 +295,7 @@ export default function BillingView({ initialCustomerId, initialOrderId }: Billi
       </div>
 
       {/* STATS KPIs OVERVIEW */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 print:hidden">
         <div className="bg-white rounded-3xl border border-light p-5 space-y-1">
           <span className="text-muted-grey uppercase text-[10px] font-bold tracking-wider">Total Invoiced Amount</span>
           <p className="font-serif font-bold text-navy text-xl">
@@ -317,7 +317,7 @@ export default function BillingView({ initialCustomerId, initialOrderId }: Billi
       </div>
 
       {/* LIST TABLE CONTAINER */}
-      <div className="bg-white rounded-3xl border border-light shadow-sm p-6 space-y-5">
+      <div className="bg-white rounded-3xl border border-light shadow-sm p-6 space-y-5 print:hidden">
         
         {/* Filters bar */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center bg-cream/35 p-4 rounded-2xl border border-light">
@@ -452,8 +452,8 @@ export default function BillingView({ initialCustomerId, initialOrderId }: Billi
           TAX INVOICE PRINT DIALOG PREVIEW (Section 8)
       ===================================================================== */}
       {isPrintReceiptOpen && activeInvoice && activeCustomer && (
-        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50 animate-fade-in text-xs font-sans">
-          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-2xl p-6 space-y-6">
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50 animate-fade-in text-xs font-sans print:p-0 print:bg-white print:static print:z-auto">
+          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-2xl p-6 space-y-6 print:p-0 print:shadow-none print:max-h-none print:overflow-visible print:border-0 print:rounded-none">
             
             <div className="flex justify-between items-center border-b border-light pb-3 print:hidden">
               <span className="font-serif font-bold text-navy text-sm">Tax Invoice Print Preview</span>
@@ -475,109 +475,133 @@ export default function BillingView({ initialCustomerId, initialOrderId }: Billi
             </div>
 
             {/* Print paper mockup */}
-            <div id="print-tax-invoice" className="bg-white border-2 border-charcoal/80 p-6 text-charcoal space-y-6 max-w-[210mm] mx-auto">
-              
+            <div id="print-tax-invoice" className="bg-white p-8 text-charcoal space-y-6 max-w-[210mm] mx-auto print:p-0">
+
               {/* Header Letterhead */}
-              <div className="text-center space-y-1 border-b-2 border-charcoal pb-4">
-                <h1 className="text-2xl font-serif font-black tracking-wider uppercase">SIGNATURE SUITINGS</h1>
-                <p className="text-[10px] font-sans font-bold tracking-widest text-charcoal/80">NEEL KANTH INDUSTRIES &bull; "THE SIGN OF COMFORT"</p>
-                <p className="text-[9px] text-charcoal/70">
-                  2, Tara Singh Avenue, Peer Dad Road, Jalandhar, Punjab, India &bull; Phones: 93572 51900, 95696 81900
-                </p>
-                <p className="text-[10px] font-mono font-bold uppercase text-navy pt-1.5">TAX GST INVOICE RECEIPT</p>
+              <div className="space-y-4 pb-5 border-b-2 border-gold/70">
+                <div className="grid grid-cols-2 gap-6 items-start">
+                  <div>
+                    <h1 className="text-[26px] leading-none font-serif font-black tracking-wide text-navy">SIGNATURE</h1>
+                    <p className="text-[11px] font-sans font-bold tracking-[0.25em] text-gold mt-1.5">SUITINGS &bull; SHOWROOM</p>
+                    <p className="text-[8px] font-sans font-semibold tracking-widest text-charcoal/50 mt-1.5 uppercase">Neel Kanth Industries &bull; "The Sign of Comfort"</p>
+                  </div>
+                  <div className="text-right space-y-0.5 text-[9px] text-charcoal/65 leading-relaxed">
+                    <p>2, Tara Singh Avenue, Peer Dad Road,</p>
+                    <p>Jalandhar, Punjab, India</p>
+                    <p className="font-semibold text-charcoal/80 pt-0.5">Ph: 93572 51900 &bull; 95696 81900</p>
+                  </div>
+                </div>
+                <p className="text-center text-[11px] font-sans font-bold uppercase tracking-[0.35em] text-navy">Tax Invoice Receipt</p>
               </div>
 
-              {/* Patient details block equivalent */}
-              <div className="grid grid-cols-2 gap-4 text-[10px] border-b border-charcoal/50 pb-3">
-                <div className="space-y-1">
-                  <p><b>Invoice No:</b> {activeInvoice.invoiceNumber}</p>
-                  <p><b>Billing Date:</b> {new Date(activeInvoice.issuedDate).toLocaleDateString("en-IN")}</p>
-                  {activeOrder && <p><b>Custom Order:</b> {activeOrder.orderNumber}</p>}
+              {/* Invoice + customer metadata */}
+              <div className="grid grid-cols-2 gap-6 text-[10px] pb-5 border-b border-light">
+                <div className="space-y-1.5 leading-relaxed">
+                  <p><span className="text-charcoal/50 font-semibold">Invoice No.</span> <b className="text-navy">{activeInvoice.invoiceNumber}</b></p>
+                  <p><span className="text-charcoal/50 font-semibold">Billing Date</span> <b>{new Date(activeInvoice.invoiceDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</b></p>
+                  {activeOrder && <p><span className="text-charcoal/50 font-semibold">Custom Order</span> <b className="text-gold">{activeOrder.orderNumber}</b></p>}
                 </div>
-                <div className="space-y-1 text-right">
-                  <p><b>Customer:</b> {activeCustomer.fullName}</p>
-                  <p><b>Mobile:</b> {activeCustomer.mobileNumber}</p>
-                  <p><b>Address:</b> {activeCustomer.address || "Collection Showroom"}</p>
+                <div className="space-y-1.5 leading-relaxed text-right">
+                  <p><span className="text-charcoal/50 font-semibold">Customer</span> <b className="text-navy">{activeCustomer.fullName}</b></p>
+                  <p><span className="text-charcoal/50 font-semibold">Mobile</span> <b>{activeCustomer.mobileNumber}</b></p>
+                  <p><span className="text-charcoal/50 font-semibold">Address</span> <b>{activeCustomer.address || "Collection Showroom"}</b></p>
                 </div>
               </div>
 
               {/* Items Line list */}
-              <table className="w-full text-left text-[11px] border-collapse">
-                <thead>
-                  <tr className="bg-charcoal/5 text-navy font-bold border-b border-charcoal">
-                    <th className="p-2">Item Description</th>
-                    <th className="p-2 text-center">Qty</th>
-                    <th className="p-2 text-right">Unit Rate</th>
-                    <th className="p-2 text-right">Net Subtotal</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-charcoal/20">
-                  {activeInvoice.lineItems.map((item, i) => (
-                    <tr key={i}>
-                      <td className="p-2 font-semibold">{item.description}</td>
-                      <td className="p-2 text-center font-mono">{item.quantity}</td>
-                      <td className="p-2 text-right font-mono">₹{item.rate.toLocaleString("en-IN")}</td>
-                      <td className="p-2 text-right font-mono">₹{item.amount.toLocaleString("en-IN")}</td>
+              <div className="border border-light rounded-xl overflow-hidden">
+                <table className="w-full text-left text-[10.5px] border-collapse">
+                  <thead>
+                    <tr className="bg-navy text-white border-b-2 border-gold">
+                      <th className="py-2.5 px-3 font-bold text-[9px] uppercase tracking-wider w-8">#</th>
+                      <th className="py-2.5 px-3 font-bold text-[9px] uppercase tracking-wider">Item Description</th>
+                      <th className="py-2.5 px-3 font-bold text-[9px] uppercase tracking-wider text-center w-14">Qty</th>
+                      <th className="py-2.5 px-3 font-bold text-[9px] uppercase tracking-wider text-right w-24">Unit Price</th>
+                      <th className="py-2.5 px-3 font-bold text-[9px] uppercase tracking-wider text-right w-28">Amount</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-light">
+                    {activeInvoice.lineItems.map((item, i) => (
+                      <tr key={i}>
+                        <td className="py-2.5 px-3 font-mono text-charcoal/45">{i + 1}</td>
+                        <td className="py-2.5 px-3 font-semibold text-charcoal">{item.description}</td>
+                        <td className="py-2.5 px-3 text-center font-mono text-charcoal/75">{item.quantity}</td>
+                        <td className="py-2.5 px-3 text-right font-mono text-charcoal/75">₹{item.rate.toLocaleString("en-IN")}</td>
+                        <td className="py-2.5 px-3 text-right font-mono font-bold text-navy">₹{item.amount.toLocaleString("en-IN")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-              {/* Financial math summary */}
-              <div className="border-t border-charcoal/50 pt-3 flex justify-end">
-                <div className="w-64 space-y-1.5 text-[10px] font-sans font-semibold text-charcoal/90">
-                  <div className="flex justify-between">
-                    <span>Subtotal:</span>
-                    <span>₹{activeInvoice.subtotal.toLocaleString("en-IN")}</span>
+              {/* Inclusive-of-taxes indicator */}
+              <div className="flex items-start gap-3 bg-cream/60 border border-gold/40 rounded-xl px-4 py-3 print:break-inside-avoid">
+                <div className="w-5 h-5 rounded-full bg-gold flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <Check className="w-3 h-3 text-white" strokeWidth={3} />
+                </div>
+                <div>
+                  <p className="font-bold text-navy text-[10px] uppercase tracking-wider">Inclusive of Taxes</p>
+                  <p className="text-charcoal/60 text-[9px] mt-0.5">Prices shown are inclusive of applicable taxes.</p>
+                </div>
+              </div>
+
+              {/* Financial totals summary */}
+              <div className="flex justify-end print:break-inside-avoid">
+                <div className="w-full sm:w-72 space-y-2">
+                  <div className="flex justify-between text-[10px] text-charcoal/70">
+                    <span>Subtotal</span>
+                    <span className="font-mono">₹{activeInvoice.subtotal.toLocaleString("en-IN")}</span>
                   </div>
-                  <div className="flex justify-between text-amber-700">
-                    <span>Discount Deduction:</span>
-                    <span>-₹{activeInvoice.discount.toLocaleString("en-IN")}</span>
+                  <div className="flex justify-between text-[10px] text-charcoal/70">
+                    <span>Discount</span>
+                    <span className="font-mono">-₹{activeInvoice.discount.toLocaleString("en-IN")}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span>CGST/SGST Taxes ({activeInvoice.taxPercent}%):</span>
-                    <span>₹{activeInvoice.taxAmount.toLocaleString("en-IN")}</span>
+                  <div className="h-px bg-gold/50" />
+                  <div className="flex justify-between items-baseline py-0.5">
+                    <span className="font-bold text-navy text-[10.5px] uppercase tracking-wide">
+                      Total Amount <span className="font-semibold normal-case text-charcoal/45 text-[8px]">(Incl. of Taxes)</span>
+                    </span>
+                    <span className="font-mono font-black text-navy text-base">₹{activeInvoice.grandTotal.toLocaleString("en-IN")}</span>
                   </div>
-                  <div className="flex justify-between text-navy border-t border-charcoal/40 pt-1.5 font-bold text-xs">
-                    <span>Grand Total Due:</span>
-                    <span>₹{activeInvoice.grandTotal.toLocaleString("en-IN")}</span>
-                  </div>
-                  <div className="flex justify-between text-green-700">
-                    <span>Deposits Received:</span>
-                    <span>₹{activeInvoice.advancePaid.toLocaleString("en-IN")}</span>
-                  </div>
-                  <div className="flex justify-between text-red-600 border-t border-charcoal/30 pt-1 font-bold">
-                    <span>Outstanding Balance:</span>
-                    <span>₹{activeInvoice.balanceDue.toLocaleString("en-IN")}</span>
+                  <div className="pt-2 space-y-1.5 border-t border-light">
+                    <div className="flex justify-between text-[10px] font-semibold text-green-700">
+                      <span>Deposits Received</span>
+                      <span className="font-mono">₹{activeInvoice.advancePaid.toLocaleString("en-IN")}</span>
+                    </div>
+                    <div className={`flex justify-between text-[11px] font-bold ${activeInvoice.balanceDue > 0 ? "text-red-600" : "text-green-700"}`}>
+                      <span>Outstanding Balance</span>
+                      <span className="font-mono">₹{activeInvoice.balanceDue.toLocaleString("en-IN")}</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Transactions log ledger list */}
               {activeInvoice.payments && activeInvoice.payments.length > 0 && (
-                <div className="border border-charcoal/45 rounded-lg p-2.5 space-y-1.5 text-[9px]">
-                  <p className="font-bold uppercase tracking-wider text-navy">Chronological Payments Log Ledger</p>
-                  <div className="space-y-1 font-mono">
+                <div className="border border-light rounded-xl p-3.5 space-y-2 print:break-inside-avoid">
+                  <p className="font-bold uppercase tracking-widest text-navy text-[9px]">Payment Log</p>
+                  <div className="space-y-1.5">
                     {activeInvoice.payments.map((pmt, i) => (
-                      <div key={i} className="flex justify-between">
-                        <span>{new Date(pmt.date).toLocaleDateString()} &bull; Deposited via {pmt.mode}</span>
-                        <span className="font-bold">₹{pmt.amount.toLocaleString("en-IN")}</span>
+                      <div key={i} className="flex justify-between text-[9.5px] text-charcoal/70">
+                        <span>{new Date(pmt.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} &bull; Deposited via {pmt.mode}</span>
+                        <span className="font-mono font-bold text-charcoal">₹{pmt.amount.toLocaleString("en-IN")}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* Receipts Disclaimer & signatures (Section 8.1 / Section 1.1) */}
-              <div className="border-t-2 border-charcoal pt-6 mt-4 grid grid-cols-2 gap-4 text-[9px] font-sans font-semibold text-charcoal/90">
-                <div className="space-y-1.5">
-                  <p className="leading-relaxed">No responsibility of clothes after one month from the date of delivery. E. & O.E.</p>
-                  <p className="text-[7px] text-charcoal/60">Signature Suitings &bull; Jalandhar City Showroom</p>
+              {/* Disclaimer & signature */}
+              <div className="pt-5 mt-1 border-t-2 border-gold/70 grid grid-cols-2 gap-6 items-end print:break-inside-avoid">
+                <div className="space-y-2 text-[8.5px] text-charcoal/55 leading-relaxed">
+                  <p>No responsibility of clothes after one month from the date of delivery. E. &amp; O.E.</p>
+                  <p className="font-semibold text-charcoal/65">Signature Suitings &bull; Jalandhar City Showroom</p>
+                  <p className="italic text-charcoal/45 pt-1">Thank you for choosing Signature Suitings.<br />We appreciate your trust.</p>
                 </div>
-                <div className="flex flex-col justify-end items-end h-16 pt-4">
-                  <span className="border-t border-charcoal/60 w-36 text-center text-[9px] uppercase tracking-wider text-charcoal/80 pt-1">
-                    Authorised Signature
-                  </span>
+                <div className="flex flex-col items-end">
+                  <div className="w-36 border-t border-charcoal/50 pt-1.5 text-center">
+                    <span className="text-[8.5px] uppercase tracking-widest text-charcoal/60">Authorised Signature</span>
+                  </div>
                 </div>
               </div>
 

@@ -52,6 +52,22 @@ html, body, button, input, select, textarea, optgroup, table, th, td, h1, h2, h3
     width: 100% !important;
     max-width: 100% !important;
   }
+  /* Browsers strip background colors by default when printing. The invoice's dark
+     table header and gold accents are deliberate branding, not filler, so opt them
+     back in explicitly rather than losing white-on-navy text to white-on-white. */
+  #print-tax-invoice, #print-tax-invoice * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  #print-tax-invoice table {
+    break-inside: auto;
+  }
+  #print-tax-invoice tr {
+    break-inside: avoid;
+  }
+  #print-tax-invoice thead {
+    display: table-header-group;
+  }
 }
 
 /* Animations */
