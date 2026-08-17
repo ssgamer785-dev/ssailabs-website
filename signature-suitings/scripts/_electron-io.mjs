@@ -4,19 +4,11 @@
 // what is unproven under Electron is whether a blob download reaches disk and
 // whether <input type=file> is wired to a real dialog.
 //
-// CURRENT RESULT: the blob download FAILS — zero files reach disk. backupEngine's
-// triggerFileDownload() builds an <a download> pointing at a blob: URL and clicks
-// it, which works in a browser but produces nothing under Electron's file:// origin.
-// In a packaged build that means "Export Full Backup" appears to run and silently
-// writes no file.
-//
-// PROPOSED FIX (designed, NOT yet implemented or tested): stop loading the renderer
-// over file:// and serve dist from a registered privileged scheme instead —
-// protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard:
-// true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true }}])
-// plus protocol.handle('app', ...) and loadURL('app://bundle/index.html'). A normal
-// secure origin restores standard download behaviour. This is packaging-layer only;
-// it needs no change to application source.
+// HISTORY: an earlier version of this file reported that blob downloads produced
+// zero files and concluded Electron was dropping them. That was wrong — the fault
+// was in the harness, not the app (see the note on app.evaluate and require()
+// below). scripts/_dl-diag.mjs settled it: the main process does receive the
+// download, with the correct filename.
 import { _electron as electron } from 'playwright-core';
 import { existsSync, readdirSync, rmSync, mkdirSync, statSync } from 'node:fs';
 
@@ -30,9 +22,14 @@ rmSync(`${process.env.HOME}/.config/Signature Suitings`, { recursive: true, forc
 
 const app = await electron.launch({ args: ['.', '--no-sandbox'], cwd: '/home/user/ssailabs-website/signature-suitings' });
 
+// Bypass the Save dialog by choosing the path up front. NOTE: no require() in
+// here — app.evaluate runs the function in the main process but does not give it
+// module scope, so a require() call throws, setSavePath never runs, and Electron
+// falls back to the dialog (which hangs headless and looks exactly like "the
+// download silently failed"). Build the path with plain string concatenation.
 await app.evaluate(async ({ session }, dir) => {
   session.defaultSession.on('will-download', (_e, item) => {
-    item.setSavePath(require('node:path').join(dir, item.getFilename()));
+    item.setSavePath(`${dir}/${item.getFilename()}`);
   });
 }, DL);
 

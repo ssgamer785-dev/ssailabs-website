@@ -6,8 +6,9 @@
  * renderer is the same bundle the browser build produces, talking to the same
  * Supabase project, with the same LocalStorage cache underneath it.
  */
-const { app, BrowserWindow, shell, Menu, dialog, session, net } = require("electron");
+const { app, BrowserWindow, shell, Menu, dialog, session, net, protocol } = require("electron");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 // Shown in the window title bar, the Windows task bar, and %APPDATA%.
 app.setName("Signature Suitings");
@@ -18,6 +19,63 @@ app.setPath("userData", path.join(app.getPath("appData"), "Signature Suitings"))
 
 const isDev = !app.isPackaged;
 let mainWindow = null;
+
+// ---------------------------------------------------------------------------
+// Renderer origin.
+//
+// The renderer used to be loaded with loadFile(), i.e. from file://. That works
+// for displaying the app but quietly breaks saving one: Chromium does not treat
+// file:// as a normal origin, and a download started the way the backup engine
+// starts one — build a Blob, point an <a download> at its blob: URL, click it —
+// never reaches disk. Measured under file://: "Export Full Backup" ran to
+// completion and wrote zero bytes anywhere, with no error shown to the user.
+//
+// So the bundle is served over a registered privileged scheme instead. Declaring
+// it standard + secure gives the renderer an ordinary web origin, which restores
+// normal download behaviour (and normal storage/fetch semantics) without giving
+// the page any additional privilege: still sandboxed, still no Node integration,
+// still no filesystem API exposed to the renderer.
+// ---------------------------------------------------------------------------
+const APP_SCHEME = "app";
+const APP_ORIGIN = `${APP_SCHEME}://bundle`;
+const RENDERER_ROOT = path.join(__dirname, "..", "dist");
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: APP_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true
+    }
+  }
+]);
+
+function registerRendererProtocol() {
+  protocol.handle(APP_SCHEME, async request => {
+    let relative;
+    try {
+      relative = decodeURIComponent(new URL(request.url).pathname);
+    } catch (err) {
+      return new Response("Bad request", { status: 400 });
+    }
+    if (!relative || relative === "/") relative = "/index.html";
+
+    const resolved = path.normalize(path.join(RENDERER_ROOT, relative));
+    // Never serve anything outside the bundled renderer directory.
+    if (resolved !== RENDERER_ROOT && !resolved.startsWith(RENDERER_ROOT + path.sep)) {
+      return new Response("Not found", { status: 404 });
+    }
+
+    try {
+      return await net.fetch(pathToFileURL(resolved).toString());
+    } catch (err) {
+      return new Response("Not found", { status: 404 });
+    }
+  });
+}
 
 // Web fonts, and why they are gated below.
 //
@@ -49,6 +107,43 @@ function probeFontsReachable(timeoutMs = 1500) {
       clearTimeout(timer);
       finish(false);
     }
+  });
+}
+
+// Downloads (backup export).
+//
+// The renderer asks for a save by clicking an <a download>; nothing here reaches
+// back into the page. All this does is give the Save dialog a sensible starting
+// folder and filename, and surface a failed write instead of letting it pass
+// silently — a backup the owner believes they took but which never landed is the
+// worst possible outcome for this feature.
+function configureDownloads() {
+  session.defaultSession.on("will-download", (_event, item) => {
+    const suggested = item.getFilename();
+    item.setSaveDialogOptions({
+      title: "Save Signature Suitings backup",
+      defaultPath: path.join(app.getPath("downloads"), suggested),
+      filters: [
+        { name: "Signature Suitings backup", extensions: ["backup"] },
+        { name: "All files", extensions: ["*"] }
+      ]
+    });
+
+    item.once("done", (_e, state) => {
+      if (state === "completed") {
+        console.log(`[download] saved ${item.getSavePath()}`);
+        return;
+      }
+      if (state === "cancelled") {
+        console.log("[download] cancelled by the user");
+        return;
+      }
+      dialog.showErrorBox(
+        "Backup not saved",
+        `"${suggested}" could not be written to disk (${state}).\n\n` +
+        `Nothing has been backed up. Try again, and choose a folder you can write to.`
+      );
+    });
   });
 }
 
@@ -110,10 +205,11 @@ function createWindow() {
   if (isDev && process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
-    // The renderer is the production Vite build. It is built with a relative
-    // base (see the electron:build script) so its asset URLs resolve under
-    // file://, which is what makes the packaged app work offline.
-    mainWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"));
+    // The renderer is the production Vite build, served over the app:// scheme
+    // registered above. It is built with a relative base (see build:electron) so
+    // its asset URLs resolve against this origin, and everything is read from the
+    // local bundle — no network needed to start.
+    mainWindow.loadURL(`${APP_ORIGIN}/index.html`);
   }
 
   mainWindow.on("closed", () => {
@@ -165,8 +261,11 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(async () => {
-    // Must run before the first window loads, otherwise the hang described above
-    // happens on that very first load.
+    // All three must run before the first window loads: the protocol has to exist
+    // before anything is served from it, and the font gate has to be in place
+    // before that first load or the hang described above happens on it.
+    registerRendererProtocol();
+    configureDownloads();
     await configureWebFonts();
     buildMenu();
     createWindow();

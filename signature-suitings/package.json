@@ -2,6 +2,8 @@
   "name": "react-example",
   "private": true,
   "version": "1.0.0",
+  "description": "Signature Suitings — bespoke showroom and tailoring management suite",
+  "author": "Signature Suitings • Jalandhar City Showroom",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {

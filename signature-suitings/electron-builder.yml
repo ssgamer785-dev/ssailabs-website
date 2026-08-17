@@ -8,6 +8,13 @@ appId: com.signaturesuitings.showroom
 productName: Signature Suitings
 copyright: Signature Suitings • Jalandhar City Showroom
 
+# No auto-update server. Without this, electron-builder still writes both
+# artifacts and then fails while generating update metadata it has nowhere to
+# publish to ("Cannot read properties of null (reading 'provider')"), which turns
+# a successful build into a non-zero exit. The showroom installs from a file, so
+# there is nothing to publish.
+publish: null
+
 directories:
   output: release
   buildResources: electron/icons
