@@ -72,7 +72,6 @@ export default function BillingView({ initialCustomerId, initialOrderId }: Billi
     { name: "Bespoke Suit (Three-Piece)", price: 45000, qty: 1 }
   ]);
   const [formDiscount, setFormDiscount] = useState<number>(0);
-  const [formTax, setFormTax] = useState<number>(5); // 5% GST standard
   const [formInitialPaid, setFormInitialPaid] = useState<number>(20000); // 50% deposit norm
 
   // --- RECORD PAYMENT STATE ---
@@ -90,12 +89,14 @@ export default function BillingView({ initialCustomerId, initialOrderId }: Billi
     return db.onSync(refreshDb);
   }, []);
 
-  // Calculations for current form
+  // Calculations for current form.
+  // Prices entered here are TAX-INCLUSIVE, so no tax is added on top: the grand total is
+  // simply the subtotal less any discount. Invoices are still stored with taxPercent /
+  // taxAmount columns (0 for anything issued here) because older invoices may carry real
+  // values in them, and those are read back and printed as-is rather than recalculated.
   const subtotal = formItems.reduce((acc, item) => acc + (item.price * item.qty), 0);
   const discountVal = (subtotal * formDiscount) / 100;
-  const taxableVal = subtotal - discountVal;
-  const taxVal = (taxableVal * formTax) / 100;
-  const finalTotal = taxableVal + taxVal;
+  const finalTotal = Math.max(0, subtotal - discountVal);
   const finalBalance = finalTotal - formInitialPaid;
 
   // Invoice detailed selectors
@@ -187,8 +188,9 @@ export default function BillingView({ initialCustomerId, initialOrderId }: Billi
         })),
         subtotal: subtotal,
         discount: discountVal,
-        taxPercent: formTax,
-        taxAmount: taxVal,
+        // Tax-inclusive pricing: nothing is added on top of the entered amounts.
+        taxPercent: 0,
+        taxAmount: 0,
         grandTotal: finalTotal,
         advancePaid: formInitialPaid,
         paymentMode: "UPI"
@@ -775,29 +777,20 @@ export default function BillingView({ initialCustomerId, initialOrderId }: Billi
               </div>
 
               {/* Financial Metrics Split */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="font-semibold text-navy">Discount (%)</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     value={formDiscount}
                     onChange={(e) => setFormDiscount(Number(e.target.value))}
                     className="w-full bg-white px-3 py-2 border border-light rounded-lg focus:outline-hidden font-mono"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="font-semibold text-navy">Tax GST (%)</label>
-                  <input 
-                    type="number" 
-                    value={formTax}
-                    onChange={(e) => setFormTax(Number(e.target.value))}
-                    className="w-full bg-white px-3 py-2 border border-light rounded-lg focus:outline-hidden font-mono"
-                  />
-                </div>
-                <div className="space-y-1">
                   <label className="font-semibold text-navy">Deposit Deposit (₹)</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     value={formInitialPaid}
                     onChange={(e) => setFormInitialPaid(Number(e.target.value))}
                     className="w-full bg-white px-3 py-2 border border-light rounded-lg focus:outline-hidden font-mono text-green-700 font-bold"
@@ -815,13 +808,12 @@ export default function BillingView({ initialCustomerId, initialOrderId }: Billi
                   <span>Discount ({formDiscount}%):</span>
                   <span>-₹{discountVal.toLocaleString("en-IN")}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>CGST/SGST Taxes ({formTax}%):</span>
-                  <span>₹{taxVal.toLocaleString("en-IN")}</span>
-                </div>
                 <div className="flex justify-between border-t border-light pt-1.5 text-navy font-bold text-xs">
                   <span>Grand Total Bill:</span>
                   <span>₹{finalTotal.toLocaleString("en-IN")}</span>
+                </div>
+                <div className="flex justify-end text-charcoal/50 text-[9px] font-sans -mt-0.5">
+                  <span>Inclusive of applicable taxes</span>
                 </div>
                 <div className="flex justify-between text-green-700">
                   <span>Initial Deposit:</span>
