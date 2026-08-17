@@ -1,0 +1,53 @@
+# electron-builder configuration for the Signature Suitings Windows desktop build.
+#
+# This packages the EXISTING production Vite build. It does not alter the
+# application: `dist` is produced by the same `vite build` the web deployment
+# uses (only with a relative asset base so it resolves under file://).
+
+appId: com.signaturesuitings.showroom
+productName: Signature Suitings
+copyright: Signature Suitings • Jalandhar City Showroom
+
+directories:
+  output: release
+  buildResources: electron/icons
+
+# Whitelist, not blacklist. Only the compiled renderer and the Electron wrapper
+# are shipped. Source, scripts, SQL migrations and — importantly — .env.local
+# are therefore never placed inside the installer. The Supabase URL and anon key
+# the renderer needs are already inlined into dist by Vite at build time, which
+# is exactly how the browser production build receives them.
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+
+# Belt and braces: even if the patterns above were widened later, never let
+# environment files or local keys into a shipped package.
+extraMetadata:
+  name: signature-suitings
+asarUnpack: []
+
+win:
+  icon: electron/icons/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+
+nsis:
+  oneClick: false                     # show a real installer with options
+  perMachine: false                   # install per-user; no admin prompt needed
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Signature Suitings
+  installerIcon: electron/icons/icon.ico
+  uninstallerIcon: electron/icons/icon.ico
+  installerHeaderIcon: electron/icons/icon.ico
+  artifactName: ${productName}-Setup-${version}.${ext}
+
+portable:
+  artifactName: ${productName}-Portable-${version}.${ext}
