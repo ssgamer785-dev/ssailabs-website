@@ -1,7 +1,10 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppStateProvider } from './lib/app-state';
+import { AuthProvider } from './lib/auth-context';
+import { RequireAuth, RedirectIfAuthed } from './components/RequireAuth';
 import { SplashScreen } from './screens/SplashScreen';
 import { LoginScreen } from './screens/LoginScreen';
+import { SignupScreen } from './screens/SignupScreen';
 import { HomeScreen } from './screens/HomeScreen';
 import { CommunityPage } from './screens/CommunityPage';
 import { CreatePostScreen } from './screens/CreatePostScreen';
@@ -18,28 +21,31 @@ import { CommunityAdminPreviewScreen, CommunityMemberPreviewScreen } from './scr
 
 export default function App() {
   return (
-    <AppStateProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<SplashScreen />} />
-          <Route path="/login" element={<LoginScreen />} />
-          <Route path="/home" element={<HomeScreen />} />
-          <Route path="/community" element={<CommunityPage />} />
-          <Route path="/community/admin-view" element={<CommunityAdminPreviewScreen />} />
-          <Route path="/community/member-view" element={<CommunityMemberPreviewScreen />} />
-          <Route path="/create-post" element={<CreatePostScreen />} />
-          <Route path="/calculator" element={<RiskCalculatorScreen />} />
-          <Route path="/news" element={<MarketNewsScreen />} />
-          <Route path="/chat" element={<ChatListScreen />} />
-          <Route path="/chat/admin" element={<AdminChatScreen />} />
-          <Route path="/profile" element={<ProfileScreen />} />
-          <Route path="/profile/name-visibility" element={<NameVisibilityScreen />} />
-          <Route path="/analysis" element={<AnalysisDetailScreen />} />
-          <Route path="/notifications" element={<NotificationsScreen />} />
-          <Route path="/admin-inbox" element={<AdminInboxScreen />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
-    </AppStateProvider>
+    <AuthProvider>
+      <AppStateProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<SplashScreen />} />
+            <Route path="/login" element={<RedirectIfAuthed><LoginScreen /></RedirectIfAuthed>} />
+            <Route path="/signup" element={<RedirectIfAuthed><SignupScreen /></RedirectIfAuthed>} />
+            <Route path="/home" element={<RequireAuth><HomeScreen /></RequireAuth>} />
+            <Route path="/community" element={<RequireAuth><CommunityPage /></RequireAuth>} />
+            <Route path="/community/admin-view" element={<RequireAuth><CommunityAdminPreviewScreen /></RequireAuth>} />
+            <Route path="/community/member-view" element={<RequireAuth><CommunityMemberPreviewScreen /></RequireAuth>} />
+            <Route path="/create-post" element={<RequireAuth><CreatePostScreen /></RequireAuth>} />
+            <Route path="/calculator" element={<RequireAuth><RiskCalculatorScreen /></RequireAuth>} />
+            <Route path="/news" element={<RequireAuth><MarketNewsScreen /></RequireAuth>} />
+            <Route path="/chat" element={<RequireAuth><ChatListScreen /></RequireAuth>} />
+            <Route path="/chat/admin" element={<RequireAuth><AdminChatScreen /></RequireAuth>} />
+            <Route path="/profile" element={<RequireAuth><ProfileScreen /></RequireAuth>} />
+            <Route path="/profile/name-visibility" element={<RequireAuth><NameVisibilityScreen /></RequireAuth>} />
+            <Route path="/analysis" element={<RequireAuth><AnalysisDetailScreen /></RequireAuth>} />
+            <Route path="/notifications" element={<RequireAuth><NotificationsScreen /></RequireAuth>} />
+            <Route path="/admin-inbox" element={<RequireAuth><AdminInboxScreen /></RequireAuth>} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </AppStateProvider>
+    </AuthProvider>
   );
 }

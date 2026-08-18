@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { useAppState, initials } from '../lib/app-state';
+import { useAuth } from '../lib/auth-context';
 import { StatusBar } from '../components/StatusBar';
 import { PhoneShell } from '../components/PhoneShell';
 
@@ -22,7 +23,13 @@ const rowIcon = css('flex:none');
 export function ProfileScreen() {
   const navigate = useNavigate();
   const { userName, reveal } = useAppState();
+  const { signOut } = useAuth();
   const myIdentity = reveal ? userName : 'Unknown User';
+
+  async function handleLogout() {
+    await signOut();
+    navigate('/login', { replace: true });
+  }
 
   return (
     <PhoneShell>
@@ -60,7 +67,7 @@ export function ProfileScreen() {
         <div style={css('height:1px;background:#F1F4F9;margin:0 22px')} />
       </div>
       <div style={css('flex:none;padding:0 20px 40px')}>
-        <Hoverable onClick={() => navigate('/login')} style={css('height:50px;border-radius:12px;background:#FEF2F3;border:1px solid #FBD5D9;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#EF4444;cursor:pointer')} hoverStyle={css('background:#FDE7E9')}>
+        <Hoverable onClick={handleLogout} style={css('height:50px;border-radius:12px;background:#FEF2F3;border:1px solid #FBD5D9;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#EF4444;cursor:pointer')} hoverStyle={css('background:#FDE7E9')}>
           Logout
         </Hoverable>
       </div>

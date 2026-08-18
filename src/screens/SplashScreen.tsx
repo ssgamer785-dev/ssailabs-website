@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { makeRand } from '../lib/rng';
+import { useAuth } from '../lib/auth-context';
 import { StatusBar } from '../components/StatusBar';
 import { PhoneShell } from '../components/PhoneShell';
 import logo from '../assets/traders-planet-logo.jpg';
@@ -28,16 +29,23 @@ function SplashCandles() {
 
 export function SplashScreen() {
   const navigate = useNavigate();
+  const { session, loading } = useAuth();
 
   useEffect(() => {
-    const t = setTimeout(() => navigate('/login'), 2200);
+    if (loading) return;
+    const t = setTimeout(() => navigate(session ? '/home' : '/login', { replace: true }), 2200);
     return () => clearTimeout(t);
-  }, [navigate]);
+  }, [navigate, session, loading]);
+
+  function goNext() {
+    if (loading) return;
+    navigate(session ? '/home' : '/login', { replace: true });
+  }
 
   return (
     <PhoneShell>
       <StatusBar />
-      <div style={css('flex:1;position:relative;overflow:hidden;background:#FCFDFF;cursor:pointer')} onClick={() => navigate('/login')}>
+      <div style={css('flex:1;position:relative;overflow:hidden;background:#FCFDFF;cursor:pointer')} onClick={goNext}>
         <div style={css('position:absolute;right:-190px;top:-150px;width:520px;height:520px;border-radius:50%;background:radial-gradient(circle,rgba(11,95,239,.11),rgba(11,95,239,0) 68%)')} />
         <div style={css('position:absolute;left:-150px;top:170px;width:520px;height:560px;border-radius:50%;background:radial-gradient(circle,rgba(11,95,239,.07),rgba(11,95,239,0) 66%)')} />
         <div style={css('position:absolute;left:0;right:0;top:142px;display:flex;flex-direction:column;align-items:center;gap:26px')}>
