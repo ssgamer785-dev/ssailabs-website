@@ -171,7 +171,18 @@ END $$;
 COMMIT;
 
 -- ---------------------------------------------------------------------
--- 6. Report
+-- 6. Reload the PostgREST schema cache
+--
+--    PostgREST answers from a cached picture of the schema. A table it has
+--    not seen yet produces "Could not find the table 'public.trash' in the
+--    schema cache" even though the table now exists. Supabase usually
+--    reloads on its own via an event trigger; this makes it immediate and
+--    is harmless if the reload has already happened.
+-- ---------------------------------------------------------------------
+NOTIFY pgrst, 'reload schema';
+
+-- ---------------------------------------------------------------------
+-- 7. Report
 -- ---------------------------------------------------------------------
 SELECT
   (SELECT count(*) FROM information_schema.tables
