@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #EEF1F7;
+  font-family: -apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+input, textarea {
+  font-family: inherit;
+  border: 0;
+  background: transparent;
+  outline: none;
+  color: #0F172A;
+}
+
+input::placeholder, textarea::placeholder {
+  color: #A6AEBC;
+}
+
+textarea {
+  resize: none;
+}
+
+/* On real phone-width viewports, drop the device bezel and fill the screen edge to edge. */
+@media (max-width: 480px) {
+  .phone-viewport {
+    padding: 0 !important;
+  }
+  .phone-frame {
+    width: 100vw !important;
+    height: 100dvh !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+}
