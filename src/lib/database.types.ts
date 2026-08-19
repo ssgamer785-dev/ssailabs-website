@@ -59,6 +59,11 @@ export interface Database {
           display_name: string;
           created_at: string;
           updated_at: string;
+          storage_key: string | null;
+          mime_type: string | null;
+          size_bytes: number | null;
+          file_name: string | null;
+          media_purged: boolean;
         };
         Insert: {
           author_id: string;
@@ -73,6 +78,10 @@ export interface Database {
           attachment_url?: string | null;
           chart_seed?: number | null;
           is_anonymous?: boolean;
+          storage_key?: string | null;
+          mime_type?: string | null;
+          size_bytes?: number | null;
+          file_name?: string | null;
         };
         Update: {
           title?: string | null;
@@ -85,6 +94,10 @@ export interface Database {
           attachment_url?: string | null;
           chart_seed?: number | null;
           is_anonymous?: boolean;
+          storage_key?: string | null;
+          mime_type?: string | null;
+          size_bytes?: number | null;
+          file_name?: string | null;
         };
         Relationships: [];
       };
@@ -99,6 +112,7 @@ export interface Database {
           is_anonymous: boolean;
           display_name: string;
           created_at: string;
+          client_id: string | null;
         };
         Insert: {
           post_id: string;
@@ -107,6 +121,7 @@ export interface Database {
           voice_url?: string | null;
           voice_duration_seconds?: number | null;
           is_anonymous?: boolean;
+          client_id?: string | null;
         };
         Update: {
           body?: string | null;
@@ -234,6 +249,61 @@ export interface Database {
           last_message_at: string;
           last_message_preview: string | null;
         }[];
+      };
+      posts_feed: {
+        Args: { p_channel: PostChannel; p_before?: string | null; p_limit?: number };
+        Returns: {
+          id: string;
+          author_id: string;
+          channel: PostChannel;
+          title: string | null;
+          body: string | null;
+          instrument: string | null;
+          entry_price: number | null;
+          stop_loss: number | null;
+          take_profit: number | null;
+          attachment: AttachmentKind;
+          storage_key: string | null;
+          mime_type: string | null;
+          size_bytes: number | null;
+          file_name: string | null;
+          media_purged: boolean;
+          chart_seed: number | null;
+          is_anonymous: boolean;
+          display_name: string;
+          created_at: string;
+          updated_at: string;
+          author_name: string;
+          author_role: UserRole | null;
+          is_mine: boolean;
+          like_count: number;
+          comment_count: number;
+          liked_by_me: boolean;
+        }[];
+      };
+      post_comments: {
+        Args: { p_post_id: string; p_before?: string | null; p_limit?: number };
+        Returns: {
+          id: string;
+          post_id: string;
+          author_id: string;
+          body: string | null;
+          voice_url: string | null;
+          voice_duration_seconds: number | null;
+          is_anonymous: boolean;
+          display_name: string;
+          created_at: string;
+          author_name: string;
+          is_mine: boolean;
+        }[];
+      };
+      my_unread_notification_count: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
+      mark_all_notifications_read: {
+        Args: Record<string, never>;
+        Returns: number;
       };
     };
     Enums: {

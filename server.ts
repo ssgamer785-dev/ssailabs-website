@@ -4,6 +4,7 @@ import { createServer as createViteServer } from "vite";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 import { chatMediaRouter } from "./server/chat-media";
+import { postMediaRouter } from "./server/post-media";
 
 dotenv.config();
 
@@ -14,6 +15,8 @@ app.use(express.json());
 
 // Cloudflare R2-backed chat attachments (signed upload/read URLs, quota purge).
 app.use("/api/chat", chatMediaRouter());
+// R2-backed community post attachments + the 6-month retention sweep.
+app.use("/api/posts", postMediaRouter());
 
 // In-memory leads storage for backup / immediate access
 const leads: Array<{

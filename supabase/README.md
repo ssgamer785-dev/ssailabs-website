@@ -126,6 +126,49 @@ from your app origin:
 
 If R2 is unset the media endpoints return 503 and text chat keeps working.
 
+## Community + notifications (Phase 2D)
+
+`20260819140000_community_production.sql` connects the Community and
+Notifications screens to real data.
+
+- **One query per feed page.** `posts_feed(channel, before, limit)` returns the
+  page together with each post's author, like/comment counts and
+  `liked_by_me`. Doing that client-side would be a query per post per counter.
+  `post_comments(post_id, before, limit)` is the same idea for a thread. Both
+  are SECURITY INVOKER, so posts/comments RLS still decides visibility.
+- **Anonymity carries through.** `author_name` resolves to the real profile
+  name for admins and to the snapshotted `display_name` for everyone else —
+  the same rule as Phase 2A, now applied inside the feed reader.
+- **Notification triggers already existed** (new official post, new comment,
+  new like, new chat message) from Phases 2A/2C. This migration adds
+  `my_unread_notification_count()` for the badge and
+  `mark_all_notifications_read()` for the header action.
+
+Post attachments use the same private-R2 pattern as chat, via `/api/posts`:
+reads are open to any signed-in member (posts are readable to all members
+anyway), writes are namespaced to the uploader (`posts/<userId>/…`), and
+deletes require the post's author or an admin.
+
+### 6-month retention
+
+**This rule did not exist before Phase 2D — this migration establishes it.**
+Nothing in the earlier phases expired anything.
+
+`purge_expired_posts()` deletes community posts older than
+`community_retention_cutoff()` (now − 6 months); comments and likes follow via
+`ON DELETE CASCADE`. Because the R2 objects live outside the database, run the
+sweep through `POST /api/posts/run-retention` (admin token required), which:
+
+1. calls `select_expired_post_media()` for the keys still referenced,
+2. deletes those objects from R2,
+3. calls `purge_expired_posts()` to remove the rows.
+
+Calling `purge_expired_posts()` on its own is safe but leaves the bucket
+paying for orphaned files, so prefer the endpoint. If `pg_cron` is enabled on
+the project the migration also schedules the SQL half nightly at 03:15 UTC as
+a backstop; on projects without the extension that block is skipped and the
+endpoint is the only path.
+
 ## Applying the migration
 
 With the Supabase CLI, linked to your project:

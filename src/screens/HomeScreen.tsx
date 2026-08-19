@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { useAppState, initials } from '../lib/app-state';
+import { useUnreadNotificationCount } from '../lib/notifications/useNotifications';
 import { StatusBar } from '../components/StatusBar';
 import { BottomNav } from '../components/BottomNav';
 import { PhoneShell } from '../components/PhoneShell';
@@ -13,6 +14,7 @@ const quickLabel = css('font-size:10.5px;font-weight:500;color:#526174;text-alig
 export function HomeScreen() {
   const navigate = useNavigate();
   const { userName } = useAppState();
+  const unread = useUnreadNotificationCount();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   return (
@@ -30,7 +32,9 @@ export function HomeScreen() {
           </div>
           <div onClick={() => navigate('/notifications')} style={css('position:relative;width:44px;height:44px;border-radius:14px;background:#FFFFFF;box-shadow:0 3px 12px rgba(15,23,42,.10);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d="M18 16.4H6l1.4-2.3V11a4.6 4.6 0 0 1 9.2 0v3.1z" /><path d="M10.3 19.2a1.9 1.9 0 0 0 3.4 0" /></svg>
-            <div style={css('position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#EF4444;border:2px solid #FFFFFF;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#FFFFFF;line-height:1')}>3</div>
+            {unread > 0 && (
+              <div style={css('position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#EF4444;border:2px solid #FFFFFF;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#FFFFFF;line-height:1')}>{unread}</div>
+            )}
           </div>
           <div onClick={() => navigate('/profile')} style={css('width:44px;height:44px;border-radius:50%;background:#DCE7F7;color:#29527F;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex:none;box-shadow:0 2px 8px rgba(15,23,42,.10);cursor:pointer')}>{initials(userName)}</div>
         </div>

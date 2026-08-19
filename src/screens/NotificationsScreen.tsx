@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
-import { useAppState, NOTIFS, type Notif } from '../lib/app-state';
+import { useNotifications, type AppNotification } from '../lib/notifications/useNotifications';
+import type { NotificationKind } from '../lib/database.types';
 import { StatusBar } from '../components/StatusBar';
 import { PhoneShell } from '../components/PhoneShell';
 
 const NCATS = ['All', 'Community', 'Chat'] as const;
 
-const ICONS: Record<Notif['kind'], [string, string, string]> = {
+const ICONS: Record<NotificationKind, [string, string, string]> = {
   signal: ['#EDF3FE', '#0B5FEF', 'M4.2 16.8 9 11.4l3.4 3.2 2.7-2.6 4.7 4.6M14.6 5.2h5v5'],
   target: ['#E9F8EF', '#16A34A', 'M12 3.6v16.8M12 3.6l4 4M12 3.6l-4 4M5 20.4h14'],
   like: ['#FEF1F1', '#EF4444', 'M12 20.4S4.3 15.2 4.3 10a4.3 4.3 0 0 1 7.7-2.6A4.3 4.3 0 0 1 19.7 10c0 5.2-7.7 10.4-7.7 10.4z'],
@@ -16,7 +17,7 @@ const ICONS: Record<Notif['kind'], [string, string, string]> = {
   session: ['#FFF6E6', '#B98F3C', 'M12 7.4v5l3.4 2M12 3.9a8.1 8.1 0 1 1 0 16.2 8.1 8.1 0 0 1 0-16.2z'],
 };
 
-function NotifIcon({ kind }: { kind: Notif['kind'] }) {
+function NotifIcon({ kind }: { kind: NotificationKind }) {
   const [bg, stroke, d] = ICONS[kind];
   return (
     <div style={{ width: 42, height: 42, borderRadius: 13, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
@@ -25,15 +26,43 @@ function NotifIcon({ kind }: { kind: Notif['kind'] }) {
   );
 }
 
+/** Categorises a notification kind into the screen's existing chip filters. */
+function categoryOf(kind: NotificationKind): 'Community' | 'Chat' | 'Signals' {
+  if (kind === 'like' || kind === 'comment' || kind === 'session') return 'Community';
+  if (kind === 'chat') return 'Chat';
+  return 'Signals';
+}
+
+/** The design splits the list into TODAY and EARLIER. */
+function isToday(iso: string): boolean {
+  const d = new Date(iso);
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth()
+    && d.getDate() === now.getDate();
+}
+
+/** "8:02 AM" today, "Yesterday", else a short date — matches the mock's style. */
+function whenLabel(iso: string): string {
+  const d = new Date(iso);
+  if (isToday(iso)) return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+}
+
 export function NotificationsScreen() {
   const navigate = useNavigate();
-  const { readMap, markRead, markAllRead } = useAppState();
+  const { notifications, loading, error, markRead, markAllRead } = useNotifications();
   const [notifCat, setNotifCat] = useState<typeof NCATS[number]>('All');
 
-  const isUnread = (n: Notif) => (readMap[n.id] ? false : n.unread);
+  const isUnread = (n: AppNotification) => !n.readAt;
 
   function Rows({ when }: { when: 'today' | 'earlier' }) {
-    const list = NOTIFS.filter(n => n.when === when && (notifCat === 'All' || n.cat === notifCat));
+    const list = notifications.filter(n =>
+      (when === 'today' ? isToday(n.createdAt) : !isToday(n.createdAt))
+      && (notifCat === 'All' || categoryOf(n.kind) === notifCat));
     if (!list.length) return <div style={css('padding:10px 20px;font-size:13px;color:#94A3B8')}>Nothing here yet.</div>;
     return (
       <>
@@ -47,7 +76,7 @@ export function NotificationsScreen() {
                 <div style={css('font-size:12.5px;color:#64748B;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>{n.body}</div>
               </div>
               <div style={css('flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:7px')}>
-                <div style={{ fontSize: 11, color: unread ? '#0B5FEF' : '#94A3B8', fontWeight: unread ? 600 : 400, whiteSpace: 'nowrap' }}>{n.time}</div>
+                <div style={{ fontSize: 11, color: unread ? '#0B5FEF' : '#94A3B8', fontWeight: unread ? 600 : 400, whiteSpace: 'nowrap' }}>{whenLabel(n.createdAt)}</div>
                 {unread && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#0B5FEF' }} />}
               </div>
             </div>
@@ -68,7 +97,9 @@ export function NotificationsScreen() {
       <div style={css('flex:none;padding:4px 20px 0;display:flex;gap:9px;overflow:hidden')}>
         {NCATS.map(c => {
           const on = notifCat === c;
-          const count = c === 'All' ? NOTIFS.filter(isUnread).length : NOTIFS.filter(n => n.cat === c && isUnread(n)).length;
+          const count = c === 'All'
+            ? notifications.filter(isUnread).length
+            : notifications.filter(n => categoryOf(n.kind) === c && isUnread(n)).length;
           return (
             <div key={c} onClick={() => setNotifCat(c)} style={{ height: 34, padding: '0 14px', borderRadius: 999, display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: on ? 600 : 500, whiteSpace: 'nowrap', cursor: 'pointer', flex: 'none', background: on ? '#0B5FEF' : '#F2F4F9', color: on ? '#FFFFFF' : '#475569', boxShadow: on ? '0 4px 12px rgba(11,95,239,.26)' : 'none' }}>
               {c}
@@ -78,11 +109,24 @@ export function NotificationsScreen() {
         })}
       </div>
       <div style={css('flex:1;min-height:0;padding:16px 0 0;display:flex;flex-direction:column;overflow-y:auto')}>
+        {error && (
+          <div style={css('padding:10px 20px;font-size:12px;color:#EF4444;line-height:1.4')}>{error}</div>
+        )}
+        {loading ? (
+          <div style={css('flex:1;display:flex;align-items:center;justify-content:center;font-size:12.5px;color:#94A3B8')}>Loading notifications…</div>
+        ) : notifications.length === 0 ? (
+          <div style={css('flex:1;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12.5px;color:#94A3B8;line-height:1.5;padding:0 34px')}>
+            You're all caught up. New signals, replies and likes will show up here.
+          </div>
+        ) : (
+        <>
         <div style={css('flex:none;padding:0 20px 9px;font-size:11px;font-weight:700;color:#94A3B8;letter-spacing:.07em;white-space:nowrap')}>TODAY</div>
         <Rows when="today" />
         <div style={css('flex:none;padding:16px 20px 9px;font-size:11px;font-weight:700;color:#94A3B8;letter-spacing:.07em;white-space:nowrap')}>EARLIER</div>
         <Rows when="earlier" />
         <div style={css('height:16px;flex:none')} />
+        </>
+        )}
       </div>
     </PhoneShell>
   );

@@ -1,11 +1,14 @@
-import { useState, type ReactNode } from 'react';
+import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { makeRand } from '../lib/rng';
+import { useAuth } from '../lib/auth-context';
+import { useFeed, type FeedPost } from '../lib/community/useFeed';
+import { useComments } from '../lib/community/useComments';
 import { StatusBar } from './StatusBar';
 import { BottomNav } from './BottomNav';
-import { CandleChart } from './CandleChart';
+import { PostMedia, timeAgo } from './community/PostMedia';
 import logo from '../assets/traders-planet-logo.jpg';
 
 function Wave({ bars, color, height, gap, seed }: { bars: number; color: string; height: number; gap: number; seed: number }) {
@@ -68,39 +71,74 @@ function SwitchEl({ on, onClick }: { on: boolean; onClick: () => void }) {
   );
 }
 
-function Heart({ on, size, onClick }: { on: boolean; size: number; onClick?: () => void }) {
+function Heart({ on, size }: { on: boolean; size: number }) {
   const d = 'M12 20.8S3.9 15.4 3.9 9.9A4.55 4.55 0 0 1 12 7.1a4.55 4.55 0 0 1 8.1 2.8c0 5.5-8.1 10.9-8.1 10.9z';
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" style={{ display: 'block' }} onClick={onClick}>
+    <svg width={size} height={size} viewBox="0 0 24 24" style={{ display: 'block' }}>
       <path d={d} fill={on ? '#EF4444' : 'none'} stroke={on ? '#EF4444' : '#64748B'} strokeWidth={1.7} strokeLinejoin="round" />
     </svg>
   );
 }
 
-function Mic({ on, onClick }: { on: boolean; onClick: () => void }) {
-  return (
-    <div onClick={onClick} title="Hold to record a voice message" style={{ width: 36, height: 36, borderRadius: '50%', flex: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: on ? '#EF4444' : '#F2F4F9', boxShadow: on ? '0 0 0 4px rgba(239,68,68,.16)' : 'none' }}>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={on ? '#FFFFFF' : '#64748B'} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
-        <rect x={9} y={3.2} width={6} height={10.4} rx={3} />
-        <path d="M5.6 11.4a6.4 6.4 0 0 0 12.8 0M12 17.8v3M8.8 20.8h6.4" />
-      </svg>
-    </div>
-  );
-}
-
-function VoiceReply() {
-  return (
-    <div style={{ flex: 1, background: '#F4F6FA', borderRadius: 999, padding: '7px 13px 7px 8px', display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-      <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#0B5FEF', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', cursor: 'pointer' }}>
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="#FFFFFF" style={{ marginLeft: 1 }}><path d="M8.5 5.5l10 6.5-10 6.5z" /></svg>
-      </div>
-      <Wave bars={24} color="rgba(100,116,139,.45)" height={18} gap={2.4} seed={63} />
-      <div style={{ fontSize: 10.5, fontWeight: 600, color: '#64748B', flex: 'none', whiteSpace: 'nowrap' }}>0:21</div>
-    </div>
-  );
-}
-
 const iconBtn = css('height:36px;padding:0 14px;border:1px solid #E7EBF1;border-radius:10px;display:flex;align-items:center;gap:7px;cursor:pointer;background:#fff');
+const VERIFIED = (
+  <svg width="14" height="14" viewBox="0 0 24 24" style={css('display:block;flex:none')}>
+    <circle cx="12" cy="12" r="9.5" fill="#0B5FEF" />
+    <path d="M8.2 12.3l2.6 2.6 5.1-5.4" fill="none" stroke="#FFFFFF" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+/** Reply row on a student post — posts a real comment. */
+function ReplyRow({ postId, anonymous }: { postId: string; anonymous: boolean }) {
+  const { addComment } = useComments(postId);
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+
+  async function send() {
+    if (!text.trim() || sending) return;
+    setSending(true);
+    await addComment(text, anonymous);
+    setText('');
+    setSending(false);
+  }
+
+  return (
+    <div style={css('display:flex;align-items:center;gap:9px')}>
+      <div style={css('flex:1;height:38px;border-radius:999px;background:#F2F4F9;display:flex;align-items:center;padding:0 14px')}>
+        <input
+          placeholder="Reply or send a voice note..."
+          value={text}
+          onChange={e => setText(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void send(); } }}
+          style={css('flex:1;font-size:12.5px;height:100%')}
+        />
+      </div>
+      <Hoverable as="div" onClick={send} style={css('width:36px;height:36px;border-radius:50%;background:#DCE9FF;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')} hoverStyle={css('background:#C6DBFF')}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="#0B5FEF" style={css('margin-left:-1px')}><path d="M20.8 3.2 3.9 9.9c-.7.3-.6 1.3.1 1.5l6.3 1.9 1.9 6.3c.2.7 1.2.8 1.5.1z" /></svg>
+      </Hoverable>
+    </div>
+  );
+}
+
+/** Long-press (or right-click) to delete your own post — same gesture as chat. */
+function useLongPressDelete(enabled: boolean) {
+  const [confirming, setConfirming] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const start = useCallback(() => {
+    if (enabled) timer.current = setTimeout(() => setConfirming(true), 500);
+  }, [enabled]);
+  const cancel = useCallback(() => clearTimeout(timer.current), []);
+  return { confirming, setConfirming, start, cancel };
+}
+
+function DeleteBar({ onDelete, onCancel }: { onDelete: () => void; onCancel: () => void }) {
+  return (
+    <div style={css('display:flex;align-items:center;gap:10px;padding-top:2px')}>
+      <div onClick={onDelete} style={css('font-size:11.5px;font-weight:700;color:#EF4444;cursor:pointer;white-space:nowrap')}>Delete post</div>
+      <div onClick={onCancel} style={css('font-size:11.5px;font-weight:600;color:#94A3B8;cursor:pointer;white-space:nowrap')}>Cancel</div>
+    </div>
+  );
+}
 
 export function CommunityScreen({ initialTab = 'official', adminView = false, asOthers = false, reveal: revealProp, userName = 'Rahul Trader', onToggleReveal }: {
   initialTab?: 'official' | 'students';
@@ -111,32 +149,19 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
   onToggleReveal?: () => void;
 }) {
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const [tab, setTab] = useState(initialTab);
-  const [l1, setL1] = useState(true); const [n1, setN1] = useState(245);
-  const [l2, setL2] = useState(true); const [n2, setN2] = useState(16);
-  const [l3, setL3] = useState(true); const [n3, setN3] = useState(11);
-  const [reply, setReply] = useState('');
-  const [rec, setRec] = useState(false);
-  const [recSec, setRecSec] = useState(0);
   const [myReveal, setMyReveal] = useState(false);
-  const recTimer = useState<{ id?: ReturnType<typeof setInterval> }>({})[0];
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  const admin = adminView;
+  const feed = useFeed(tab);
+
+  // `adminView` / `asOthers` are the design's preview modes; a real admin
+  // session also gets the admin treatment.
+  const admin = adminView || (isAdmin && !asOthers);
   const others = asOthers;
   const reveal = revealProp !== undefined ? revealProp : myReveal;
-  const myInitials = userName.split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
 
-  function toggleRec() {
-    clearInterval(recTimer.id);
-    if (rec) { setRec(false); setRecSec(0); return; }
-    recTimer.id = setInterval(() => setRecSec(v => v + 1), 1000);
-    setRec(true); setRecSec(0);
-  }
-  function toggle(which: 1 | 2 | 3) {
-    if (which === 1) { setL1(v => !v); setN1(v => l1 ? v - 1 : v + 1); }
-    if (which === 2) { setL2(v => !v); setN2(v => l2 ? v - 1 : v + 1); }
-    if (which === 3) { setL3(v => !v); setN3(v => l3 ? v - 1 : v + 1); }
-  }
   function handleToggleReveal() {
     if (onToggleReveal) onToggleReveal();
     else setMyReveal(v => !v);
@@ -144,6 +169,12 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
 
   const isOfficial = tab === 'official';
   const isStudents = tab === 'students';
+
+  const onScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) void feed.loadMore();
+  }, [feed]);
 
   return (
     <div style={css("position:relative;width:100%;height:100%;display:flex;flex-direction:column;background:#FFFFFF;overflow:hidden;font-family:-apple-system,'SF Pro Text','Helvetica Neue',Helvetica,Arial,sans-serif;color:#0F172A")}>
@@ -171,193 +202,54 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
       </div>
 
       <div style={css('flex:1;min-height:0;background:#F3F5F9;display:flex;flex-direction:column;gap:8px;overflow:hidden;border-top:1px solid #EDF0F5')}>
-        <div style={css('flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px')}>
+        <div ref={scrollRef} onScroll={onScroll} style={css('flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch')}>
 
-        {isOfficial && (
-          <>
-            <div style={css('background:#FFFFFF;padding:16px 20px 14px;display:flex;flex-direction:column;gap:12px')}>
-              <div style={css('display:flex;align-items:center;gap:10px')}>
-                <div style={css('width:34px;height:34px;border-radius:50%;background:#0F1733;display:flex;align-items:center;justify-content:center;overflow:hidden;flex:none')}>
-                  <img src={logo} alt="The Traders Planet" style={css('width:30px;height:30px;object-fit:contain')} />
-                </div>
-                <div style={css('flex:1;display:flex;flex-direction:column;gap:1px')}>
-                  <div style={css('display:flex;align-items:center;gap:5px')}>
-                    <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap')}>The Traders Planet</div>
-                    <svg width="14" height="14" viewBox="0 0 24 24" style={css('display:block;flex:none')}><circle cx="12" cy="12" r="9.5" fill="#0B5FEF" /><path d="M8.2 12.3l2.6 2.6 5.1-5.4" fill="none" stroke="#FFFFFF" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </div>
-                  <div style={css('font-size:11.5px;color:#94A3B8')}>Admin</div>
-                </div>
-                <div style={css('font-size:11.5px;color:#94A3B8;flex:none;white-space:nowrap')}>2h ago</div>
-              </div>
-              <div style={css('display:flex;flex-direction:column;gap:5px')}>
-                <div style={css('font-size:16px;font-weight:700;letter-spacing:-.35px')}>Gold Analysis</div>
-                <div style={css('font-size:13.5px;line-height:1.5;color:#334155')}>Buy Above 3365</div>
-                <div style={css('font-size:13.5px;line-height:1.5;color:#334155')}>SL 3358 | TP 3380</div>
-              </div>
-              <div style={css('position:relative;height:152px;border-radius:12px;overflow:hidden')} onClick={() => navigate('/analysis')}>
-                <CandleChart seed={4} />
-              </div>
-              <div style={css('display:flex;gap:10px')}>
-                <Hoverable style={iconBtn} hoverStyle={css('border-color:#0B5FEF')}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#0B5FEF" strokeWidth={1.8} strokeLinejoin="round"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg>
-                  <div style={css('font-size:12.5px;font-weight:600')}>PDF</div>
-                </Hoverable>
-                <Hoverable style={iconBtn} hoverStyle={css('border-color:#0B5FEF')}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#0B5FEF" strokeWidth={1.8} strokeLinejoin="round"><rect x="3.2" y="6.6" width="12" height="10.8" rx="2.6" /><path d="M15.2 11.2 20.4 8.2v7.6l-5.2-3z" /></svg>
-                  <div style={css('font-size:12.5px;font-weight:600')}>Video</div>
-                </Hoverable>
-              </div>
-              <div style={css('display:flex;align-items:center;gap:18px;padding-top:2px')}>
-                <div onClick={() => toggle(1)} style={css('display:flex;align-items:center;gap:7px;cursor:pointer')}>
-                  <Heart on={l1} size={20} />
-                  <div style={css('font-size:13px;font-weight:600;color:#334155')}>{n1}</div>
-                </div>
-                <div style={css('display:flex;align-items:center;gap:7px;cursor:pointer')}>
-                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d="M20.4 11.8c0 3.8-3.8 6.9-8.4 6.9-1 0-2-.1-2.9-.4L4.4 20.2l1.5-3.5c-1.6-1.3-2.5-3-2.5-4.9 0-3.8 3.8-6.9 8.4-6.9s8.6 3.1 8.6 6.9z" /></svg>
-                  <div style={css('font-size:13px;font-weight:600;color:#334155')}>54</div>
-                </div>
-                <div style={css('flex:1')} />
-                <div style={css('cursor:pointer')}>
-                  <svg width="19" height="19" viewBox="0 0 24 24" style={css('display:block')} onClick={() => {}}><path d="M7 4.4h10v16l-5-3.5-5 3.5z" fill="none" stroke="#64748B" strokeWidth={1.7} strokeLinejoin="round" /></svg>
-                </div>
-                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={1.7} strokeLinecap="round" style={css('cursor:pointer')}><circle cx="18" cy="5.6" r="2.4" /><circle cx="6.4" cy="12" r="2.4" /><circle cx="18" cy="18.4" r="2.4" /><path d="M8.6 10.8 15.8 6.9M8.6 13.2l7.2 3.9" /></svg>
-              </div>
+          {isStudents && others && (
+            <div style={css('background:#F7FAFF;border-top:1px solid #DCE9FF;border-bottom:1px solid #DCE9FF;padding:10px 18px;display:flex;gap:10px;align-items:flex-start')}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0B5FEF" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" style={css('flex:none;margin-top:1px')}><path d="M2.4 12S6 5.9 12 5.9 21.6 12 21.6 12 18 18.1 12 18.1 2.4 12 2.4 12z" /><circle cx="12" cy="12" r="2.9" /></svg>
+              <div style={css('flex:1;font-size:11.5px;color:#334155;line-height:1.45;text-wrap:pretty')}>Member view — this is exactly what other students see. Names stay <strong style={css('font-weight:700')}>Unknown User</strong> unless a member shares them.</div>
             </div>
-
-            <div style={css('background:#FFFFFF;padding:16px 20px 18px;display:flex;flex-direction:column;gap:11px')}>
-              <div style={css('display:flex;align-items:center;gap:10px')}>
-                <div style={css('width:34px;height:34px;border-radius:50%;background:#E4E9F7;color:#3C5A8A;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:none')}>AV</div>
-                <div style={css('flex:1;display:flex;flex-direction:column;gap:1px')}>
-                  <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap')}>Aman Verma</div>
-                  <div style={css('font-size:11.5px;color:#94A3B8')}>Contributor</div>
-                </div>
-                <div style={css('font-size:11.5px;color:#94A3B8;flex:none;white-space:nowrap')}>3h ago</div>
-              </div>
-              <div style={css('display:flex;flex-direction:column;gap:5px')}>
-                <div style={css('font-size:16px;font-weight:700;letter-spacing:-.35px')}>Weekly Market Outlook</div>
-                <div style={css('font-size:13.5px;line-height:1.5;color:#334155')}>Global markets expected to remain volatile this week.</div>
-              </div>
-              <div style={css('display:flex;gap:10px')}>
-                <Hoverable style={iconBtn} hoverStyle={css('border-color:#EF4444')}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth={1.8} strokeLinejoin="round"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg>
-                  <div style={css('font-size:12.5px;font-weight:600')}>PDF</div>
-                </Hoverable>
-              </div>
+          )}
+          {isStudents && admin && (
+            <div style={css('background:#FFF9EC;border-top:1px solid #F3E3BE;border-bottom:1px solid #F3E3BE;padding:10px 18px;display:flex;gap:10px;align-items:flex-start')}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B98F3C" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" style={css('flex:none;margin-top:1px')}><path d="M12 3.8 5.6 6.2v5.3c0 4 2.6 7.4 6.4 8.7 3.8-1.3 6.4-4.7 6.4-8.7V6.2z" /></svg>
+              <div style={css('flex:1;font-size:11.5px;color:#7A5D25;line-height:1.45;text-wrap:pretty')}>Admin view — real names are always visible to you, even when a member posts as Unknown User.</div>
             </div>
-          </>
-        )}
+          )}
 
-        {isStudents && (
-          <>
-            {others && (
-              <div style={css('background:#F7FAFF;border-top:1px solid #DCE9FF;border-bottom:1px solid #DCE9FF;padding:10px 18px;display:flex;gap:10px;align-items:flex-start')}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0B5FEF" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" style={css('flex:none;margin-top:1px')}><path d="M2.4 12S6 5.9 12 5.9 21.6 12 21.6 12 18 18.1 12 18.1 2.4 12 2.4 12z" /><circle cx="12" cy="12" r="2.9" /></svg>
-                <div style={css('flex:1;font-size:11.5px;color:#334155;line-height:1.45;text-wrap:pretty')}>Member view — this is exactly what other students see. Names stay <strong style={css('font-weight:700')}>Unknown User</strong> unless a member shares them.</div>
-              </div>
-            )}
-            {admin && (
-              <div style={css('background:#FFF9EC;border-top:1px solid #F3E3BE;border-bottom:1px solid #F3E3BE;padding:10px 18px;display:flex;gap:10px;align-items:flex-start')}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B98F3C" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" style={css('flex:none;margin-top:1px')}><path d="M12 3.8 5.6 6.2v5.3c0 4 2.6 7.4 6.4 8.7 3.8-1.3 6.4-4.7 6.4-8.7V6.2z" /></svg>
-                <div style={css('flex:1;font-size:11.5px;color:#7A5D25;line-height:1.45;text-wrap:pretty')}>Admin view — real names are always visible to you, even when a member posts as Unknown User.</div>
-              </div>
-            )}
+          {feed.error && (
+            <div style={css('background:#FFFFFF;padding:14px 20px;font-size:12px;color:#EF4444;line-height:1.4')}>{feed.error}</div>
+          )}
 
-            <div style={css('background:#FFFFFF;padding:14px 18px 12px;display:flex;flex-direction:column;gap:11px')}>
-              <div style={css('display:flex;align-items:center;gap:10px')}>
-                {admin ? <InitialAvatar text="RS" size={34} bg="#DCE7F7" color="#29527F" online /> : <MaskAvatar size={34} online />}
-                <div style={css('flex:1;display:flex;flex-direction:column;gap:1px;min-width:0')}>
-                  <div style={css('display:flex;align-items:center;gap:5px')}>
-                    <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap')}>{admin ? 'Rahul Sharma' : 'Unknown User'}</div>
-                    {!admin && <LockMark />}
-                  </div>
-                  <div style={css('font-size:11.5px;color:#94A3B8;flex:none;white-space:nowrap')}>{admin ? 'Student · appears as Unknown User' : 'Student'}</div>
-                </div>
-                <div style={css('font-size:11.5px;color:#94A3B8;flex:none;white-space:nowrap')}>2h ago</div>
-              </div>
-              <div style={css('font-size:14px;color:#0F172A;line-height:1.45')}>Gold looks bullish today.</div>
-              <div style={css('position:relative;height:148px;border-radius:12px;overflow:hidden')}>
-                <CandleChart seed={12} />
-              </div>
-              <div style={css('display:flex;align-items:center;gap:18px;padding-top:1px')}>
-                <div onClick={() => toggle(2)} style={css('display:flex;align-items:center;gap:7px;cursor:pointer')}>
-                  <Heart on={l2} size={19} />
-                  <div style={css('font-size:13px;font-weight:600;color:#334155')}>{n2}</div>
-                </div>
-                <div style={css('display:flex;align-items:center;gap:7px;cursor:pointer')}>
-                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d="M20.4 11.8c0 3.8-3.8 6.9-8.4 6.9-1 0-2-.1-2.9-.4L4.4 20.2l1.5-3.5c-1.6-1.3-2.5-3-2.5-4.9 0-3.8 3.8-6.9 8.4-6.9s8.6 3.1 8.6 6.9z" /></svg>
-                  <div style={css('font-size:13px;font-weight:600;color:#334155')}>8</div>
-                </div>
-                <div style={css('flex:1')} />
-                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={1.7} strokeLinejoin="round" style={css('cursor:pointer')}><path d="M7 4.4h10v16l-5-3.5-5 3.5z" /></svg>
-              </div>
-              {!rec && (
-                <div style={css('display:flex;align-items:center;gap:9px')}>
-                  <div style={css('flex:1;height:38px;border-radius:999px;background:#F2F4F9;display:flex;align-items:center;padding:0 14px')}>
-                    <input placeholder="Reply or send a voice note..." value={reply} onChange={e => setReply(e.target.value)} style={css('flex:1;font-size:12.5px;height:100%')} />
-                  </div>
-                  <Mic on={false} onClick={toggleRec} />
-                  <Hoverable as="div" style={css('width:36px;height:36px;border-radius:50%;background:#DCE9FF;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')} hoverStyle={css('background:#C6DBFF')}>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="#0B5FEF" style={css('margin-left:-1px')}><path d="M20.8 3.2 3.9 9.9c-.7.3-.6 1.3.1 1.5l6.3 1.9 1.9 6.3c.2.7 1.2.8 1.5.1z" /></svg>
-                  </Hoverable>
-                </div>
-              )}
-              {rec && (
-                <div style={css('display:flex;align-items:center;gap:9px')}>
-                  <div style={css('flex:1;height:38px;border-radius:999px;background:#FEF4F4;border:1px solid #FBD5D9;display:flex;align-items:center;padding:0 14px;gap:10px;min-width:0')}>
-                    <div style={css('width:8px;height:8px;border-radius:50%;background:#EF4444;flex:none')} />
-                    <div style={css('font-size:12px;font-weight:700;color:#EF4444;flex:none;white-space:nowrap')}>{Math.floor(recSec / 60)}:{(recSec % 60) < 10 ? '0' : ''}{recSec % 60}</div>
-                    <Wave bars={26} color="rgba(239,68,68,.55)" height={18} gap={2.4} seed={91} />
-                    <div onClick={toggleRec} style={css('font-size:11px;font-weight:600;color:#94A3B8;cursor:pointer;flex:none;white-space:nowrap')}>Cancel</div>
-                  </div>
-                  <Mic on={true} onClick={toggleRec} />
-                  <Hoverable as="div" style={css('width:36px;height:36px;border-radius:50%;background:#DCE9FF;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')} hoverStyle={css('background:#C6DBFF')}>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="#0B5FEF" style={css('margin-left:-1px')}><path d="M20.8 3.2 3.9 9.9c-.7.3-.6 1.3.1 1.5l6.3 1.9 1.9 6.3c.2.7 1.2.8 1.5.1z" /></svg>
-                  </Hoverable>
-                </div>
-              )}
+          {feed.loading ? (
+            <div style={css('flex:1;display:flex;align-items:center;justify-content:center;font-size:12.5px;color:#94A3B8')}>Loading posts…</div>
+          ) : feed.posts.length === 0 ? (
+            <div style={css('flex:1;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12.5px;color:#94A3B8;line-height:1.5;padding:0 34px')}>
+              {isOfficial
+                ? 'No official updates yet. Analysis and signals from the team will appear here.'
+                : 'No student posts yet. Be the first to share an idea with the group.'}
             </div>
+          ) : (
+            feed.posts.map(post => (
+              <PostCard
+                key={post.id}
+                post={post}
+                official={isOfficial}
+                admin={admin}
+                others={others}
+                reveal={reveal}
+                userName={userName}
+                onToggleReveal={handleToggleReveal}
+                onOpen={() => navigate(`/analysis?post=${post.id}`)}
+                onToggleLike={() => feed.toggleLike(post.id)}
+                onDelete={() => feed.deletePost(post)}
+              />
+            ))
+          )}
 
-            <div style={css('background:#FFFFFF;padding:14px 18px 14px;display:flex;flex-direction:column;gap:11px')}>
-              <div style={css('display:flex;align-items:center;gap:10px')}>
-                {(admin || reveal) ? <InitialAvatar text={myInitials} size={34} bg="#DCE7F7" color="#29527F" online={false} /> : <MaskAvatar size={34} online={false} />}
-                <div style={css('flex:1;display:flex;flex-direction:column;gap:1px;min-width:0')}>
-                  <div style={css('display:flex;align-items:center;gap:5px')}>
-                    <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap')}>{(admin || reveal) ? userName : 'Unknown User'}</div>
-                    {reveal ? <SharedTag /> : <LockMark />}
-                  </div>
-                  <div style={css('font-size:11.5px;color:#94A3B8;flex:none;white-space:nowrap')}>
-                    {admin ? (reveal ? 'You · name shared' : 'You · appears as Unknown User') : others ? 'Student' : (reveal ? 'You · name visible' : 'You · posting anonymously')}
-                  </div>
-                </div>
-                <div style={css('font-size:11.5px;color:#94A3B8;flex:none;white-space:nowrap')}>3h ago</div>
-              </div>
-              <div style={css('font-size:14px;color:#0F172A;line-height:1.45')}>Can someone explain ICT setup?</div>
-              {!admin && !others && (
-                <div style={css('background:#F7FAFF;border:1px solid #DCE9FF;border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:11px')}>
-                  <div style={css('flex:1;display:flex;flex-direction:column;gap:2px;min-width:0')}>
-                    <div style={css('font-size:12px;font-weight:700;letter-spacing:-.15px;white-space:nowrap')}>Show my real name on this post</div>
-                    <div style={css('font-size:11px;color:#64748B;line-height:1.4')}>{reveal ? `Others now see ${userName}` : 'Others see you as Unknown User'}</div>
-                  </div>
-                  <SwitchEl on={reveal} onClick={handleToggleReveal} />
-                </div>
-              )}
-              <div style={css('display:flex;align-items:center;gap:18px')}>
-                <div onClick={() => toggle(3)} style={css('display:flex;align-items:center;gap:7px;cursor:pointer')}>
-                  <Heart on={l3} size={19} />
-                  <div style={css('font-size:13px;font-weight:600;color:#334155')}>{n3}</div>
-                </div>
-                <div style={css('display:flex;align-items:center;gap:7px;cursor:pointer')}>
-                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d="M20.4 11.8c0 3.8-3.8 6.9-8.4 6.9-1 0-2-.1-2.9-.4L4.4 20.2l1.5-3.5c-1.6-1.3-2.5-3-2.5-4.9 0-3.8 3.8-6.9 8.4-6.9s8.6 3.1 8.6 6.9z" /></svg>
-                  <div style={css('font-size:13px;font-weight:600;color:#334155')}>15</div>
-                </div>
-              </div>
-              <div style={css('display:flex;align-items:center;gap:10px;padding-right:62px')}>
-                {admin ? <InitialAvatar text="RS" size={28} bg="#DCE7F7" color="#29527F" online={false} /> : <MaskAvatar size={28} online={false} />}
-                <VoiceReply />
-              </div>
-            </div>
-          </>
-        )}
+          {feed.loadingMore && (
+            <div style={css('padding:10px 0 16px;text-align:center;font-size:11.5px;color:#94A3B8')}>Loading more…</div>
+          )}
         </div>
       </div>
 
@@ -372,7 +264,163 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
         </Hoverable>
       )}
 
+      {isOfficial && admin && (
+        <Hoverable
+          as="div"
+          onClick={() => navigate('/create-post?channel=official')}
+          style={css('position:absolute;right:20px;bottom:104px;width:54px;height:54px;border-radius:50%;background:#0B5FEF;box-shadow:0 8px 22px rgba(11,95,239,.38);display:flex;align-items:center;justify-content:center;cursor:pointer')}
+          hoverStyle={css('background:#0A52D6')}
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={2.2} strokeLinecap="round"><path d="M12 5.5v13M5.5 12h13" /></svg>
+        </Hoverable>
+      )}
+
       <BottomNav active="community" />
     </div>
   );
 }
+
+function PostCard({ post, official, admin, others, reveal, userName, onToggleReveal, onOpen, onToggleLike, onDelete }: {
+  post: FeedPost;
+  official: boolean;
+  admin: boolean;
+  others: boolean;
+  reveal: boolean;
+  userName: string;
+  onToggleReveal: () => void;
+  onOpen: () => void;
+  onToggleLike: () => void;
+  onDelete: () => void;
+}) {
+  const press = useLongPressDelete(post.isMine || admin);
+  const initials = post.authorName.split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+
+  const pressHandlers = {
+    onPointerDown: press.start,
+    onPointerUp: press.cancel,
+    onPointerLeave: press.cancel,
+    onContextMenu: (e: React.MouseEvent) => {
+      if (post.isMine || admin) { e.preventDefault(); press.setConfirming(true); }
+    },
+  };
+
+  if (official) {
+    return (
+      <div style={css('background:#FFFFFF;padding:16px 20px 14px;display:flex;flex-direction:column;gap:12px')} {...pressHandlers}>
+        <div style={css('display:flex;align-items:center;gap:10px')}>
+          <div style={css('width:34px;height:34px;border-radius:50%;background:#0F1733;display:flex;align-items:center;justify-content:center;overflow:hidden;flex:none')}>
+            <img src={logo} alt="The Traders Planet" style={css('width:30px;height:30px;object-fit:contain')} />
+          </div>
+          <div style={css('flex:1;display:flex;flex-direction:column;gap:1px')}>
+            <div style={css('display:flex;align-items:center;gap:5px')}>
+              <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap')}>The Traders Planet</div>
+              {VERIFIED}
+            </div>
+            <div style={css('font-size:11.5px;color:#94A3B8')}>Admin</div>
+          </div>
+          <div style={css('font-size:11.5px;color:#94A3B8;flex:none;white-space:nowrap')}>{timeAgo(post.createdAt)}</div>
+        </div>
+
+        <div style={css('display:flex;flex-direction:column;gap:5px')} onClick={onOpen}>
+          {post.title && <div style={css('font-size:16px;font-weight:700;letter-spacing:-.35px')}>{post.title}</div>}
+          {post.body && <div style={css('font-size:13.5px;line-height:1.5;color:#334155;white-space:pre-wrap')}>{post.body}</div>}
+          {post.entryPrice != null && (
+            <div style={css('font-size:13.5px;line-height:1.5;color:#334155')}>
+              SL {post.stopLoss ?? '—'} | TP {post.takeProfit ?? '—'}
+            </div>
+          )}
+        </div>
+
+        {post.attachment !== 'pdf' && <div onClick={onOpen}><PostMedia post={post} height={152} /></div>}
+        {post.attachment === 'pdf' && <PostMedia post={post} height={152} />}
+
+        <div style={css('display:flex;gap:10px')}>
+          <Hoverable style={iconBtn} hoverStyle={css('border-color:#0B5FEF')}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#0B5FEF" strokeWidth={1.8} strokeLinejoin="round"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg>
+            <div style={css('font-size:12.5px;font-weight:600')}>PDF</div>
+          </Hoverable>
+          <Hoverable style={iconBtn} hoverStyle={css('border-color:#0B5FEF')}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#0B5FEF" strokeWidth={1.8} strokeLinejoin="round"><rect x="3.2" y="6.6" width="12" height="10.8" rx="2.6" /><path d="M15.2 11.2 20.4 8.2v7.6l-5.2-3z" /></svg>
+            <div style={css('font-size:12.5px;font-weight:600')}>Video</div>
+          </Hoverable>
+        </div>
+
+        <div style={css('display:flex;align-items:center;gap:18px;padding-top:2px')}>
+          <div onClick={onToggleLike} style={css('display:flex;align-items:center;gap:7px;cursor:pointer')}>
+            <Heart on={post.likedByMe} size={20} />
+            <div style={css('font-size:13px;font-weight:600;color:#334155')}>{post.likeCount}</div>
+          </div>
+          <div onClick={onOpen} style={css('display:flex;align-items:center;gap:7px;cursor:pointer')}>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d="M20.4 11.8c0 3.8-3.8 6.9-8.4 6.9-1 0-2-.1-2.9-.4L4.4 20.2l1.5-3.5c-1.6-1.3-2.5-3-2.5-4.9 0-3.8 3.8-6.9 8.4-6.9s8.6 3.1 8.6 6.9z" /></svg>
+            <div style={css('font-size:13px;font-weight:600;color:#334155')}>{post.commentCount}</div>
+          </div>
+          <div style={css('flex:1')} />
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={1.7} strokeLinejoin="round" style={css('cursor:pointer')}><path d="M7 4.4h10v16l-5-3.5-5 3.5z" /></svg>
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={1.7} strokeLinecap="round" style={css('cursor:pointer')}><circle cx="18" cy="5.6" r="2.4" /><circle cx="6.4" cy="12" r="2.4" /><circle cx="18" cy="18.4" r="2.4" /><path d="M8.6 10.8 15.8 6.9M8.6 13.2l7.2 3.9" /></svg>
+        </div>
+
+        {press.confirming && <DeleteBar onDelete={() => { press.setConfirming(false); onDelete(); }} onCancel={() => press.setConfirming(false)} />}
+      </div>
+    );
+  }
+
+  // ---- students card ----
+  const showRealName = admin || (post.isMine && reveal) || !post.isAnonymous;
+  const shownName = showRealName ? post.authorName : 'Unknown User';
+  const role = post.isMine
+    ? (admin
+        ? (reveal ? 'You · name shared' : 'You · appears as Unknown User')
+        : others ? 'Student' : (reveal ? 'You · name visible' : 'You · posting anonymously'))
+    : (admin && post.isAnonymous ? 'Student · appears as Unknown User' : 'Student');
+
+  return (
+    <div style={css('background:#FFFFFF;padding:14px 18px 12px;display:flex;flex-direction:column;gap:11px')} {...pressHandlers}>
+      <div style={css('display:flex;align-items:center;gap:10px')}>
+        {showRealName
+          ? <InitialAvatar text={initials} size={34} bg="#DCE7F7" color="#29527F" online={!post.isMine} />
+          : <MaskAvatar size={34} online={!post.isMine} />}
+        <div style={css('flex:1;display:flex;flex-direction:column;gap:1px;min-width:0')}>
+          <div style={css('display:flex;align-items:center;gap:5px')}>
+            <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap')}>{shownName}</div>
+            {post.isMine && reveal ? <SharedTag /> : post.isAnonymous ? <LockMark /> : null}
+          </div>
+          <div style={css('font-size:11.5px;color:#94A3B8;flex:none;white-space:nowrap')}>{role}</div>
+        </div>
+        <div style={css('font-size:11.5px;color:#94A3B8;flex:none;white-space:nowrap')}>{timeAgo(post.createdAt)}</div>
+      </div>
+
+      {post.body && <div style={css('font-size:14px;color:#0F172A;line-height:1.45;white-space:pre-wrap')} onClick={onOpen}>{post.body}</div>}
+
+      {post.attachment !== 'none' && <div onClick={onOpen}><PostMedia post={post} height={148} /></div>}
+
+      {post.isMine && !admin && !others && (
+        <div style={css('background:#F7FAFF;border:1px solid #DCE9FF;border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:11px')}>
+          <div style={css('flex:1;display:flex;flex-direction:column;gap:2px;min-width:0')}>
+            <div style={css('font-size:12px;font-weight:700;letter-spacing:-.15px;white-space:nowrap')}>Show my real name on this post</div>
+            <div style={css('font-size:11px;color:#64748B;line-height:1.4')}>{reveal ? `Others now see ${userName}` : 'Others see you as Unknown User'}</div>
+          </div>
+          <SwitchEl on={reveal} onClick={onToggleReveal} />
+        </div>
+      )}
+
+      <div style={css('display:flex;align-items:center;gap:18px;padding-top:1px')}>
+        <div onClick={onToggleLike} style={css('display:flex;align-items:center;gap:7px;cursor:pointer')}>
+          <Heart on={post.likedByMe} size={19} />
+          <div style={css('font-size:13px;font-weight:600;color:#334155')}>{post.likeCount}</div>
+        </div>
+        <div onClick={onOpen} style={css('display:flex;align-items:center;gap:7px;cursor:pointer')}>
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d="M20.4 11.8c0 3.8-3.8 6.9-8.4 6.9-1 0-2-.1-2.9-.4L4.4 20.2l1.5-3.5c-1.6-1.3-2.5-3-2.5-4.9 0-3.8 3.8-6.9 8.4-6.9s8.6 3.1 8.6 6.9z" /></svg>
+          <div style={css('font-size:13px;font-weight:600;color:#334155')}>{post.commentCount}</div>
+        </div>
+        <div style={css('flex:1')} />
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={1.7} strokeLinejoin="round" style={css('cursor:pointer')}><path d="M7 4.4h10v16l-5-3.5-5 3.5z" /></svg>
+      </div>
+
+      <ReplyRow postId={post.id} anonymous={!reveal} />
+
+      {press.confirming && <DeleteBar onDelete={() => { press.setConfirming(false); onDelete(); }} onCancel={() => press.setConfirming(false)} />}
+    </div>
+  );
+}
+
+export { Wave };
