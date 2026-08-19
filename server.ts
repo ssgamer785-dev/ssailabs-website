@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
+import { chatMediaRouter } from "./server/chat-media";
 
 dotenv.config();
 
@@ -10,6 +11,9 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json());
+
+// Cloudflare R2-backed chat attachments (signed upload/read URLs, quota purge).
+app.use("/api/chat", chatMediaRouter());
 
 // In-memory leads storage for backup / immediate access
 const leads: Array<{

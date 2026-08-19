@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
+import { useChatOverview } from '../lib/chat/useChatOverview';
+import { formatTime } from '../lib/chat/types';
 import { StatusBar } from '../components/StatusBar';
 import { BottomNav } from '../components/BottomNav';
 import { PhoneShell } from '../components/PhoneShell';
@@ -9,6 +11,10 @@ import logo from '../assets/traders-planet-logo.jpg';
 export function ChatListScreen() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
+  const { overview } = useChatOverview();
+
+  const preview = overview?.lastMessagePreview ?? 'Start a conversation with the Admin';
+  const unread = overview?.unreadCount ?? 0;
 
   return (
     <PhoneShell>
@@ -32,11 +38,15 @@ export function ChatListScreen() {
               <svg width="14" height="14" viewBox="0 0 24 24" style={css('display:block;flex:none')}><circle cx="12" cy="12" r="9.5" fill="#0B5FEF" /><path d="M8.2 12.3l2.6 2.6 5.1-5.4" fill="none" stroke="#FFFFFF" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" /></svg>
             </div>
             <div style={css('font-size:11.5px;font-weight:600;color:#22C55E')}>Online</div>
-            <div style={css('font-size:12.5px;color:#64748B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>Sure, check the PDF.</div>
+            <div style={css('font-size:12.5px;color:#64748B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>{preview}</div>
           </div>
           <div style={css('flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:7px')}>
-            <div style={css('font-size:11px;font-weight:600;color:#0B5FEF;white-space:nowrap')}>10:30 AM</div>
-            <div style={css('min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:#0B5FEF;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff')}>2</div>
+            {overview?.lastMessageAt && (
+              <div style={css('font-size:11px;font-weight:600;color:#0B5FEF;white-space:nowrap')}>{formatTime(overview.lastMessageAt)}</div>
+            )}
+            {unread > 0 && (
+              <div style={css('min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:#0B5FEF;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff')}>{unread}</div>
+            )}
           </div>
         </div>
         <div style={css('height:1px;background:#F1F4F9')} />

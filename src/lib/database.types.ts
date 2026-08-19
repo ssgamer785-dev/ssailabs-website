@@ -7,7 +7,7 @@
 export type UserRole = 'admin' | 'student';
 export type PostChannel = 'official' | 'students';
 export type AttachmentKind = 'none' | 'image' | 'video' | 'pdf' | 'poll' | 'chart';
-export type MessageKind = 'text' | 'image' | 'pdf' | 'chart' | 'voice';
+export type MessageKind = 'text' | 'image' | 'pdf' | 'chart' | 'voice' | 'video';
 export type NotificationKind = 'signal' | 'chat' | 'like' | 'comment' | 'target' | 'session';
 
 export interface Database {
@@ -39,6 +39,7 @@ export interface Database {
           reveal_identity?: boolean;
           avatar_url?: string | null;
         };
+        Relationships: [];
       };
       posts: {
         Row: {
@@ -85,6 +86,7 @@ export interface Database {
           chart_seed?: number | null;
           is_anonymous?: boolean;
         };
+        Relationships: [];
       };
       comments: {
         Row: {
@@ -111,6 +113,7 @@ export interface Database {
           voice_url?: string | null;
           voice_duration_seconds?: number | null;
         };
+        Relationships: [];
       };
       likes: {
         Row: {
@@ -122,7 +125,8 @@ export interface Database {
           post_id: string;
           user_id: string;
         };
-        Update: never;
+        Update: Record<string, never>;
+        Relationships: [];
       };
       bookmarks: {
         Row: {
@@ -134,7 +138,8 @@ export interface Database {
           post_id: string;
           user_id: string;
         };
-        Update: never;
+        Update: Record<string, never>;
+        Relationships: [];
       };
       conversations: {
         Row: {
@@ -142,11 +147,13 @@ export interface Database {
           student_id: string;
           created_at: string;
           last_message_at: string;
+          media_bytes_used: number;
         };
         Insert: {
           student_id: string;
         };
-        Update: never;
+        Update: Record<string, never>;
+        Relationships: [];
       };
       messages: {
         Row: {
@@ -159,6 +166,13 @@ export interface Database {
           voice_duration_seconds: number | null;
           read_at: string | null;
           created_at: string;
+          client_id: string | null;
+          deleted_at: string | null;
+          storage_key: string | null;
+          mime_type: string | null;
+          size_bytes: number | null;
+          file_name: string | null;
+          media_purged: boolean;
         };
         Insert: {
           conversation_id: string;
@@ -167,10 +181,17 @@ export interface Database {
           body?: string | null;
           media_url?: string | null;
           voice_duration_seconds?: number | null;
+          client_id?: string | null;
+          storage_key?: string | null;
+          mime_type?: string | null;
+          size_bytes?: number | null;
+          file_name?: string | null;
         };
         Update: {
           read_at?: string | null;
+          deleted_at?: string | null;
         };
+        Relationships: [];
       };
       notifications: {
         Row: {
@@ -184,10 +205,11 @@ export interface Database {
           read_at: string | null;
           created_at: string;
         };
-        Insert: never;
+        Insert: Record<string, never>;
         Update: {
           read_at?: string | null;
         };
+        Relationships: [];
       };
     };
     Views: Record<string, never>;
@@ -195,6 +217,23 @@ export interface Database {
       is_admin: {
         Args: { uid?: string };
         Returns: boolean;
+      };
+      get_or_create_my_conversation: {
+        Args: Record<string, never>;
+        Returns: string;
+      };
+      mark_conversation_read: {
+        Args: { p_conversation_id: string };
+        Returns: number;
+      };
+      my_chat_overview: {
+        Args: Record<string, never>;
+        Returns: {
+          conversation_id: string;
+          unread_count: number;
+          last_message_at: string;
+          last_message_preview: string | null;
+        }[];
       };
     };
     Enums: {

@@ -36,20 +36,6 @@ begin
 end;
 $$;
 
--- SECURITY DEFINER so RLS policies can call this without recursing back into
--- profiles' own RLS (which would otherwise deadlock the check).
-create or replace function public.is_admin(uid uuid default auth.uid())
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select exists (
-    select 1 from public.profiles where id = uid and role = 'admin'
-  );
-$$;
-
 -- ----------------------------------------------------------------------------
 -- profiles  (one row per auth.users; role drives Admin/Student access)
 -- ----------------------------------------------------------------------------
@@ -68,6 +54,22 @@ create table public.profiles (
 comment on table public.profiles is 'One row per authenticated user; role gates Admin vs Student access everywhere else.';
 comment on column public.profiles.reveal_identity is
   'Default "post with my real name" preference. Individual posts snapshot their own is_anonymous, so this is just the starting value for new posts.';
+
+-- Defined here, after profiles exists: a LANGUAGE sql body is name-resolved at
+-- CREATE time, so this cannot be hoisted into the helpers section above.
+-- SECURITY DEFINER so RLS policies can call it without recursing back into
+-- profiles' own RLS (which would otherwise deadlock the check).
+create or replace function public.is_admin(uid uuid default auth.uid())
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.profiles where id = uid and role = 'admin'
+  );
+$$;
 
 create trigger profiles_set_updated_at
   before update on public.profiles
@@ -92,6 +94,9 @@ create trigger on_auth_user_created
   for each row execute function public.handle_new_user();
 
 -- Only an existing admin may change someone's role (prevents self-promotion).
+-- auth.uid() is null outside an end-user request — the SQL editor, a migration,
+-- or a service-role call — and those are trusted, which is also how the very
+-- first admin gets promoted (see supabase/README.md).
 create or replace function public.prevent_role_self_escalation()
 returns trigger
 language plpgsql
@@ -99,7 +104,9 @@ security definer
 set search_path = public
 as $$
 begin
-  if new.role is distinct from old.role and not public.is_admin(auth.uid()) then
+  if new.role is distinct from old.role
+     and auth.uid() is not null
+     and not public.is_admin(auth.uid()) then
     raise exception 'Only admins can change a profile''s role';
   end if;
   return new;

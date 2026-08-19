@@ -70,6 +70,62 @@ once the frontend is wired up. `profiles`, `bookmarks` and `conversations`
 are intentionally left out — nothing in the current screens needs to observe
 those live.
 
+## Chat (Phase 2C)
+
+`20260819090000_chat_message_kind_video.sql` adds `video` to the message-kind
+enum — separate from the next file because Postgres won't let a new enum value
+be *used* in the transaction that adds it.
+
+`20260819090100_chat_production.sql` turns the Student↔Admin thread into a real
+chat: attachment metadata, idempotent sends, soft delete, and media accounting.
+
+- **Idempotent sends.** Every outgoing message carries a client-generated
+  `client_id`, unique per conversation. A retried send collides instead of
+  posting twice, and the optimistic bubble reconciles with the row that arrives
+  over Realtime.
+- **Who may change what.** RLS can't express "only these columns", so
+  `guard_message_update()` draws the line: the sender may soft-delete their own
+  message (never edit it), and the other participant may only set `read_at`.
+  Without this, the foundation migration's update policy would have let either
+  side rewrite the other's messages.
+- **`auth.uid() is null` means "not an end-user request".** Every messages
+  policy is `to authenticated`, so a null uid can only be our own server
+  (service-role) or the SQL editor. The guards deliberately allow that through —
+  it's how FIFO purging and the first-admin bootstrap work.
+- **100 MB per student, FIFO.** `conversations.media_bytes_used` is kept in sync
+  by trigger. When it goes over, the server calls
+  `select_chat_media_to_purge()` (oldest first), deletes those objects from R2,
+  then calls `mark_chat_media_purged()`. Splitting it in two means a failed R2
+  call can't leave the database claiming space is free. The message row
+  survives with `media_purged = true` so the thread keeps its shape.
+
+Typing indicators and presence ride Realtime **broadcast** on the per-thread
+channel — no table, nothing persisted.
+
+### Cloudflare R2
+
+Chat attachments (images, video, PDFs, voice notes) live in a **private** R2
+bucket. The browser never holds R2 credentials or a durable URL: `server/chat-media.ts`
+issues short-lived signed PUT/GET URLs after verifying the caller's Supabase JWT
+*and* their membership of the conversation. Upload keys are generated
+server-side (`chat/<conversationId>/…`), so a client can't choose where its
+bytes land, and `ContentType`/`ContentLength` are part of the signature, so an
+upload can't exceed the size that was validated.
+
+Create the bucket, then set `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`, `R2_BUCKET` and `SUPABASE_SERVICE_ROLE_KEY` (all
+server-only — never `VITE_`-prefixed). The bucket needs CORS allowing `PUT`
+from your app origin:
+
+```json
+[{ "AllowedOrigins": ["https://your-app-domain"],
+   "AllowedMethods": ["PUT", "GET"],
+   "AllowedHeaders": ["content-type"],
+   "MaxAgeSeconds": 3000 }]
+```
+
+If R2 is unset the media endpoints return 503 and text chat keeps working.
+
 ## Applying the migration
 
 With the Supabase CLI, linked to your project:
