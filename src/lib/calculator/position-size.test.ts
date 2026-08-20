@@ -84,6 +84,93 @@ describe('3. different risk percentages', () => {
   });
 });
 
+describe('3b. Risk unit: % vs $', () => {
+  it('% mode takes Risk as a share of the balance', () => {
+    // Brief: balance 100000, risk 2% -> risk amount 2000
+    const r = expectOk(run({ accountBalance: '100000', risk: '2', riskUnit: 'percent' }));
+    expect(r.riskAmount).toBe(2000);
+  });
+
+  it('$ mode takes Risk as the money at stake, ignoring the balance', () => {
+    // Brief: balance 100000, risk $500 -> risk amount 500
+    const r = expectOk(run({ accountBalance: '100000', risk: '500', riskUnit: 'currency' }));
+    expect(r.riskAmount).toBe(500);
+  });
+
+  it('$ mode is unaffected by the balance', () => {
+    const small = expectOk(run({ accountBalance: '1000', risk: '500', riskUnit: 'currency' }));
+    const large = expectOk(run({ accountBalance: '5000000', risk: '500', riskUnit: 'currency' }));
+    expect(small.riskAmount).toBe(500);
+    expect(large.riskAmount).toBe(500);
+    expect(small.units).toBeCloseTo(large.units, 9);
+  });
+
+  it('the two modes agree when they describe the same money', () => {
+    const pct = expectOk(run({ accountBalance: '100000', risk: '0.5', riskUnit: 'percent' }));
+    const dollars = expectOk(run({ accountBalance: '100000', risk: '500', riskUnit: 'currency' }));
+    expect(pct.riskAmount).toBe(500);
+    expect(dollars.riskAmount).toBe(500);
+    expect(pct.units).toBeCloseTo(dollars.units, 9);
+    expect(pct.lots).toBeCloseTo(dollars.lots, 9);
+  });
+
+  it('sizes the $500 example correctly end to end', () => {
+    // 500 / 83.2782 = 6.0040 oz -> 0.060040 lots at 100 oz per lot
+    const r = expectOk(run({ accountBalance: '100000', risk: '500', riskUnit: 'currency' }));
+    expect(r.units).toBeCloseTo(500 / 83.2782, 8);
+    expect(r.units.toFixed(3)).toBe('6.004');
+    expect(r.lots).toBeCloseTo(0.0600397, 6);
+  });
+
+  it('applies the 100 ceiling only to %, not to $', () => {
+    // 500 would be nonsense as a percent but is a normal dollar risk.
+    expect(expectError(run({ risk: '500', riskUnit: 'percent' }))).toContain('more than 100%');
+    expect(expectOk(run({ risk: '500', riskUnit: 'currency' })).riskAmount).toBe(500);
+  });
+
+  it('rejects zero, negative and blank in $ mode too', () => {
+    expect(expectError(run({ risk: '0', riskUnit: 'currency' })))
+      .toBe('Risk must be greater than zero.');
+    expect(expectError(run({ risk: '-500', riskUnit: 'currency' })))
+      .toContain('greater than zero');
+    expect(expectError(run({ risk: '', riskUnit: 'currency' })))
+      .toContain('valid risk value');
+    expect(expectError(run({ risk: 'abc', riskUnit: 'currency' })))
+      .toContain('valid risk value');
+  });
+
+  it('rejects a $ risk above the balance, and accepts one equal to it', () => {
+    expect(expectError(run({ accountBalance: '1000', risk: '1000.01', riskUnit: 'currency' })))
+      .toContain('more than the account balance');
+    expect(expectOk(run({ accountBalance: '1000', risk: '1000', riskUnit: 'currency' })).riskAmount)
+      .toBe(1000);
+  });
+
+  it('handles a fractional $ risk', () => {
+    const r = expectOk(run({ risk: '12.75', riskUnit: 'currency' }));
+    expect(r.riskAmount).toBe(12.75);
+    expect(r.units).toBeCloseTo(12.75 / 83.2782, 9);
+  });
+
+  it('works for a short trade in $ mode', () => {
+    const r = expectOk(run({
+      openPrice: '4080.6318', stopLossPrice: '4163.91',
+      risk: '500', riskUnit: 'currency',
+    }));
+    expect(r.direction).toBe('short');
+    expect(r.riskAmount).toBe(500);
+    expect(r.units.toFixed(3)).toBe('6.004');
+  });
+
+  it('respects contract size in $ mode when the instrument changes', () => {
+    const gold = expectOk(run({ risk: '500', riskUnit: 'currency', instrumentSymbol: 'XAUUSD' }));
+    const eur = expectOk(run({ risk: '500', riskUnit: 'currency', instrumentSymbol: 'EURUSD' }));
+    expect(gold.units).toBeCloseTo(eur.units, 9);
+    expect(gold.lots).toBeCloseTo(gold.units / 100, 9);
+    expect(eur.lots).toBeCloseTo(eur.units / 100000, 9);
+  });
+});
+
 describe('4. different stop-loss distances', () => {
   it('sizes inversely to the stop distance', () => {
     const tight = expectOk(run({ stopLossPrice: '4153.91' }));   // 10.00 away

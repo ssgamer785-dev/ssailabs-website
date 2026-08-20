@@ -160,7 +160,10 @@ export function RiskCalculatorScreen() {
               <div style={css('flex:1;height:52px;border:1px solid #D8DEE8;border-radius:8px;background:#FFFFFF;display:flex;align-items:center;padding:0 14px;min-width:0')}>
                 <select value={riskUnit} onChange={e => setRiskUnit(e.target.value as RiskUnit)} style={SELECT}>
                   <option value="percent">%</option>
-                  <option value="currency">{depositCurrency}</option>
+                  {/* Always "$": a non-USD account is stopped by the FX guard
+                      before any result is produced, so this can never mislabel
+                      a calculation that actually succeeded. */}
+                  <option value="currency">$</option>
                 </select>
                 <Chevron />
               </div>
