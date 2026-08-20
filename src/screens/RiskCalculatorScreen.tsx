@@ -1,97 +1,206 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
+import { DEPOSIT_CURRENCIES, INSTRUMENTS, type CurrencyCode } from '../lib/calculator/instruments';
+import {
+  calculatePositionSize,
+  formatSize,
+  type CalculatorResult,
+  type RiskUnit,
+} from '../lib/calculator/position-size';
 import { StatusBar } from '../components/StatusBar';
 import { PhoneShell } from '../components/PhoneShell';
 
-const C = {
-  instrument: ['Gold (XAUUSD)', 'EUR/USD', 'US30', 'BTC/USD'],
-  balance: [10000, 5000, 25000, 50000],
-  risk: [2, 1, 3, 5],
-  entry: [3365, 3372, 3358],
-  sl: [3358, 3364, 3350],
-  tp: [3380, 3392, 3372],
-} as const;
+const LABEL = css('font-size:14px;font-weight:700;letter-spacing:-.1px;color:#0F172A');
+const FIELD = css('margin-top:9px;height:52px;border:1px solid #D8DEE8;border-radius:8px;background:#FFFFFF;display:flex;align-items:center;padding:0 14px');
+const INPUT = css('flex:1;font-size:16px;height:100%;color:#0F172A;background:transparent;border:0;outline:none;min-width:0');
+/** Native select keeps the platform picker on mobile; the chevron is drawn by the wrapper. */
+const SELECT = css('flex:1;font-size:16px;height:100%;color:#0F172A;background:transparent;border:0;outline:none;appearance:none;-webkit-appearance:none;cursor:pointer;min-width:0');
 
-type Key = keyof typeof C;
-
-function money(n: number) {
-  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function Chevron() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#334155" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" style={css('flex:none;margin-left:8px')}>
+      <path d="M6 9.5l6 6 6-6" />
+    </svg>
+  );
 }
 
-function Row({ label, value, onClick }: { label: string; value: string; onClick: () => void }) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div onClick={onClick} style={css('display:flex;align-items:center;gap:12px;cursor:pointer')}>
-      <div style={css('flex:1;font-size:13px;color:#475569;white-space:nowrap')}>{label}</div>
-      <Hoverable style={css('width:186px;height:40px;border:1px solid #E7EBF2;border-radius:10px;background:#fff;display:flex;align-items:center;padding:0 12px;gap:8px')} hoverStyle={css('border-color:#0B5FEF')}>
-        <div style={css('flex:1;font-size:13.5px;font-weight:500;color:#334155;white-space:nowrap;overflow:hidden')}>{value}</div>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C2CAD6" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" style={css('flex:none')}><path d="M9 6l6 6-6 6" /></svg>
-      </Hoverable>
+    <div style={css('flex:none')}>
+      <div style={LABEL}>{label}</div>
+      {children}
     </div>
   );
 }
 
-function ResultCard({ label, value, sub }: { label: string; value: string; sub: string }) {
+function ResultColumn({ label, value }: { label: string; value: string }) {
   return (
-    <div style={css('background:#FFFFFF;border:1px solid #EDF0F6;border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,.035);padding:11px 13px 12px;display:flex;flex-direction:column;gap:3px')}>
-      <div style={css('font-size:10.5px;color:#94A3B8')}>{label}</div>
-      <div style={css('font-size:20px;font-weight:800;letter-spacing:-.6px')}>{value}</div>
-      <div style={css('font-size:10.5px;color:#94A3B8')}>{sub}</div>
+    <div style={css('flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;min-width:0')}>
+      <div style={css('font-size:13px;font-weight:500;color:#64748B;white-space:nowrap')}>{label}</div>
+      <div style={css('font-size:30px;font-weight:800;letter-spacing:-1px;color:#0F172A;white-space:nowrap')}>{value}</div>
     </div>
   );
 }
 
 export function RiskCalculatorScreen() {
   const navigate = useNavigate();
-  const [ci, setCi] = useState<Record<Key, number>>({ instrument: 0, balance: 0, risk: 0, entry: 0, sl: 0, tp: 0 });
-  const [pricesTouched, setPricesTouched] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  function cycle(k: Key) {
-    setCi(p => ({ ...p, [k]: (p[k] + 1) % C[k].length }));
-    if (k === 'entry' || k === 'sl' || k === 'tp') setPricesTouched(true);
+  // Prefilled with the worked example so the screen is usable on arrival.
+  const [instrumentSymbol, setInstrumentSymbol] = useState('XAUUSD');
+  const [depositCurrency, setDepositCurrency] = useState<CurrencyCode>('USD');
+  const [openPrice, setOpenPrice] = useState('4163.91000');
+  const [stopLossPrice, setStopLossPrice] = useState('4080.63180');
+  const [accountBalance, setAccountBalance] = useState('100000');
+  const [risk, setRisk] = useState('2');
+  const [riskUnit, setRiskUnit] = useState<RiskUnit>('percent');
+
+  // Results deliberately only move when Calculate is pressed.
+  const [result, setResult] = useState<CalculatorResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function calculate() {
+    const outcome = calculatePositionSize({
+      instrumentSymbol,
+      depositCurrency,
+      openPrice,
+      stopLossPrice,
+      accountBalance,
+      risk,
+      riskUnit,
+    });
+    if (outcome.status === 'ok') {
+      setResult(outcome.result);
+      setError(null);
+    } else {
+      setResult(null);
+      setError(outcome.error);
+    }
   }
 
-  const instrument = C.instrument[ci.instrument];
-  const balance = C.balance[ci.balance];
-  const risk = C.risk[ci.risk];
-  const entry = C.entry[ci.entry];
-  const sl = C.sl[ci.sl];
-  const tp = C.tp[ci.tp];
-  const riskAmount = (balance * risk) / 100;
-  const stopDist = Math.max(0.01, Math.abs(entry - sl));
-  const lots = riskAmount / (stopDist * 46.08);
-  const rrNum = Math.abs(tp - entry) / stopDist;
-  const rr = pricesTouched ? '1:' + rrNum.toFixed(2) : '1:2.50';
-  const units = Math.round((Math.round(lots * 100) / 100) * 100000).toLocaleString('en-US');
-
   return (
-    <PhoneShell>
+    <PhoneShell scrollRef={scrollRef}>
       <StatusBar />
+
       <div style={css('flex:none;height:52px;display:flex;align-items:center;padding:0 20px;gap:12px')}>
         <svg onClick={() => navigate(-1)} width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" style={css('cursor:pointer;flex:none')}><path d="M14.5 5.5l-7 6.5 7 6.5" /></svg>
         <div style={css('flex:1;text-align:center;font-size:17px;font-weight:700;letter-spacing:-.35px;padding-right:22px')}>Risk Calculator</div>
       </div>
-      <div style={css('flex:none;padding:8px 20px 0;display:flex;flex-direction:column;gap:9px')}>
-        <Row label="Instrument" value={instrument} onClick={() => cycle('instrument')} />
-        <Row label="Account Balance" value={'$' + balance.toLocaleString('en-US')} onClick={() => cycle('balance')} />
-        <Row label="Risk Percentage" value={risk + '%'} onClick={() => cycle('risk')} />
-        <Row label="Entry Price" value={String(entry)} onClick={() => cycle('entry')} />
-        <Row label="Stop Loss" value={String(sl)} onClick={() => cycle('sl')} />
-        <Row label="Take Profit" value={String(tp)} onClick={() => cycle('tp')} />
+
+      <div ref={scrollRef} style={css('flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch')}>
+        <div style={css('padding:6px 20px 0;display:flex;flex-direction:column;gap:18px')}>
+
+          <Field label="Instrument">
+            <div style={FIELD}>
+              <select value={instrumentSymbol} onChange={e => setInstrumentSymbol(e.target.value)} style={SELECT}>
+                {INSTRUMENTS.map(i => <option key={i.symbol} value={i.symbol}>{i.label}</option>)}
+              </select>
+              <Chevron />
+            </div>
+          </Field>
+
+          <Field label="Deposit currency">
+            <div style={FIELD}>
+              <select value={depositCurrency} onChange={e => setDepositCurrency(e.target.value as CurrencyCode)} style={SELECT}>
+                {DEPOSIT_CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+              </select>
+              <Chevron />
+            </div>
+          </Field>
+
+          <Field label="Open price">
+            <div style={FIELD}>
+              <input
+                value={openPrice}
+                onChange={e => setOpenPrice(e.target.value)}
+                inputMode="decimal"
+                placeholder="0.00"
+                style={INPUT}
+              />
+            </div>
+          </Field>
+
+          <Field label="Stop loss price">
+            <div style={FIELD}>
+              <input
+                value={stopLossPrice}
+                onChange={e => setStopLossPrice(e.target.value)}
+                inputMode="decimal"
+                placeholder="0.00"
+                style={INPUT}
+              />
+            </div>
+          </Field>
+
+          <Field label="Account Balance">
+            <div style={FIELD}>
+              <input
+                value={accountBalance}
+                onChange={e => setAccountBalance(e.target.value)}
+                inputMode="decimal"
+                placeholder="0"
+                style={INPUT}
+              />
+            </div>
+          </Field>
+
+          <Field label="Risk">
+            <div style={css('margin-top:9px;display:flex;gap:12px')}>
+              <div style={css('flex:1;height:52px;border:1px solid #D8DEE8;border-radius:8px;background:#FFFFFF;display:flex;align-items:center;padding:0 14px;min-width:0')}>
+                <input
+                  value={risk}
+                  onChange={e => setRisk(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="0"
+                  style={INPUT}
+                />
+              </div>
+              <div style={css('flex:1;height:52px;border:1px solid #D8DEE8;border-radius:8px;background:#FFFFFF;display:flex;align-items:center;padding:0 14px;min-width:0')}>
+                <select value={riskUnit} onChange={e => setRiskUnit(e.target.value as RiskUnit)} style={SELECT}>
+                  <option value="percent">%</option>
+                  <option value="currency">{depositCurrency}</option>
+                </select>
+                <Chevron />
+              </div>
+            </div>
+          </Field>
+
+          <div
+            onClick={() => navigate('/chat/admin')}
+            style={css('font-size:14px;font-weight:700;color:#0B5FEF;text-decoration:underline;cursor:pointer;line-height:1.4')}
+          >
+            Calculate lot size in MT4/MT5?
+          </div>
+
+          {error && (
+            <div style={css('font-size:12.5px;color:#EF4444;line-height:1.45;text-wrap:pretty')}>{error}</div>
+          )}
+        </div>
+
+        <div style={css('margin-top:22px;border-top:1px solid #EDF0F6;padding:24px 20px 0;display:flex;justify-content:center')}>
+          <Hoverable
+            onClick={calculate}
+            style={css('width:230px;height:56px;border-radius:999px;background:#0B5FEF;box-shadow:0 10px 22px rgba(11,95,239,.28);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:600;color:#FFFFFF;cursor:pointer;letter-spacing:-.2px')}
+            hoverStyle={css('background:#0A52D6')}
+          >
+            Calculate
+          </Hoverable>
+        </div>
+
+        <div style={css('padding:26px 20px 12px;display:flex;align-items:flex-start;gap:12px')}>
+          <ResultColumn label="Lots (trade size)" value={result ? formatSize(result.lots, 2) : '—'} />
+          <ResultColumn label="Units (trade size)" value={result ? formatSize(result.units, 3) : '—'} />
+        </div>
+
+        {result && (
+          <div style={css('padding:0 20px 30px;text-align:center;font-size:11.5px;color:#94A3B8;line-height:1.5')}>
+            {result.direction === 'long' ? 'Long' : 'Short'} · risking {formatSize(result.riskAmount, 2)} {depositCurrency} over {formatSize(result.stopDistance, result.instrument.pricePrecision)} points · {formatSize(result.instrument.contractSize, 0)} units per lot
+          </div>
+        )}
+        {!result && <div style={css('height:30px')} />}
       </div>
-      <Hoverable style={css('flex:none;margin:20px 20px 0;height:48px;border-radius:12px;background:#0B5FEF;box-shadow:0 10px 22px rgba(11,95,239,.28);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#FFFFFF;cursor:pointer')} hoverStyle={css('background:#0A52D6')}>
-        Calculate
-      </Hoverable>
-      <div style={css('flex:none;padding:16px 20px 0;display:grid;grid-template-columns:1fr 1fr;gap:11px')}>
-        <ResultCard label="Position Size" value={lots.toFixed(2)} sub="Lots" />
-        <ResultCard label="Risk Amount" value={money(riskAmount)} sub="Per trade" />
-        <ResultCard label="Max Loss" value={money(riskAmount)} sub="At stop loss" />
-        <ResultCard label="Risk Reward" value={rr} sub="Ratio" />
-        <ResultCard label="Lot Size" value={lots.toFixed(2)} sub="Standard" />
-        <ResultCard label="Units" value={units} sub="Units" />
-      </div>
-      <div style={css('flex:1')} />
     </PhoneShell>
   );
 }
