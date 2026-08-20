@@ -14,7 +14,7 @@
  * and a short with the same gap risk the same money.
  */
 
-import { findInstrument, type CurrencyCode, type InstrumentSpec } from './instruments';
+import { currencySymbol, findInstrument, type CurrencyCode, type InstrumentSpec } from './instruments';
 
 export type RiskUnit = 'percent' | 'currency';
 
@@ -30,7 +30,8 @@ export interface CalculatorInput {
 }
 
 export interface CalculatorResult {
-  lots: number;
+  /** null when the instrument has no standardised lot — the screen shows "?". */
+  lots: number | null;
   units: number;
   riskAmount: number;
   stopDistance: number;
@@ -120,9 +121,11 @@ export function calculatePositionSize(input: CalculatorInput): CalculationOutcom
   const direction: 'long' | 'short' = stopLossPrice < openPrice ? 'long' : 'short';
 
   const units = riskAmount / (stopDistance * rate);
-  const lots = units / instrument.contractSize;
+  // Units never depend on contract size; lots do, so they stay null for the
+  // instruments where a lot is not standardised across brokers.
+  const lots = instrument.contractSize === null ? null : units / instrument.contractSize;
 
-  if (!Number.isFinite(units) || !Number.isFinite(lots)) {
+  if (!Number.isFinite(units) || (lots !== null && !Number.isFinite(lots))) {
     return { status: 'error', error: 'Those values produce a position size that cannot be calculated.' };
   }
 
@@ -142,4 +145,17 @@ export function formatSize(value: number, maxDecimals: number): string {
   while (decimals < 8 && Math.abs(value) < 10 ** -decimals) decimals += 2;
 
   return value.toLocaleString('en-US', { maximumFractionDigits: decimals });
+}
+
+/**
+ * Money at risk, e.g. "US$2,000.00". Always two decimals — this is an amount
+ * of money, not a size, so trailing zeros are meaningful.
+ */
+export function formatMoney(value: number, currency: CurrencyCode): string {
+  if (!Number.isFinite(value)) return '—';
+  const amount = value.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${currencySymbol(currency)}${amount}`;
 }

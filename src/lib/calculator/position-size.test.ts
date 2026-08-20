@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { calculatePositionSize, formatSize, type CalculatorInput } from './position-size';
-import { INSTRUMENTS, findInstrument } from './instruments';
+import { calculatePositionSize, formatMoney, formatSize, type CalculatorInput } from './position-size';
+import { INSTRUMENTS, findInstrument, historicalChartUrl, liveChartUrl } from './instruments';
 
 /** The reference screenshot's inputs; individual tests override what they vary. */
 const BASE: CalculatorInput = {
@@ -25,6 +25,13 @@ function expectOk(outcome: ReturnType<typeof run>) {
 function expectError(outcome: ReturnType<typeof run>) {
   if (outcome.status !== 'error') throw new Error('expected a validation error, got a result');
   return outcome.error;
+}
+
+/** Asserts the instrument has a standardised lot and returns it as a number. */
+function expectLots(outcome: ReturnType<typeof run>) {
+  const lots = expectOk(outcome).lots;
+  if (lots === null) throw new Error('expected a numeric lot size, got null');
+  return lots;
 }
 
 describe('1. XAU/USD reference case', () => {
@@ -166,8 +173,10 @@ describe('3b. Risk unit: % vs $', () => {
     const gold = expectOk(run({ risk: '500', riskUnit: 'currency', instrumentSymbol: 'XAUUSD' }));
     const eur = expectOk(run({ risk: '500', riskUnit: 'currency', instrumentSymbol: 'EURUSD' }));
     expect(gold.units).toBeCloseTo(eur.units, 9);
-    expect(gold.lots).toBeCloseTo(gold.units / 100, 9);
-    expect(eur.lots).toBeCloseTo(eur.units / 100000, 9);
+    expect(expectLots(run({ risk: '500', riskUnit: 'currency', instrumentSymbol: 'XAUUSD' })))
+      .toBeCloseTo(gold.units / 100, 9);
+    expect(expectLots(run({ risk: '500', riskUnit: 'currency', instrumentSymbol: 'EURUSD' })))
+      .toBeCloseTo(eur.units / 100000, 9);
   });
 });
 
@@ -276,19 +285,19 @@ describe('10. instrument switching', () => {
     // purely by contract size.
     const gold = expectOk(run({ instrumentSymbol: 'XAUUSD' }));
     const eur = expectOk(run({ instrumentSymbol: 'EURUSD' }));
-    const btc = expectOk(run({ instrumentSymbol: 'BTCUSD' }));
 
     expect(gold.units).toBeCloseTo(eur.units, 9);
     expect(gold.lots).toBeCloseTo(gold.units / 100, 9);
     expect(eur.lots).toBeCloseTo(eur.units / 100000, 9);
-    expect(btc.lots).toBeCloseTo(btc.units, 9);
   });
 
   it('exposes a spec for every instrument in the dropdown', () => {
     for (const spec of INSTRUMENTS) {
       expect(findInstrument(spec.symbol)).toBeDefined();
-      expect(spec.contractSize).toBeGreaterThan(0);
       expect(spec.label.length).toBeGreaterThan(0);
+      expect(spec.chartSymbol.length).toBeGreaterThan(0);
+      // Either a real contract size, or an explicit null meaning "no standard lot".
+      if (spec.contractSize !== null) expect(spec.contractSize).toBeGreaterThan(0);
     }
   });
 
@@ -324,5 +333,91 @@ describe('formatSize', () => {
     expect(formatSize(0.00024016, 2)).toBe('0.0002');
     expect(formatSize(0.0000001, 2)).toBe('0.0000001');
     expect(formatSize(0, 2)).toBe('0');
+  });
+});
+
+
+describe('11. results section — reference screenshot', () => {
+  // open 4491.32000, stop 4401.49360, 2% of 100000
+  const REF = {
+    openPrice: '4491.32000',
+    stopLossPrice: '4401.49360',
+    accountBalance: '100000',
+    risk: '2',
+    riskUnit: 'percent' as const,
+  };
+
+  it('reproduces the units and money-at-risk figures exactly', () => {
+    const r = expectOk(run(REF));
+    expect(r.units.toFixed(3)).toBe('22.265');
+    expect(formatMoney(r.riskAmount, 'USD')).toBe('US$2,000.00');
+  });
+
+  it('gives XAU/USD a numeric lot size', () => {
+    expect(expectLots(run(REF))).toBeCloseTo(22.265169 / 100, 6);
+  });
+});
+
+describe('12. lots "?" for instruments with no standard lot', () => {
+  it.each(['US30', 'NAS100', 'SPX500', 'BTCUSD', 'ETHUSD'] as const)(
+    '%s reports lots as null rather than inventing one', symbol => {
+      const r = expectOk(run({ instrumentSymbol: symbol }));
+      expect(r.lots).toBeNull();
+      // Units never depend on contract size, so they stay exact.
+      expect(r.units).toBeGreaterThan(0);
+      expect(r.units.toFixed(3)).toBe('24.016');
+    });
+
+  it.each(['XAUUSD', 'XAGUSD', 'EURUSD', 'GBPUSD', 'AUDUSD', 'NZDUSD', 'USOIL'] as const)(
+    '%s still reports a numeric lot size', symbol => {
+      const spec = findInstrument(symbol)!;
+      expect(expectLots(run({ instrumentSymbol: symbol })))
+        .toBeCloseTo(expectOk(run({ instrumentSymbol: symbol })).units / spec.contractSize!, 9);
+    });
+});
+
+describe('13. money at risk formatting', () => {
+  it('formats the % example as US$2,000.00', () => {
+    const r = expectOk(run({ accountBalance: '100000', risk: '2', riskUnit: 'percent' }));
+    expect(formatMoney(r.riskAmount, 'USD')).toBe('US$2,000.00');
+  });
+
+  it('formats a fixed $ risk as the exact amount entered', () => {
+    const r = expectOk(run({ risk: '500', riskUnit: 'currency' }));
+    expect(formatMoney(r.riskAmount, 'USD')).toBe('US$500.00');
+  });
+
+  it('always shows two decimals and groups thousands', () => {
+    expect(formatMoney(1234567.5, 'USD')).toBe('US$1,234,567.50');
+    expect(formatMoney(0.5, 'USD')).toBe('US$0.50');
+    expect(formatMoney(12, 'USD')).toBe('US$12.00');
+  });
+
+  it('tracks the account balance in % mode', () => {
+    expect(formatMoney(expectOk(run({ accountBalance: '25000', risk: '2' })).riskAmount, 'USD'))
+      .toBe('US$500.00');
+    expect(formatMoney(expectOk(run({ accountBalance: '750000', risk: '1.5' })).riskAmount, 'USD'))
+      .toBe('US$11,250.00');
+  });
+});
+
+describe('14. chart links follow the selected instrument', () => {
+  it('builds a distinct live and historical URL per instrument', () => {
+    const gold = findInstrument('XAUUSD')!;
+    const eur = findInstrument('EURUSD')!;
+    expect(liveChartUrl(gold)).toContain('XAUUSD');
+    expect(historicalChartUrl(gold)).toContain('XAUUSD');
+    expect(liveChartUrl(eur)).toContain('EURUSD');
+    expect(liveChartUrl(gold)).not.toBe(liveChartUrl(eur));
+    expect(liveChartUrl(gold)).not.toBe(historicalChartUrl(gold));
+  });
+
+  it('every instrument produces usable links and a label for them', () => {
+    for (const spec of INSTRUMENTS) {
+      expect(liveChartUrl(spec)).toStartWith('https://');
+      expect(historicalChartUrl(spec)).toStartWith('https://');
+      // "View XAU/USD Live Chart" is built from this label.
+      expect(spec.label).not.toBe('');
+    }
   });
 });
