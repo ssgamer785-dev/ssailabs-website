@@ -18,6 +18,8 @@ export interface FeedPost {
   takeProfit: number | null;
   attachment: AttachmentKind;
   storageKey: string | null;
+  /** R2 key of the video's poster frame; null for every other attachment. */
+  posterKey: string | null;
   mimeType: string | null;
   fileName: string | null;
   sizeBytes: number | null;
@@ -36,7 +38,8 @@ export interface FeedPost {
 type FeedRow = {
   id: string; author_id: string; channel: PostChannel; title: string | null; body: string | null;
   instrument: string | null; entry_price: number | null; stop_loss: number | null; take_profit: number | null;
-  attachment: AttachmentKind; storage_key: string | null; mime_type: string | null; size_bytes: number | null;
+  attachment: AttachmentKind; storage_key: string | null; poster_key: string | null;
+  mime_type: string | null; size_bytes: number | null;
   file_name: string | null; media_purged: boolean; chart_seed: number | null; is_anonymous: boolean;
   display_name: string; created_at: string; updated_at: string; author_name: string;
   author_role: UserRole | null; is_mine: boolean; like_count: number; comment_count: number; liked_by_me: boolean;
@@ -55,6 +58,7 @@ function toPost(r: FeedRow): FeedPost {
     takeProfit: r.take_profit,
     attachment: r.attachment,
     storageKey: r.storage_key,
+    posterKey: r.poster_key,
     mimeType: r.mime_type,
     fileName: r.file_name,
     sizeBytes: r.size_bytes,

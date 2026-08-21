@@ -2,8 +2,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../supabase';
 import { useAuth } from '../auth-context';
-import type { ChatMessage, ConnectionState, MediaKind, MessageKind } from './types';
-import { deleteRemoteMedia, finalizeUpload, requestUploadUrl, uploadToR2 } from './media-api';
+import { probeVideo } from '../media/video-poster';
+import { sortByTime, upsertMessage as upsert } from './merge';
+import {
+  purgeNotice,
+  type ChatMessage,
+  type ConnectionState,
+  type MediaKind,
+  type MessageKind,
+  type UploadStatus,
+} from './types';
+import {
+  deleteRemoteMedia,
+  finalizeUpload,
+  requestUploadUrl,
+  resumeUpload,
+  uploadToR2,
+} from './media-api';
 
 const PAGE_SIZE = 30;
 const TYPING_TIMEOUT_MS = 3500;
@@ -15,6 +30,8 @@ type MessageRow = {
   kind: MessageKind;
   body: string | null;
   storage_key: string | null;
+  poster_key: string | null;
+  poster_size_bytes: number | null;
   mime_type: string | null;
   size_bytes: number | null;
   file_name: string | null;
@@ -24,12 +41,20 @@ type MessageRow = {
   client_id: string | null;
   deleted_at: string | null;
   media_purged: boolean | null;
+  upload_status: UploadStatus | null;
 };
 
 const SELECT_COLUMNS =
-  'id, conversation_id, sender_id, kind, body, storage_key, mime_type, size_bytes, file_name, voice_duration_seconds, read_at, created_at, client_id, deleted_at, media_purged';
+  'id, conversation_id, sender_id, kind, body, storage_key, poster_key, poster_size_bytes, mime_type, size_bytes, file_name, voice_duration_seconds, read_at, created_at, client_id, deleted_at, media_purged, upload_status';
 
 function toMessage(row: MessageRow): ChatMessage {
+  const uploadStatus: UploadStatus = row.upload_status ?? 'ready';
+  // A row still marked pending when it reaches us from the server is an upload
+  // that never finished — the sender closed the app mid-send. The live upload
+  // keeps its own 'uploading' state through upsertMessage, so this only ever
+  // labels the abandoned case.
+  const abandoned = uploadStatus === 'pending';
+
   return {
     id: row.id,
     clientId: row.client_id ?? row.id,
@@ -38,33 +63,20 @@ function toMessage(row: MessageRow): ChatMessage {
     kind: row.kind,
     body: row.body,
     storageKey: row.storage_key,
+    posterKey: row.poster_key,
+    posterSizeBytes: row.poster_size_bytes,
     mimeType: row.mime_type,
     sizeBytes: row.size_bytes,
     fileName: row.file_name,
-    voiceDurationSeconds: row.voice_duration_seconds,
+    durationSeconds: row.voice_duration_seconds,
     readAt: row.read_at,
     createdAt: row.created_at,
     deletedAt: row.deleted_at,
     mediaPurged: !!row.media_purged,
-    status: 'sent',
+    uploadStatus,
+    status: abandoned ? 'failed' : 'sent',
+    error: abandoned ? "This upload didn't finish." : undefined,
   };
-}
-
-function sortByTime(list: ChatMessage[]): ChatMessage[] {
-  return [...list].sort((a, b) => {
-    const d = a.createdAt.localeCompare(b.createdAt);
-    return d !== 0 ? d : a.clientId.localeCompare(b.clientId);
-  });
-}
-
-/** Merges a confirmed row in, replacing its optimistic twin if one is present. */
-function upsert(list: ChatMessage[], incoming: ChatMessage): ChatMessage[] {
-  const idx = list.findIndex(m => m.clientId === incoming.clientId || m.id === incoming.id);
-  if (idx === -1) return sortByTime([...list, incoming]);
-  const next = [...list];
-  // Keep the local preview so an image doesn't flicker while its signed URL loads.
-  next[idx] = { ...incoming, localPreviewUrl: next[idx].localPreviewUrl };
-  return sortByTime(next);
 }
 
 export interface UseConversation {
@@ -73,9 +85,14 @@ export interface UseConversation {
   loading: boolean;
   error: string | null;
   connection: ConnectionState;
+  /** True while the other side of this thread has the screen open. */
+  peerOnline: boolean;
   hasMore: boolean;
   loadingOlder: boolean;
   peerTyping: boolean;
+  /** Set when FIFO cleanup freed space; clears when dismissed. */
+  storageNotice: string | null;
+  dismissStorageNotice: () => void;
   loadOlder: () => Promise<void>;
   sendText: (body: string) => Promise<void>;
   sendMedia: (file: Blob, kind: MediaKind, fileName: string, durationSeconds?: number) => Promise<void>;
@@ -83,11 +100,12 @@ export interface UseConversation {
   deleteMessage: (message: ChatMessage) => Promise<void>;
   markRead: () => Promise<void>;
   notifyTyping: () => void;
+  stopTyping: () => void;
 }
 
 /**
  * Drives one Student <-> Admin thread: history, pagination, Realtime sync,
- * optimistic sends with retry, read receipts and typing.
+ * presence, optimistic sends with retry, read receipts and typing.
  *
  * Pass a conversationId to open a specific thread (admin viewing a student);
  * omit it and the current student's own thread is resolved or created.
@@ -101,15 +119,24 @@ export function useConversation(explicitConversationId?: string): UseConversatio
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [connection, setConnection] = useState<ConnectionState>('connecting');
+  const [peerOnline, setPeerOnline] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [peerTyping, setPeerTyping] = useState(false);
+  const [storageNotice, setStorageNotice] = useState<string | null>(null);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastTypingSent = useRef(0);
   /** Newest server timestamp we hold — the gap-fill anchor after a reconnect. */
   const newestAt = useRef<string | null>(null);
+  /** Every object URL this thread minted, so unmount can revoke all of them. */
+  const objectUrls = useRef<string[]>([]);
+
+  const trackObjectUrl = useCallback((url: string) => {
+    objectUrls.current.push(url);
+    return url;
+  }, []);
 
   // ---- resolve the conversation ------------------------------------------
 
@@ -150,7 +177,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     // Preserve any in-flight optimistic messages across a refetch.
     setMessages(prev => {
       const pending = prev.filter(m => m.status !== 'sent');
-      return sortByTime([...ordered, ...pending]);
+      return ordered.reduce(upsert, pending);
     });
   }, []);
 
@@ -184,10 +211,10 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     }
     const rows = ((data ?? []) as MessageRow[]).map(toMessage);
     setHasMore(rows.length === PAGE_SIZE);
-    if (rows.length) setMessages(prev => sortByTime([...rows, ...prev]));
+    if (rows.length) setMessages(prev => rows.reduce(upsert, prev));
   }, [conversationId, hasMore, loadingOlder, messages]);
 
-  // ---- realtime + reconnection -------------------------------------------
+  // ---- realtime + presence + reconnection ---------------------------------
 
   /** After a dropped subscription, pull anything that landed while we were away. */
   const fillGap = useCallback(async (id: string) => {
@@ -216,7 +243,9 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     let hadDrop = false;
 
     const channel = supabase
-      .channel(`chat:${conversationId}`, { config: { broadcast: { self: false } } })
+      .channel(`chat:${conversationId}`, {
+        config: { broadcast: { self: false }, presence: { key: userId } },
+      })
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
@@ -244,10 +273,17 @@ export function useConversation(explicitConversationId?: string): UseConversatio
           typingTimer.current = setTimeout(() => setPeerTyping(false), TYPING_TIMEOUT_MS);
         }
       })
+      .on('presence', { event: 'sync' }, () => {
+        if (!active) return;
+        // Anyone in the channel who isn't us is the other side of the thread.
+        const others = Object.keys(channel.presenceState()).filter(key => key !== userId);
+        setPeerOnline(others.length > 0);
+      })
       .subscribe(status => {
         if (!active) return;
         if (status === 'SUBSCRIBED') {
           setConnection('online');
+          void channel.track({ userId, onlineAt: new Date().toISOString() });
           if (hadDrop) {
             hadDrop = false;
             void fillGap(conversationId);
@@ -255,6 +291,8 @@ export function useConversation(explicitConversationId?: string): UseConversatio
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           hadDrop = true;
           setConnection('offline');
+          setPeerOnline(false);
+          setPeerTyping(false);
         }
       });
 
@@ -283,7 +321,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     setMessages(prev => prev.map(m => (m.clientId === clientId ? { ...m, ...changes } : m)));
   }, []);
 
-  const insertRow = useCallback(async (draft: ChatMessage) => {
+  const insertRow = useCallback(async (draft: ChatMessage, uploadStatus: UploadStatus) => {
     const { data, error: insErr } = await supabase
       .from('messages')
       .insert({
@@ -293,10 +331,13 @@ export function useConversation(explicitConversationId?: string): UseConversatio
         body: draft.body,
         client_id: draft.clientId,
         storage_key: draft.storageKey,
+        poster_key: draft.posterKey,
+        poster_size_bytes: draft.posterSizeBytes,
         mime_type: draft.mimeType,
         size_bytes: draft.sizeBytes,
         file_name: draft.fileName,
-        voice_duration_seconds: draft.voiceDurationSeconds,
+        voice_duration_seconds: draft.durationSeconds,
+        upload_status: uploadStatus,
       })
       .select(SELECT_COLUMNS)
       .single();
@@ -305,32 +346,12 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     return toMessage(data as MessageRow);
   }, []);
 
-  const runSend = useCallback(async (draft: ChatMessage) => {
+  /** Plain text: one insert, no bytes, nothing to reserve. */
+  const sendTextRow = useCallback(async (draft: ChatMessage) => {
     try {
-      if (draft.pendingFile && draft.kind !== 'text') {
-        patch(draft.clientId, { status: 'uploading', progress: 0, error: undefined });
-        const ticket = await requestUploadUrl({
-          conversationId: draft.conversationId,
-          kind: draft.kind as MediaKind,
-          mimeType: draft.mimeType || 'application/octet-stream',
-          sizeBytes: draft.pendingFile.size,
-        });
-        await uploadToR2(
-          ticket.uploadUrl,
-          draft.pendingFile,
-          draft.mimeType || 'application/octet-stream',
-          fraction => patch(draft.clientId, { progress: fraction }),
-        );
-        draft = { ...draft, storageKey: ticket.storageKey };
-        patch(draft.clientId, { storageKey: ticket.storageKey, status: 'sending' });
-      }
-
-      const saved = await insertRow(draft);
-      setMessages(prev => upsert(prev, { ...saved, localPreviewUrl: draft.localPreviewUrl }));
+      const saved = await insertRow(draft, 'ready');
+      setMessages(prev => upsert(prev, saved));
       if (!newestAt.current || saved.createdAt > newestAt.current) newestAt.current = saved.createdAt;
-
-      // Quota is enforced after the row exists so the new object is counted.
-      if (draft.storageKey) await finalizeUpload(draft.conversationId).catch(() => {});
     } catch (e) {
       patch(draft.clientId, {
         status: 'failed',
@@ -339,31 +360,122 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     }
   }, [insertRow, patch]);
 
+  /**
+   * Media send, in the order the storage rules require:
+   *
+   *   1. ask the server for somewhere to put it — that call frees space first,
+   *      deleting the oldest attachments if this one wouldn't otherwise fit;
+   *   2. write the message row as 'pending', so the database knows about the
+   *      object before a single byte is sent and nothing can be orphaned;
+   *   3. upload the bytes (and the poster frame, for video);
+   *   4. flip the row to 'ready', which is what releases it to the recipient.
+   *
+   * A failure at any point leaves a pending row holding the key. Retrying
+   * resumes that same row rather than starting a second one.
+   */
+  const sendMediaRow = useCallback(async (draft: ChatMessage) => {
+    const file = draft.pendingFile;
+    if (!file) return;
+
+    try {
+      patch(draft.clientId, { status: 'uploading', progress: 0, error: undefined });
+      const mimeType = draft.mimeType || 'application/octet-stream';
+
+      // A resumed send already has its row and its keys; a fresh one does not.
+      let rowId = draft.uploadStatus === 'pending' && draft.storageKey ? draft.id : null;
+      let uploadUrl: string;
+      let posterUploadUrl: string | undefined;
+
+      if (rowId) {
+        const ticket = await resumeUpload(rowId);
+        uploadUrl = ticket.uploadUrl;
+        posterUploadUrl = ticket.posterUploadUrl;
+      } else {
+        const ticket = await requestUploadUrl({
+          conversationId: draft.conversationId,
+          kind: draft.kind as MediaKind,
+          mimeType,
+          sizeBytes: file.size,
+          posterBytes: draft.pendingPoster?.size,
+        });
+        uploadUrl = ticket.uploadUrl;
+        posterUploadUrl = ticket.posterUploadUrl;
+
+        if (ticket.purged > 0) setStorageNotice(purgeNotice(ticket.purged));
+
+        draft = { ...draft, storageKey: ticket.storageKey, posterKey: ticket.posterKey ?? null };
+        const row = await insertRow(draft, 'pending');
+        rowId = row.id;
+        draft = { ...draft, id: row.id, createdAt: row.createdAt, uploadStatus: 'pending' };
+        setMessages(prev => upsert(prev, { ...draft, status: 'uploading', progress: 0 }));
+      }
+
+      await uploadToR2(uploadUrl, file, mimeType, fraction =>
+        patch(draft.clientId, { progress: fraction }));
+
+      if (posterUploadUrl && draft.pendingPoster) {
+        await uploadToR2(posterUploadUrl, draft.pendingPoster, 'image/jpeg', () => {});
+      }
+
+      patch(draft.clientId, { status: 'sending' });
+      const { data, error: upErr } = await supabase
+        .from('messages')
+        .update({ upload_status: 'ready' })
+        .eq('id', rowId)
+        .select(SELECT_COLUMNS)
+        .single();
+      if (upErr) throw new Error(upErr.message);
+
+      // Set directly rather than through upsert: this is the one moment where
+      // the local in-progress state should be dropped, not preserved.
+      const saved = toMessage(data as MessageRow);
+      setMessages(prev => prev.map(m => (m.clientId === saved.clientId
+        ? { ...saved, localPreviewUrl: m.localPreviewUrl, localPosterUrl: m.localPosterUrl }
+        : m)));
+      if (!newestAt.current || saved.createdAt > newestAt.current) newestAt.current = saved.createdAt;
+
+      // Reconciliation only — the space was already made in step 1.
+      finalizeUpload(draft.conversationId)
+        .then(state => { if (state.purged > 0) setStorageNotice(purgeNotice(state.purged)); })
+        .catch(() => {});
+    } catch (e) {
+      patch(draft.clientId, {
+        status: 'failed',
+        error: e instanceof Error ? e.message : 'Could not send. Tap to retry.',
+      });
+    }
+  }, [insertRow, patch]);
+
+  const blankDraft = useCallback((conversation: string, sender: string): ChatMessage => ({
+    id: crypto.randomUUID(),
+    clientId: crypto.randomUUID(),
+    conversationId: conversation,
+    senderId: sender,
+    kind: 'text',
+    body: null,
+    storageKey: null,
+    posterKey: null,
+    posterSizeBytes: null,
+    mimeType: null,
+    sizeBytes: null,
+    fileName: null,
+    durationSeconds: null,
+    readAt: null,
+    createdAt: new Date().toISOString(),
+    deletedAt: null,
+    mediaPurged: false,
+    uploadStatus: 'ready',
+    status: 'sending',
+  }), []);
+
   const sendText = useCallback(async (body: string) => {
     const trimmed = body.trim();
     if (!trimmed || !conversationId || !userId) return;
 
-    const draft: ChatMessage = {
-      id: crypto.randomUUID(),
-      clientId: crypto.randomUUID(),
-      conversationId,
-      senderId: userId,
-      kind: 'text',
-      body: trimmed,
-      storageKey: null,
-      mimeType: null,
-      sizeBytes: null,
-      fileName: null,
-      voiceDurationSeconds: null,
-      readAt: null,
-      createdAt: new Date().toISOString(),
-      deletedAt: null,
-      mediaPurged: false,
-      status: 'sending',
-    };
+    const draft: ChatMessage = { ...blankDraft(conversationId, userId), body: trimmed };
     setMessages(prev => sortByTime([...prev, draft]));
-    await runSend(draft);
-  }, [conversationId, userId, runSend]);
+    await sendTextRow(draft);
+  }, [conversationId, userId, blankDraft, sendTextRow]);
 
   const sendMedia = useCallback(async (
     file: Blob,
@@ -373,47 +485,79 @@ export function useConversation(explicitConversationId?: string): UseConversatio
   ) => {
     if (!conversationId || !userId) return;
 
-    const draft: ChatMessage = {
-      id: crypto.randomUUID(),
-      clientId: crypto.randomUUID(),
-      conversationId,
-      senderId: userId,
+    let draft: ChatMessage = {
+      ...blankDraft(conversationId, userId),
       kind,
-      body: null,
-      storageKey: null,
       mimeType: file.type || 'application/octet-stream',
       sizeBytes: file.size,
       fileName,
-      voiceDurationSeconds: durationSeconds ?? null,
-      readAt: null,
-      createdAt: new Date().toISOString(),
-      deletedAt: null,
-      mediaPurged: false,
+      durationSeconds: durationSeconds ?? null,
       status: 'uploading',
       progress: 0,
       // Renders instantly; revoked when the thread unmounts.
-      localPreviewUrl: kind === 'image' || kind === 'video' || kind === 'voice'
-        ? URL.createObjectURL(file)
+      localPreviewUrl: kind === 'image' || kind === 'voice'
+        ? trackObjectUrl(URL.createObjectURL(file))
         : undefined,
       pendingFile: file,
     };
+    // The bubble goes up before any of the slow work, so sending always looks
+    // immediate — decoding a video frame can take a second or two.
     setMessages(prev => sortByTime([...prev, draft]));
-    await runSend(draft);
-  }, [conversationId, userId, runSend]);
+
+    // Video gets a poster frame and a duration read off the file itself, so
+    // the bubble can render without anyone touching the video bytes.
+    if (kind === 'video') {
+      const probe = await probeVideo(file);
+      const poster = probe.poster?.blob;
+      const posterUrl = poster ? trackObjectUrl(URL.createObjectURL(poster)) : undefined;
+      draft = {
+        ...draft,
+        durationSeconds: draft.durationSeconds ?? probe.durationSeconds,
+        posterSizeBytes: poster?.size ?? null,
+        localPosterUrl: posterUrl,
+        pendingPoster: poster,
+      };
+      patch(draft.clientId, {
+        durationSeconds: draft.durationSeconds,
+        posterSizeBytes: draft.posterSizeBytes,
+        localPosterUrl: posterUrl,
+        pendingPoster: poster,
+      });
+    }
+
+    await sendMediaRow(draft);
+  }, [conversationId, userId, blankDraft, patch, sendMediaRow, trackObjectUrl]);
 
   const retry = useCallback(async (clientId: string) => {
     const target = messages.find(m => m.clientId === clientId);
     if (!target || target.status !== 'failed') return;
-    // Start over from the upload — a half-finished PUT leaves no usable object.
-    await runSend({ ...target, storageKey: null, status: 'sending', error: undefined, progress: 0 });
-  }, [messages, runSend]);
+    if (target.kind === 'text') {
+      await sendTextRow({ ...target, status: 'sending', error: undefined });
+      return;
+    }
+    // The file lives in memory only. An upload abandoned in an earlier session
+    // has nothing left to send, so say so rather than spinning.
+    if (!target.pendingFile) {
+      patch(clientId, { error: "This upload can't be resumed — remove it and send the file again." });
+      return;
+    }
+    await sendMediaRow({ ...target, status: 'uploading', error: undefined, progress: 0 });
+  }, [messages, patch, sendTextRow, sendMediaRow]);
 
   const deleteMessage = useCallback(async (message: ChatMessage) => {
     if (message.senderId !== userId) return;
 
-    // Never persisted — just drop the local bubble.
-    if (message.status === 'failed' || message.status === 'sending' || message.status === 'uploading') {
+    // Never reached the database — just drop the local bubble.
+    if (message.status !== 'sent' && message.uploadStatus !== 'pending') {
       setMessages(prev => prev.filter(m => m.clientId !== message.clientId));
+      return;
+    }
+
+    // An abandoned upload: remove the row and its object outright, rather than
+    // leaving a tombstone for something nobody ever saw.
+    if (message.uploadStatus === 'pending') {
+      setMessages(prev => prev.filter(m => m.clientId !== message.clientId));
+      await deleteRemoteMedia(message.id).catch(() => {});
       return;
     }
 
@@ -439,26 +583,44 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     await supabase.rpc('mark_conversation_read', { p_conversation_id: conversationId });
   }, [conversationId]);
 
+  const broadcastTyping = useCallback((isTyping: boolean) => {
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: { userId, isTyping },
+    });
+  }, [userId]);
+
   const notifyTyping = useCallback(() => {
     const now = Date.now();
     // At most one broadcast per 1.5s while the user keeps typing.
     if (now - lastTypingSent.current < 1500) return;
     lastTypingSent.current = now;
-    channelRef.current?.send({
-      type: 'broadcast',
-      event: 'typing',
-      payload: { userId, isTyping: true },
-    });
-  }, [userId]);
+    broadcastTyping(true);
+  }, [broadcastTyping]);
 
-  // Release object URLs for optimistic previews on unmount.
+  /** Sent on send/blur so the peer's indicator clears immediately. */
+  const stopTyping = useCallback(() => {
+    lastTypingSent.current = 0;
+    broadcastTyping(false);
+  }, [broadcastTyping]);
+
+  const dismissStorageNotice = useCallback(() => setStorageNotice(null), []);
+
+  // Release every object URL this thread minted, on unmount.
   useEffect(() => () => {
-    messages.forEach(m => { if (m.localPreviewUrl) URL.revokeObjectURL(m.localPreviewUrl); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    objectUrls.current.forEach(url => URL.revokeObjectURL(url));
+    objectUrls.current = [];
   }, []);
 
   const visible = useMemo(
-    () => messages.filter(m => !(m.deletedAt && m.senderId !== userId && !m.body)),
+    () => messages.filter(m => {
+      // A deleted message the other side sent leaves nothing to show.
+      if (m.deletedAt && m.senderId !== userId && !m.body) return false;
+      // Someone else's upload is not a message until its bytes have landed.
+      if (m.uploadStatus === 'pending' && m.senderId !== userId) return false;
+      return true;
+    }),
     [messages, userId],
   );
 
@@ -468,9 +630,12 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     loading,
     error,
     connection,
+    peerOnline,
     hasMore,
     loadingOlder,
     peerTyping,
+    storageNotice,
+    dismissStorageNotice,
     loadOlder,
     sendText,
     sendMedia,
@@ -478,5 +643,6 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     deleteMessage,
     markRead,
     notifyTyping,
+    stopTyping,
   };
 }

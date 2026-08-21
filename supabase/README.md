@@ -169,6 +169,62 @@ the project the migration also schedules the SQL half nightly at 03:15 UTC as
 a backstop; on projects without the extension that block is skipped and the
 endpoint is the only path.
 
+## Media, posters and pre-upload cleanup (Phase 2E)
+
+`20260821090000_chat_media_polish.sql` changes three things about how media is
+stored. The chat, community and notification behaviour above still holds.
+
+- **Posters.** `messages.poster_key` / `posts.poster_key` hold a small JPEG
+  first frame for a video, generated in the browser (`src/lib/media/video-poster.ts`)
+  and uploaded alongside it. A thread or a feed can then show what a clip
+  contains without downloading a single byte of the clip. Poster bytes are real
+  bytes, so `poster_size_bytes` counts toward the 100 MB cap and the poster is
+  always deleted with its video — a thumbnail nothing references is exactly the
+  orphan the cap is meant to prevent.
+- **Uploads are written before they happen.** A media message row is inserted
+  with `upload_status = 'pending'` *before* the bytes go to R2, and flipped to
+  `'ready'` afterwards. The database therefore knows about every object in the
+  bucket from the moment its key is issued. A client that dies mid-PUT leaves a
+  pending row; `select_stale_pending_uploads()` / `delete_stale_pending_uploads()`
+  clear both the row and the object after an hour, and the server runs that
+  sweep opportunistically (at most once every ten minutes) off the back of a
+  finalize. Recipients never see a pending row — the client filters it, and the
+  chat notification fires on the pending→ready transition rather than on the
+  insert, so nobody is told about a message that cannot be opened yet.
+- **Room is made before the upload, not after it.** `select_chat_media_to_purge()`
+  now takes `p_incoming_bytes`, so `POST /api/chat/upload-url` frees exactly
+  enough space for the file it is about to sign for, oldest attachment first,
+  and reports how many went. The student sees a notice naming the cleanup.
+  `POST /api/chat/finalize` still runs the same sweep with `0` afterwards as
+  reconciliation, which is what catches two devices uploading at once.
+
+Worked example, the one from the brief: a conversation holding 92 MB is sent a
+20 MB video. The pre-flight computes 92 + 20 > 100, walks the attachments
+oldest-first deleting until 20 MB is free, and only then signs the PUT. Text
+messages are never touched — they hold no bytes and are not candidates — and
+the purged rows survive with `media_purged = true`, so the thread keeps its
+shape and the bubble explains itself.
+
+Rows still uploading are never chosen as purge victims, and their bytes are
+counted from the moment the row exists, so two concurrent uploads cannot both
+conclude that they fit.
+
+### Testing the migrations
+
+`supabase/tests/` runs every migration against a throwaway Postgres 16
+database and asserts the behaviour above — FIFO order, poster accounting, the
+92 MB + 20 MB example, the update guard, the stale sweep, and cross-student
+isolation. RLS policies, `SECURITY DEFINER` functions and triggers only behave
+like themselves when a real server executes them, so these are not mocked.
+
+```bash
+supabase/tests/run.sh [PGHOST] [PGPORT]   # defaults: /tmp 55432
+```
+
+`00-supabase-shim.sql` stands in for the parts of a hosted project the
+migrations touch (`auth.users`, `auth.uid()`, the API roles, the
+`supabase_realtime` publication).
+
 ## Applying the migration
 
 With the Supabase CLI, linked to your project:

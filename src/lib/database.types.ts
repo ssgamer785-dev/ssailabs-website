@@ -9,6 +9,8 @@ export type PostChannel = 'official' | 'students';
 export type AttachmentKind = 'none' | 'image' | 'video' | 'pdf' | 'poll' | 'chart';
 export type MessageKind = 'text' | 'image' | 'pdf' | 'chart' | 'voice' | 'video';
 export type NotificationKind = 'signal' | 'chat' | 'like' | 'comment' | 'target' | 'session';
+/** Where a media row is in its upload: 'pending' until the bytes reach R2. */
+export type UploadStatus = 'pending' | 'ready';
 
 export interface Database {
   public: {
@@ -64,6 +66,8 @@ export interface Database {
           size_bytes: number | null;
           file_name: string | null;
           media_purged: boolean;
+          poster_key: string | null;
+          poster_size_bytes: number | null;
         };
         Insert: {
           author_id: string;
@@ -82,6 +86,8 @@ export interface Database {
           mime_type?: string | null;
           size_bytes?: number | null;
           file_name?: string | null;
+          poster_key?: string | null;
+          poster_size_bytes?: number | null;
         };
         Update: {
           title?: string | null;
@@ -98,6 +104,8 @@ export interface Database {
           mime_type?: string | null;
           size_bytes?: number | null;
           file_name?: string | null;
+          poster_key?: string | null;
+          poster_size_bytes?: number | null;
         };
         Relationships: [];
       };
@@ -188,6 +196,9 @@ export interface Database {
           size_bytes: number | null;
           file_name: string | null;
           media_purged: boolean;
+          poster_key: string | null;
+          poster_size_bytes: number | null;
+          upload_status: UploadStatus;
         };
         Insert: {
           conversation_id: string;
@@ -201,10 +212,16 @@ export interface Database {
           mime_type?: string | null;
           size_bytes?: number | null;
           file_name?: string | null;
+          poster_key?: string | null;
+          poster_size_bytes?: number | null;
+          upload_status?: UploadStatus;
         };
         Update: {
           read_at?: string | null;
           deleted_at?: string | null;
+          poster_key?: string | null;
+          poster_size_bytes?: number | null;
+          upload_status?: UploadStatus;
         };
         Relationships: [];
       };

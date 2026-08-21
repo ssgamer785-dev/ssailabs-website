@@ -4,7 +4,8 @@ import { css } from '../lib/css';
 import { supabase } from '../lib/supabase';
 import { useAppState } from '../lib/app-state';
 import { useAuth } from '../lib/auth-context';
-import { requestPostUploadUrl, uploadPostMedia, type PostMediaKind } from '../lib/community/media-api';
+import { requestPostUploadUrl, uploadPostMedia, type PostMediaKind, type PostUploadTicket } from '../lib/community/media-api';
+import { probeVideo } from '../lib/media/video-poster';
 import type { AttachmentKind, PostChannel } from '../lib/database.types';
 import { StatusBar } from '../components/StatusBar';
 import { CandleChart } from '../components/CandleChart';
@@ -36,9 +37,14 @@ export function CreatePostScreen() {
   const [postText, setPostText] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [poster, setPoster] = useState<Blob | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Held after a failed upload so a retry re-sends to the same key rather than
+  // stranding the first attempt's bytes in the bucket.
+  const [ticket, setTicket] = useState<PostUploadTicket | null>(null);
+  const [canRetry, setCanRetry] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const myIdentity = reveal ? userName : 'Unknown User';
@@ -55,7 +61,7 @@ export function CreatePostScreen() {
 
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
 
-  function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const picked = e.target.files?.[0];
     e.target.value = '';
     if (!picked) return;
@@ -64,8 +70,21 @@ export function CreatePostScreen() {
       return;
     }
     setError(null);
+    setCanRetry(false);
+    setTicket(null);
     setFile(picked);
+    setPoster(null);
     setPreviewUrl(picked.type.startsWith('image/') ? URL.createObjectURL(picked) : null);
+
+    // A video gets a poster frame lifted off the file itself, so the feed can
+    // show the post without anyone downloading the video first.
+    if (picked.type.startsWith('video/')) {
+      const probe = await probeVideo(picked);
+      if (probe.poster) {
+        setPoster(probe.poster.blob);
+        setPreviewUrl(URL.createObjectURL(probe.poster.blob));
+      }
+    }
   }
 
   async function submit() {
@@ -76,18 +95,33 @@ export function CreatePostScreen() {
     }
     setBusy(true);
     setError(null);
+    setCanRetry(false);
 
     try {
       let storageKey: string | null = null;
+      let posterKey: string | null = null;
       let attachment: AttachmentKind = 'none';
 
       if (file) {
         const kind = kindForFile(file)!;
         attachment = kind;
         setProgress(0);
-        const ticket = await requestPostUploadUrl({ kind, mimeType: file.type, sizeBytes: file.size });
-        await uploadPostMedia(ticket.uploadUrl, file, file.type, setProgress);
-        storageKey = ticket.storageKey;
+        // Reuse the ticket from a failed attempt while its signature is still
+        // good; otherwise ask for a fresh one.
+        const active = ticket ?? await requestPostUploadUrl({
+          kind,
+          mimeType: file.type,
+          sizeBytes: file.size,
+          posterBytes: poster?.size,
+        });
+        setTicket(active);
+
+        await uploadPostMedia(active.uploadUrl, file, file.type, setProgress);
+        if (active.posterUploadUrl && poster) {
+          await uploadPostMedia(active.posterUploadUrl, poster, 'image/jpeg', () => {});
+          posterKey = active.posterKey ?? null;
+        }
+        storageKey = active.storageKey;
         setProgress(null);
       }
 
@@ -104,6 +138,8 @@ export function CreatePostScreen() {
           body: postText.trim() || null,
           attachment,
           storage_key: storageKey,
+          poster_key: posterKey,
+          poster_size_bytes: poster?.size ?? null,
           mime_type: file?.type ?? null,
           size_bytes: file?.size ?? null,
           file_name: file?.name ?? null,
@@ -116,6 +152,7 @@ export function CreatePostScreen() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not publish the post.');
       setProgress(null);
+      setCanRetry(!!file);
     } finally {
       setBusy(false);
     }
@@ -176,7 +213,14 @@ export function CreatePostScreen() {
         </div>
       )}
 
-      {error && <div style={css('flex:none;padding:12px 20px 0;font-size:12px;color:#EF4444;line-height:1.4')}>{error}</div>}
+      {error && (
+        <div style={css('flex:none;padding:12px 20px 0;display:flex;align-items:center;gap:10px')}>
+          <div style={css('flex:1;font-size:12px;color:#EF4444;line-height:1.4')}>{error}</div>
+          {canRetry && !busy && (
+            <div onClick={submit} style={css('flex:none;font-size:12px;font-weight:700;color:#0B5FEF;cursor:pointer;white-space:nowrap')}>Retry</div>
+          )}
+        </div>
+      )}
 
       <div style={css('flex:none;padding:22px 20px 0')}>
         <div style={css('position:relative;width:122px;height:156px;border-radius:14px;overflow:hidden;box-shadow:0 6px 18px rgba(15,23,42,.14)')}>
@@ -189,7 +233,7 @@ export function CreatePostScreen() {
             </div>
           )}
           {file && progress === null && (
-            <div onClick={() => { setFile(null); setPreviewUrl(null); }} style={css('position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:50%;background:#0F172A;display:flex;align-items:center;justify-content:center;cursor:pointer')}>
+            <div onClick={() => { setFile(null); setPreviewUrl(null); setPoster(null); setTicket(null); setCanRetry(false); }} style={css('position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:50%;background:#0F172A;display:flex;align-items:center;justify-content:center;cursor:pointer')}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={2.6} strokeLinecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
             </div>
           )}

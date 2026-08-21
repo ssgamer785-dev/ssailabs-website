@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { css } from '../../lib/css';
 import { getPostMediaUrl } from '../../lib/community/media-api';
+import { useLazyMediaUrl } from '../../lib/media/useLazyMediaUrl';
 import { CandleChart } from '../CandleChart';
 import type { FeedPost } from '../../lib/community/useFeed';
 
@@ -11,32 +12,97 @@ function bytes(n: number): string {
 }
 
 /**
+ * A video attachment in the feed.
+ *
+ * Rectangular on purpose: the circular treatment belongs to short clips in a
+ * private thread, and would crop a chart or a screen recording to uselessness
+ * in a post card. What it borrows from the chat side is the loading discipline
+ * — a poster frame until someone taps, and no video bytes before that.
+ */
+function PostVideo({ post, height }: { post: FeedPost; height: number }) {
+  const [wanted, setWanted] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const poster = useLazyMediaUrl(post.posterKey, getPostMediaUrl);
+  const media = useLazyMediaUrl(post.storageKey, getPostMediaUrl, { armed: wanted });
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el || !wanted || !media.url) return;
+    el.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+  }, [wanted, media.url]);
+
+  const showVideo = wanted && !!media.url;
+
+  return (
+    <div
+      // One element, two observers: the poster loads on approach, the video
+      // waits for a tap.
+      ref={node => { poster.ref(node); media.ref(node); }}
+      // Stop here: the card around this opens the post, and a tap on the video
+      // means "play it", not "take me somewhere else". Everywhere else on the
+      // card still navigates exactly as it did before.
+      onClick={e => { e.stopPropagation(); if (!wanted) setWanted(true); }}
+      style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: '#0F172A', cursor: showVideo ? 'default' : 'pointer' }}
+    >
+      {poster.url && !showVideo && (
+        <img src={poster.url} alt={post.fileName ?? 'Video'} decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
+      )}
+      {showVideo && (
+        <video
+          ref={videoRef}
+          src={media.url ?? undefined}
+          poster={poster.url ?? undefined}
+          controls
+          playsInline
+          preload="none"
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          style={css('width:100%;height:100%;object-fit:cover;display:block')}
+        />
+      )}
+      {!showVideo && (
+        <div style={css('position:absolute;inset:0;display:flex;align-items:center;justify-content:center')}>
+          {wanted && !media.failed ? (
+            <div style={css('width:34px;height:34px;border-radius:50%;border:2.5px solid rgba(255,255,255,.35);border-top-color:#FFFFFF;animation:tp-spin .8s linear infinite')}>
+              <style>{'@keyframes tp-spin{to{transform:rotate(360deg)}}'}</style>
+            </div>
+          ) : media.failed ? (
+            <div style={css('font-size:11.5px;color:#FCA5A5')}>Could not load this video</div>
+          ) : (
+            <div style={css('width:52px;height:52px;border-radius:50%;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center')}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="#FFFFFF" style={css('margin-left:2px')}><path d="M8.5 5.5l10 6.5-10 6.5z" /></svg>
+            </div>
+          )}
+        </div>
+      )}
+      {!playing && !poster.url && !showVideo && (
+        <div style={css('position:absolute;left:10px;bottom:10px;font-size:10.5px;color:rgba(255,255,255,.75)')}>Video</div>
+      )}
+    </div>
+  );
+}
+
+/**
  * The attachment area of a post card. Falls back to the generated candlestick
  * placeholder when a post carries no uploaded media, which is what the original
  * design showed.
  */
 export function PostMedia({ post, height }: { post: FeedPost; height: number }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
+  const isImage = post.attachment === 'image';
+  const isVideo = post.attachment === 'video';
+  const image = useLazyMediaUrl(
+    isImage && !post.mediaPurged ? post.storageKey : null,
+    getPostMediaUrl,
+  );
 
-  const key = post.storageKey;
-  const isFile = post.attachment === 'image' || post.attachment === 'video';
-
-  useEffect(() => {
-    if (!key || !isFile || post.mediaPurged) return;
-    let active = true;
-    getPostMediaUrl(key)
-      .then(u => { if (active) setUrl(u); })
-      .catch(() => { if (active) setFailed(true); });
-    return () => { active = false; };
-  }, [key, isFile, post.mediaPurged]);
-
-  if (post.attachment === 'pdf' && key) {
+  if (post.attachment === 'pdf' && post.storageKey) {
     return <PdfRow post={post} />;
   }
 
   // No uploaded media: keep the design's chart placeholder.
-  if (!isFile || !key || post.mediaPurged) {
+  if ((!isImage && !isVideo) || !post.storageKey || post.mediaPurged) {
     return (
       <div style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden' }}>
         <CandleChart seed={post.chartSeed ?? 4} />
@@ -44,16 +110,16 @@ export function PostMedia({ post, height }: { post: FeedPost; height: number }) 
     );
   }
 
+  if (isVideo) return <PostVideo post={post} height={height} />;
+
   return (
-    <div style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: '#EDF0F5' }}>
-      {failed || !url ? (
+    <div ref={image.ref} style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: '#EDF0F5' }}>
+      {image.failed || !image.url ? (
         <div style={css('width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:#94A3B8')}>
-          {failed ? 'Could not load attachment' : 'Loading…'}
+          {image.failed ? 'Could not load attachment' : 'Loading…'}
         </div>
-      ) : post.attachment === 'video' ? (
-        <video src={url} controls playsInline preload="metadata" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
       ) : (
-        <img src={url} alt={post.fileName ?? 'Attachment'} loading="lazy" decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
+        <img src={image.url} alt={post.fileName ?? 'Attachment'} loading="lazy" decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
       )}
     </div>
   );
@@ -61,18 +127,13 @@ export function PostMedia({ post, height }: { post: FeedPost; height: number }) 
 
 /** PDF attachment, styled like the chat screen's document card. */
 export function PdfRow({ post }: { post: FeedPost }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const key = post.storageKey;
-
-  useEffect(() => {
-    if (!key || post.mediaPurged) return;
-    let active = true;
-    getPostMediaUrl(key).then(u => { if (active) setUrl(u); }).catch(() => {});
-    return () => { active = false; };
-  }, [key, post.mediaPurged]);
+  const { ref, url } = useLazyMediaUrl(
+    post.mediaPurged ? null : post.storageKey,
+    getPostMediaUrl,
+  );
 
   return (
-    <div style={css('background:#FFFFFF;border:1px solid #EDF0F6;border-radius:12px;padding:11px 12px;display:flex;align-items:center;gap:11px')}>
+    <div ref={ref} style={css('background:#FFFFFF;border:1px solid #EDF0F6;border-radius:12px;padding:11px 12px;display:flex;align-items:center;gap:11px')}>
       <div style={css('width:34px;height:38px;border-radius:8px;background:#FEF1F1;display:flex;align-items:center;justify-content:center;flex:none')}>
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth={1.8} strokeLinejoin="round"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg>
       </div>

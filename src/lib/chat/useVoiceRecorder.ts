@@ -26,6 +26,28 @@ export interface UseVoiceRecorder {
   cancel: () => void;
 }
 
+/**
+ * Turns a getUserMedia rejection into something a student can act on.
+ * "Denied" and "there is no microphone" need different responses, and on iOS
+ * a locked-down PWA reports a third thing again.
+ */
+function micErrorMessage(e: unknown): string {
+  const name = e instanceof DOMException ? e.name : '';
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    return 'Microphone access is blocked. Allow it for this site in your browser settings, then try again.';
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+    return 'No microphone was found on this device.';
+  }
+  if (name === 'NotReadableError') {
+    return 'The microphone is already in use by another app.';
+  }
+  if (typeof navigator !== 'undefined' && !navigator.mediaDevices) {
+    return 'Voice messages need a secure (https) connection.';
+  }
+  return 'Could not start recording. Please try again.';
+}
+
 export function useVoiceRecorder(): UseVoiceRecorder {
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
@@ -70,8 +92,8 @@ export function useVoiceRecorder(): UseVoiceRecorder {
         () => setSeconds(Math.floor((Date.now() - startedAt.current) / 1000)),
         250,
       );
-    } catch {
-      setError('Microphone access was denied.');
+    } catch (e) {
+      setError(micErrorMessage(e));
       teardown();
     }
   }, [teardown]);

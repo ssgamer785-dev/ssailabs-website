@@ -29,6 +29,20 @@ const ALLOWED_MIME: Record<string, RegExp> = {
 
 const EXTENSION: Record<string, string> = { image: 'bin', video: 'bin', pdf: 'pdf' };
 
+/** A generated JPEG frame; anything larger is not a thumbnail. */
+const MAX_POSTER_BYTES = 2 * 1024 * 1024;
+const POSTER_MIME = 'image/jpeg';
+
+function signPut(key: string, mimeType: string, sizeBytes: number): Promise<string> {
+  // ContentType and ContentLength are signed, so the upload can't exceed
+  // the size we just validated.
+  return getSignedUrl(
+    getS3()!,
+    new PutObjectCommand({ Bucket: bucket()!, Key: key, ContentType: mimeType, ContentLength: sizeBytes }),
+    { expiresIn: PUT_URL_TTL_SECONDS },
+  );
+}
+
 export function postMediaRouter(): Router {
   const router = Router();
 
@@ -50,7 +64,7 @@ export function postMediaRouter(): Router {
     const caller = await authenticate(req);
     if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
 
-    const { kind, mimeType, sizeBytes } = req.body ?? {};
+    const { kind, mimeType, sizeBytes, posterBytes } = req.body ?? {};
     if (!kind || !mimeType || typeof sizeBytes !== 'number') {
       return res.status(400).json({ error: 'kind, mimeType and sizeBytes are required.' });
     }
@@ -58,20 +72,23 @@ export function postMediaRouter(): Router {
     if (!ALLOWED_MIME[kind].test(mimeType)) {
       return res.status(400).json({ error: `${mimeType} is not an allowed ${kind} type.` });
     }
-    if (sizeBytes <= 0 || sizeBytes > MAX_BYTES[kind]) {
+    if (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > MAX_BYTES[kind]) {
       return res.status(413).json({ error: `That ${kind} is larger than the ${Math.round(MAX_BYTES[kind] / 1024 / 1024)} MB limit.` });
     }
 
-    const storageKey = `posts/${caller.userId}/${Date.now()}-${randomUUID()}.${EXTENSION[kind]}`;
-    // ContentType and ContentLength are signed, so the upload can't exceed
-    // the size we just validated.
-    const url = await getSignedUrl(
-      getS3()!,
-      new PutObjectCommand({ Bucket: bucket()!, Key: storageKey, ContentType: mimeType, ContentLength: sizeBytes }),
-      { expiresIn: PUT_URL_TTL_SECONDS },
-    );
+    const wantsPoster = kind === 'video' && typeof posterBytes === 'number' && posterBytes > 0;
+    if (wantsPoster && (!Number.isFinite(posterBytes) || posterBytes > MAX_POSTER_BYTES)) {
+      return res.status(413).json({ error: 'That thumbnail is too large.' });
+    }
 
-    res.json({ uploadUrl: url, storageKey });
+    const stem = `posts/${caller.userId}/${Date.now()}-${randomUUID()}`;
+    const storageKey = `${stem}.${EXTENSION[kind]}`;
+    const uploadUrl = await signPut(storageKey, mimeType, sizeBytes);
+
+    const posterKey = wantsPoster ? `${stem}-poster.jpg` : undefined;
+    const posterUploadUrl = posterKey ? await signPut(posterKey, POSTER_MIME, posterBytes) : undefined;
+
+    res.json({ uploadUrl, storageKey, posterUploadUrl, posterKey });
   });
 
   /** Signed GET. Any signed-in member may read post media. */
@@ -103,16 +120,21 @@ export function postMediaRouter(): Router {
     if (!postId) return res.status(400).json({ error: 'postId is required.' });
 
     const db = getAdmin()!;
-    const { data: post } = await db.from('posts').select('id, author_id, storage_key').eq('id', postId).single();
+    const { data: post } = await db.from('posts')
+      .select('id, author_id, storage_key, poster_key').eq('id', postId).single();
     if (!post) return res.status(404).json({ error: 'Post not found.' });
     if (post.author_id !== caller.userId && !caller.isAdmin) {
       return res.status(403).json({ error: 'You can only delete your own posts.' });
     }
 
-    if (post.storage_key) {
+    const keys = [post.storage_key, post.poster_key]
+      .filter((k): k is string => !!k)
+      .map(Key => ({ Key }));
+
+    if (keys.length) {
       await getS3()!.send(new DeleteObjectsCommand({
         Bucket: bucket()!,
-        Delete: { Objects: [{ Key: post.storage_key }], Quiet: true },
+        Delete: { Objects: keys, Quiet: true },
       }));
       await db.rpc('mark_post_media_purged', { p_post_ids: [post.id] });
     }
@@ -132,12 +154,16 @@ export function postMediaRouter(): Router {
 
     const db = getAdmin()!;
     const { data: expired } = await db.rpc('select_expired_post_media');
-    const victims = (expired ?? []) as { id: string; storage_key: string }[];
+    const victims = (expired ?? []) as { id: string; storage_key: string | null; poster_key: string | null }[];
+    const keys = victims
+      .flatMap(v => [v.storage_key, v.poster_key])
+      .filter((k): k is string => !!k)
+      .map(Key => ({ Key }));
 
-    if (victims.length) {
+    if (keys.length) {
       await getS3()!.send(new DeleteObjectsCommand({
         Bucket: bucket()!,
-        Delete: { Objects: victims.map(v => ({ Key: v.storage_key })), Quiet: true },
+        Delete: { Objects: keys, Quiet: true },
       }));
     }
     const { data: deleted } = await db.rpc('purge_expired_posts');

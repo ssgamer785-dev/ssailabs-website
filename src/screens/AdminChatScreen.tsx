@@ -4,6 +4,7 @@ import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { makeRand } from '../lib/rng';
 import { useAuth } from '../lib/auth-context';
+import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { useConversation } from '../lib/chat/useConversation';
 import { useVoiceRecorder } from '../lib/chat/useVoiceRecorder';
 import { formatDuration, type MediaKind } from '../lib/chat/types';
@@ -51,6 +52,7 @@ export function AdminChatScreen() {
   // Admins open a specific student's thread via ?c=<id>; students get their own.
   const chat = useConversation(params.get('c') ?? undefined);
   const recorder = useVoiceRecorder();
+  const keyboardInset = useKeyboardInset();
 
   const [msg, setMsg] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
@@ -61,7 +63,7 @@ export function AdminChatScreen() {
   /** Height before prepending an older page, so we can restore the position. */
   const restoreHeight = useRef<number | null>(null);
 
-  const { messages, markRead, loadOlder, hasMore, loadingOlder, peerTyping, connection } = chat;
+  const { messages, markRead, loadOlder, hasMore, loadingOlder, peerTyping, connection, peerOnline } = chat;
 
   // Keep the newest message in view, but never yank the user out of history.
   useEffect(() => {
@@ -92,6 +94,7 @@ export function AdminChatScreen() {
     const body = msg.trim();
     if (!body) return;
     setMsg('');
+    chat.stopTyping();
     atBottom.current = true;
     await chat.sendText(body);
   }
@@ -122,11 +125,16 @@ export function AdminChatScreen() {
     await chat.sendMedia(clip.blob, 'voice', 'voice-note', clip.durationSeconds);
   }
 
-  const subtitle = peerTyping ? 'typing…'
-    : connection === 'offline' ? 'Reconnecting…'
+  // Our own socket state comes first — "Online" would be a lie while we are
+  // reconnecting, because we cannot know what the other side is doing.
+  const subtitle = connection === 'offline' ? 'Reconnecting…'
     : connection === 'connecting' ? 'Connecting…'
-    : 'Online';
-  const subtitleColor = peerTyping ? '#0B5FEF' : connection === 'online' ? '#22C55E' : '#94A3B8';
+    : peerTyping ? 'typing…'
+    : peerOnline ? 'Online'
+    : 'Offline';
+  const subtitleColor = peerTyping ? '#0B5FEF'
+    : connection === 'online' && peerOnline ? '#22C55E'
+    : '#94A3B8';
 
   function MicBtn({ size = 40 }: { size?: number }) {
     const on = recorder.recording;
@@ -147,7 +155,7 @@ export function AdminChatScreen() {
         <svg onClick={() => navigate(-1)} width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" style={css('cursor:pointer;flex:none')}><path d="M14.5 5.5l-7 6.5 7 6.5" /></svg>
         <div style={css('position:relative;flex:none')}>
           <div style={css('width:38px;height:38px;border-radius:50%;background:#DCE7F7;color:#29527F;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700')}>A</div>
-          <div style={{ position: 'absolute', right: -1, bottom: -1, width: 11, height: 11, borderRadius: '50%', background: connection === 'online' ? '#22C55E' : '#CBD5E1', border: '2.2px solid #fff' }} />
+          <div style={{ position: 'absolute', right: -1, bottom: -1, width: 11, height: 11, borderRadius: '50%', background: connection === 'online' && peerOnline ? '#22C55E' : '#CBD5E1', border: '2.2px solid #fff' }} />
         </div>
         <div style={css('flex:1;display:flex;flex-direction:column;gap:1px;min-width:0')}>
           <div style={css('font-size:15px;font-weight:700;letter-spacing:-.25px')}>Admin</div>
@@ -187,6 +195,19 @@ export function AdminChatScreen() {
         <div style={css('flex:1')} />
       </div>
 
+      {chat.storageNotice && (
+        <div
+          onClick={chat.dismissStorageNotice}
+          style={css('flex:none;margin:0 14px 6px;padding:9px 12px;border-radius:11px;background:#FFF8E8;border:1px solid #F6E3B4;display:flex;align-items:center;gap:9px;cursor:pointer')}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" style={css('flex:none')}>
+            <path d="M12 8.4v4.4M12 16.4h.01" /><circle cx="12" cy="12" r="8.6" />
+          </svg>
+          <div style={css('flex:1;font-size:11.5px;color:#92400E;line-height:1.4')}>{chat.storageNotice}</div>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth={2.4} strokeLinecap="round" style={css('flex:none')}><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
+        </div>
+      )}
+
       {(notice || chat.error) && (
         <div style={css('flex:none;padding:6px 18px;font-size:11.5px;color:#EF4444;text-align:center;line-height:1.4')}>
           {notice ?? chat.error}
@@ -202,7 +223,7 @@ export function AdminChatScreen() {
       />
 
       {!recorder.recording ? (
-        <div style={css('flex:none;padding:12px 18px 24px;display:flex;align-items:center;gap:9px;background:#FFFFFF')}>
+        <div style={{ ...css('flex:none;display:flex;align-items:center;gap:9px;background:#FFFFFF'), padding: '12px 18px', paddingBottom: `calc(24px + env(safe-area-inset-bottom, 0px) + ${keyboardInset}px)` }}>
           <div onClick={() => fileInput.current?.click()} style={css('width:38px;height:38px;border-radius:50%;background:#F2F4F9;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')}>
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={2.1} strokeLinecap="round"><path d="M12 6v12M6 12h12" /></svg>
           </div>
@@ -212,6 +233,7 @@ export function AdminChatScreen() {
               value={msg}
               onChange={e => { setMsg(e.target.value); chat.notifyTyping(); }}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void handleSendText(); } }}
+              onBlur={() => chat.stopTyping()}
               style={css('flex:1;font-size:14px;height:100%')}
             />
           </div>
@@ -221,7 +243,7 @@ export function AdminChatScreen() {
           </Hoverable>
         </div>
       ) : (
-        <div style={css('flex:none;padding:12px 18px 24px;display:flex;align-items:center;gap:9px;background:#FFFFFF')}>
+        <div style={{ ...css('flex:none;display:flex;align-items:center;gap:9px;background:#FFFFFF'), padding: '12px 18px', paddingBottom: `calc(24px + env(safe-area-inset-bottom, 0px) + ${keyboardInset}px)` }}>
           <Hoverable onClick={recorder.cancel} style={css('width:38px;height:38px;border-radius:50%;background:#FEF1F1;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')} hoverStyle={css('background:#FDE1E3')}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><path d="M5.6 7.4h12.8M9.4 7.4V5.2h5.2v2.2M7.2 7.4l.9 12h7.8l.9-12" /></svg>
           </Hoverable>
