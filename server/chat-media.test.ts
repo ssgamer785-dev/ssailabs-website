@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { MEDIA_QUOTA_BYTES, objectKeysFor, validateUploadRequest } from './chat-media';
+import { MEDIA_QUOTA_BYTES, conversationFromKey, objectKeysFor, validateUploadRequest } from './chat-media';
 
 const MB = 1024 * 1024;
 
@@ -109,5 +109,48 @@ describe('purge key collection', () => {
 
   test('an empty nomination deletes nothing', () => {
     expect(objectKeysFor([])).toEqual([]);
+  });
+});
+
+describe('media key authorization', () => {
+  const CONV_A = 'aaaaaaaa-1111-2222-3333-444444444444';
+  const CONV_B = 'bbbbbbbb-1111-2222-3333-444444444444';
+
+  test('a key issued by this server resolves to its conversation', () => {
+    expect(conversationFromKey(`chat/${CONV_A}/1755000000000-abc.bin`)).toBe(CONV_A);
+  });
+
+  test('the conversation in the key is the one authorized, not the caller\'s own', () => {
+    // The route then checks membership of whatever comes back, so Student A
+    // asking for Student B's key is checked against B's conversation.
+    expect(conversationFromKey(`chat/${CONV_B}/1755000000000-abc.bin`)).toBe(CONV_B);
+  });
+
+  test('a poster key resolves like any other object in the conversation', () => {
+    expect(conversationFromKey(`chat/${CONV_A}/1755000000000-abc-poster.jpg`)).toBe(CONV_A);
+  });
+
+  test('traversal out of the conversation prefix is refused', () => {
+    expect(conversationFromKey(`chat/${CONV_A}/../${CONV_B}/secret.bin`)).toBeNull();
+    expect(conversationFromKey('chat/../posts/someone/private.bin')).toBeNull();
+    expect(conversationFromKey(`chat/${CONV_A}//x.bin`)).toBeNull();
+  });
+
+  test('keys from another namespace are refused', () => {
+    expect(conversationFromKey('posts/22222222-2222-2222-2222-222222222222/x.bin')).toBeNull();
+    expect(conversationFromKey('/chat/' + CONV_A + '/x.bin')).toBeNull();
+  });
+
+  test('a non-uuid conversation segment is refused', () => {
+    expect(conversationFromKey('chat/*/x.bin')).toBeNull();
+    expect(conversationFromKey('chat/all/x.bin')).toBeNull();
+    expect(conversationFromKey(`chat/${CONV_A}x/x.bin`)).toBeNull();
+  });
+
+  test('malformed and empty keys are refused', () => {
+    expect(conversationFromKey('')).toBeNull();
+    expect(conversationFromKey('chat/')).toBeNull();
+    expect(conversationFromKey(`chat/${CONV_A}`)).toBeNull();
+    expect(conversationFromKey(undefined as unknown as string)).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import type { Database } from './database.types';
@@ -38,9 +38,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
 
+  /**
+   * A cold load resolves the session twice — once from getSession(), once from
+   * the INITIAL_SESSION event — and both branches want the profile. Without a
+   * guard that is two identical requests on every launch. Only concurrent
+   * requests for the same user are collapsed, so a later reload (a role change,
+   * a renamed profile) still goes to the server as it always did.
+   */
+  const inFlightProfile = useRef<{ userId: string; promise: Promise<void> } | null>(null);
+
   const loadProfile = useCallback(async (userId: string) => {
-    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    setProfile(error ? null : data);
+    const pending = inFlightProfile.current;
+    if (pending?.userId === userId) return pending.promise;
+
+    const request = (async () => {
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+      setProfile(error ? null : data);
+    })().finally(() => {
+      if (inFlightProfile.current?.userId === userId) inFlightProfile.current = null;
+    });
+
+    inFlightProfile.current = { userId, promise: request };
+    return request;
   }, []);
 
   useEffect(() => {

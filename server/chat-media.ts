@@ -77,6 +77,33 @@ export function objectKeysFor(victims: PurgeVictim[]): { Key: string }[] {
     .map(Key => ({ Key }));
 }
 
+/**
+ * The conversation a media key belongs to.
+ *
+ * Keys are minted here as `chat/<conversationId>/<file>`, so the second segment
+ * is what authorizes a read: whoever asks for a signed URL must be a member of
+ * *that* conversation. Anything not shaped like one of our keys returns null
+ * and the caller refuses, which is what stops a crafted path — another
+ * student's conversation id, a traversal, a key from the posts namespace —
+ * from being signed.
+ */
+export function conversationFromKey(storageKey: string): string | null {
+  if (typeof storageKey !== 'string') return null;
+  const segments = storageKey.split('/');
+  if (segments.length < 3) return null;
+  if (segments[0] !== 'chat') return null;
+
+  const conversationId = segments[1];
+  // A uuid and nothing else: no traversal, no wildcards, no empty segment.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId)) {
+    return null;
+  }
+  // A key that walks back out of its own prefix is not ours.
+  if (segments.some(part => part === '..' || part === '.' || part === '')) return null;
+
+  return conversationId;
+}
+
 export interface UploadRequest {
   kind: string;
   mimeType: string;
@@ -363,10 +390,10 @@ export function chatMediaRouter(): Router {
     if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
 
     const storageKey = String(req.query.key ?? '');
-    // Keys are `chat/<conversationId>/...`; the conversation segment is what
-    // authorizes the read, so a caller can't hand us an arbitrary path.
-    const conversationId = storageKey.split('/')[1];
-    if (!storageKey.startsWith('chat/') || !conversationId) {
+    // The conversation segment of the key is what authorizes the read, so a
+    // caller can't hand us an arbitrary path.
+    const conversationId = conversationFromKey(storageKey);
+    if (!conversationId) {
       return res.status(400).json({ error: 'Invalid media key.' });
     }
     if (!(await canAccessConversation(caller, conversationId))) {
