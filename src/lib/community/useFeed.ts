@@ -35,7 +35,7 @@ export interface FeedPost {
   likedByMe: boolean;
 }
 
-type FeedRow = {
+export type FeedRow = {
   id: string; author_id: string; channel: PostChannel; title: string | null; body: string | null;
   instrument: string | null; entry_price: number | null; stop_loss: number | null; take_profit: number | null;
   attachment: AttachmentKind; storage_key: string | null; poster_key: string | null;
@@ -45,7 +45,8 @@ type FeedRow = {
   author_role: UserRole | null; is_mine: boolean; like_count: number; comment_count: number; liked_by_me: boolean;
 };
 
-function toPost(r: FeedRow): FeedPost {
+/** The one place a `posts_feed` row becomes a `FeedPost`. */
+export function toPost(r: FeedRow): FeedPost {
   return {
     id: r.id,
     authorId: r.author_id,
@@ -75,6 +76,29 @@ function toPost(r: FeedRow): FeedPost {
   };
 }
 
+/**
+ * The only caller of `posts_feed` in the app.
+ *
+ * SECURITY INVOKER on the database side, so RLS still decides which rows come
+ * back — a student gets exactly the posts they are allowed to see, whether the
+ * page is bound for the Community feed or the two summary slots on Home.
+ * Counts and `liked_by_me` arrive with the page, so a feed render is one round
+ * trip rather than a query per post per counter.
+ */
+export async function fetchFeedPage(
+  channel: PostChannel,
+  before: string | null,
+  limit: number,
+): Promise<FeedPost[]> {
+  const { data, error } = await supabase.rpc('posts_feed', {
+    p_channel: channel,
+    p_before: before,
+    p_limit: limit,
+  });
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as FeedRow[]).map(toPost);
+}
+
 export interface UseFeed {
   posts: FeedPost[];
   loading: boolean;
@@ -102,16 +126,10 @@ export function useFeed(channel: PostChannel): UseFeed {
   const [hasMore, setHasMore] = useState(false);
   const oldestRef = useRef<string | null>(null);
 
-  const fetchPage = useCallback(async (before: string | null) => {
-    const { data, error: rpcError } = await supabase.rpc('posts_feed', {
-      p_channel: channel,
-      p_before: before,
-      p_limit: PAGE_SIZE,
-    });
-    if (rpcError) throw new Error(rpcError.message);
-    const rows = ((data ?? []) as FeedRow[]).map(toPost);
-    return rows;
-  }, [channel]);
+  const fetchPage = useCallback(
+    (before: string | null) => fetchFeedPage(channel, before, PAGE_SIZE),
+    [channel],
+  );
 
   const refresh = useCallback(async () => {
     try {

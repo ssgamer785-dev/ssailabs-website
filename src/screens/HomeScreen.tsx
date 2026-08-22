@@ -3,6 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { useAppState, initials } from '../lib/app-state';
 import { useUnreadNotificationCount } from '../lib/notifications/useNotifications';
+import { useHomeHighlights } from '../lib/community/useHomeHighlights';
+import { getPostMediaUrl } from '../lib/community/media-api';
+import { useLazyMediaUrl } from '../lib/media/useLazyMediaUrl';
+import { timeAgo } from '../components/community/PostMedia';
+import type { FeedPost } from '../lib/community/useFeed';
 import { StatusBar } from '../components/StatusBar';
 import { BottomNav } from '../components/BottomNav';
 import { PhoneShell } from '../components/PhoneShell';
@@ -11,10 +16,180 @@ const quickAction = css('width:63px;display:flex;flex-direction:column;align-ite
 const quickIconWrap = css('width:52px;height:52px;border-radius:16px;background:#F2F6FE;border:1px solid #E7EEFC;display:flex;align-items:center;justify-content:center');
 const quickLabel = css('font-size:10.5px;font-weight:500;color:#526174;text-align:center;line-height:1.28');
 
+/** Muted one-liner used for every loading / empty / error slot on Home. */
+const homeNote = css('font-size:12px;color:#94A3B8;line-height:1.5');
+
+/** The Official card's frame, reused so a placeholder keeps the same footprint. */
+const officialCardFrame = css('flex:none;margin:0 20px;background:#FFFFFF;border:1px solid #EDF0F6;border-radius:16px;box-shadow:0 3px 14px rgba(15,23,42,.05);padding:14px 15px 12px');
+const homeNoteRow = { ...css('flex:none;margin:0 20px'), ...homeNote };
+const officialCardNote = { ...officialCardFrame, ...homeNote };
+
+/** The two avatar tints the Recent Posts rows already used, alternating. */
+const ROW_TINTS: [string, string][] = [['#E4E9F7', '#3C5A8A'], ['#E7E3F7', '#55488C']];
+
+function firstLine(text: string | null): string {
+  return (text ?? '').split('\n').map(l => l.trim()).find(Boolean) ?? '';
+}
+
+/** Headline for a post: its title, else the opening line of the body. */
+function headline(post: FeedPost): string {
+  return post.title?.trim() || firstLine(post.body) || 'Untitled post';
+}
+
+/**
+ * The row's second line. Whatever the body still has to say once the headline
+ * is taken out of it — and when the headline was the whole post, who wrote it,
+ * which is the only thing a bare initials avatar does not already tell you.
+ */
+function previewLine(post: FeedPost, title: string): string {
+  const rest = (post.body ?? '')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l && l !== title);
+
+  if (rest.length) return rest.join(' ');
+  if (post.attachment !== 'none' && post.fileName) return post.fileName;
+  return post.authorName;
+}
+
+/**
+ * The card's two body lines.
+ *
+ * A post carrying trade levels renders them in the shape the design was drawn
+ * around ("Buy Above 3365" / "SL 3358 | TP 3380"); anything else falls back to
+ * the first lines of its text. The headline is dropped when the body repeats
+ * it, which official posts do — they title themselves from their own first line.
+ */
+function summaryLines(post: FeedPost): string[] {
+  const levels: string[] = [];
+  if (post.entryPrice !== null) {
+    levels.push(`${post.instrument ? `${post.instrument} ` : ''}Buy Above ${post.entryPrice}`);
+  }
+  if (post.stopLoss !== null || post.takeProfit !== null) {
+    levels.push([
+      post.stopLoss !== null ? `SL ${post.stopLoss}` : null,
+      post.takeProfit !== null ? `TP ${post.takeProfit}` : null,
+    ].filter(Boolean).join(' | '));
+  }
+  if (levels.length) return levels;
+
+  const title = headline(post);
+  return (post.body ?? '')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l && l !== title)
+    .slice(0, 2);
+}
+
+/**
+ * The chips under the card body, one per attachment the post actually has.
+ *
+ * Where a picture exists it is the chip: the video chip keeps its black tile
+ * and play triangle but fills them with the real poster frame, and the image
+ * chip shows the picture itself. Nothing is fetched until the card is on
+ * screen, and a video contributes only its poster — never its own bytes.
+ */
+function AttachmentChips({ post }: { post: FeedPost }) {
+  const isVideo = post.attachment === 'video';
+  const isImage = post.attachment === 'image';
+  const key = post.mediaPurged ? null : post.posterKey ?? (isImage ? post.storageKey : null);
+  const { ref, url } = useLazyMediaUrl(key, getPostMediaUrl);
+
+  if (post.mediaPurged || post.attachment === 'none') return null;
+
+  if (post.attachment === 'pdf') {
+    return (
+      <div style={css('width:31px;height:31px;border-radius:9px;background:#FEF1F1;display:flex;align-items:center;justify-content:center;cursor:pointer')}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth={1.8} strokeLinejoin="round"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg>
+      </div>
+    );
+  }
+
+  if (isImage) {
+    return (
+      <div ref={ref} style={css('position:relative;width:31px;height:31px;border-radius:9px;background:#EDF3FE;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer')}>
+        {url
+          ? <img src={url} alt="" decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
+          : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#0B5FEF" strokeWidth={1.8} strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3.4" /><circle cx="9" cy="10" r="1.7" /><path d="M4.6 17.4l4.5-4.3 3.3 3.1 2.6-2.4 4.4 4" /></svg>}
+      </div>
+    );
+  }
+
+  if (!isVideo) return null;
+
+  return (
+    <div ref={ref} style={css('position:relative;width:38px;height:31px;border-radius:9px;background:#0F172A;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer')}>
+      {url && <img src={url} alt="" decoding="async" style={css('position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;opacity:.72')} />}
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="#FFFFFF" style={css('position:relative')}><path d="M8.5 5.5l10 6.5-10 6.5z" /></svg>
+    </div>
+  );
+}
+
+/** "Latest Official Update" — the newest Official post, in the existing card. */
+function OfficialUpdateCard({ post, onOpen }: { post: FeedPost; onOpen: () => void }) {
+  return (
+    <div onClick={onOpen} style={{ ...officialCardFrame, ...css('position:relative;overflow:hidden;cursor:pointer') }}>
+      <svg width="168" height="86" viewBox="0 0 168 86" preserveAspectRatio="none" style={css('position:absolute;right:0;bottom:0;opacity:.85')}>
+        <path d="M0,80 L16,74 L32,70 L48,60 L64,63 L80,50 L96,44 L112,32 L128,27 L144,15 L168,6 L168,86 L0,86 Z" fill="rgba(11,95,239,.09)" />
+        <path d="M0,80 L16,74 L32,70 L48,60 L64,63 L80,50 L96,44 L112,32 L128,27 L144,15 L168,6" fill="none" stroke="rgba(11,95,239,.32)" strokeWidth={1.3} />
+      </svg>
+      <div style={css('position:absolute;top:14px;right:15px;width:36px;height:36px;border-radius:12px;background:#EDF3FE;display:flex;align-items:center;justify-content:center')}>
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#0B5FEF" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M4.5 5.2c0-1 .8-1.8 1.8-1.8h1.9c.8 0 1.5.5 1.7 1.3l.7 2.5c.2.7-.1 1.5-.7 1.9l-1.2.8a11 11 0 0 0 4.4 4.4l.8-1.2c.4-.6 1.2-.9 1.9-.7l2.5.7c.8.2 1.3.9 1.3 1.7v1.9c0 1-.8 1.8-1.8 1.8C10.6 20.3 4.5 14.2 4.5 5.2z" /></svg>
+      </div>
+      <div style={css('position:relative;width:24px;height:3px;border-radius:2px;background:#D9A63F')} />
+      <div style={css('position:relative;margin-top:9px;font-size:14.5px;font-weight:700;letter-spacing:-.25px;padding-right:44px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
+        {headline(post)}
+      </div>
+      {summaryLines(post).map((line, i) => (
+        <div key={i} style={css('position:relative;margin-top:' + (i === 0 ? '5px' : '0') + ';font-size:12.5px;color:#64748B;line-height:1.55;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
+          {line}
+        </div>
+      ))}
+      <div style={css('position:relative;margin-top:13px;display:flex;align-items:center;gap:9px')}>
+        <AttachmentChips post={post} />
+        <div style={css('flex:1')} />
+        <div style={css('font-size:11px;color:#94A3B8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px')}>
+          {post.authorName} · {timeAgo(post.createdAt)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** One "Recent Posts" row. The first has no rule above it, as before. */
+function RecentPostRow({ post, index, onOpen }: { post: FeedPost; index: number; onOpen: () => void }) {
+  const [bg, fg] = ROW_TINTS[index % ROW_TINTS.length];
+  const title = headline(post);
+  const first = index === 0;
+
+  return (
+    <div
+      onClick={onOpen}
+      style={first
+        ? css('flex:none;margin:0 20px;display:flex;align-items:center;gap:11px;cursor:pointer')
+        : css('flex:none;margin:16px 20px 0;padding-top:15px;border-top:1px solid #F1F4F9;display:flex;align-items:center;gap:11px;cursor:pointer')}
+    >
+      <div style={{ ...css('width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:none'), background: bg, color: fg }}>
+        {initials(title)}
+      </div>
+      <div style={css('flex:1;display:flex;flex-direction:column;gap:2px;min-width:0')}>
+        <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
+          {title}
+        </div>
+        <div style={css('font-size:11.5px;color:#94A3B8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
+          {previewLine(post, title)}
+        </div>
+      </div>
+      <div style={css('font-size:11px;color:#94A3B8;flex:none;white-space:nowrap')}>{timeAgo(post.createdAt)}</div>
+    </div>
+  );
+}
+
 export function HomeScreen() {
   const navigate = useNavigate();
   const { userName } = useAppState();
   const unread = useUnreadNotificationCount();
+  const highlights = useHomeHighlights();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   return (
@@ -88,50 +263,44 @@ export function HomeScreen() {
         </div>
 
         <div style={css('flex:none;padding:22px 20px 11px;font-size:15px;font-weight:700;letter-spacing:-.3px')}>Latest Official Update</div>
-        <div onClick={() => navigate('/analysis')} style={css('flex:none;margin:0 20px;background:#FFFFFF;border:1px solid #EDF0F6;border-radius:16px;box-shadow:0 3px 14px rgba(15,23,42,.05);padding:14px 15px 12px;position:relative;overflow:hidden;cursor:pointer')}>
-          <svg width="168" height="86" viewBox="0 0 168 86" preserveAspectRatio="none" style={css('position:absolute;right:0;bottom:0;opacity:.85')}>
-            <path d="M0,80 L16,74 L32,70 L48,60 L64,63 L80,50 L96,44 L112,32 L128,27 L144,15 L168,6 L168,86 L0,86 Z" fill="rgba(11,95,239,.09)" />
-            <path d="M0,80 L16,74 L32,70 L48,60 L64,63 L80,50 L96,44 L112,32 L128,27 L144,15 L168,6" fill="none" stroke="rgba(11,95,239,.32)" strokeWidth={1.3} />
-          </svg>
-          <div style={css('position:absolute;top:14px;right:15px;width:36px;height:36px;border-radius:12px;background:#EDF3FE;display:flex;align-items:center;justify-content:center')}>
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#0B5FEF" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M4.5 5.2c0-1 .8-1.8 1.8-1.8h1.9c.8 0 1.5.5 1.7 1.3l.7 2.5c.2.7-.1 1.5-.7 1.9l-1.2.8a11 11 0 0 0 4.4 4.4l.8-1.2c.4-.6 1.2-.9 1.9-.7l2.5.7c.8.2 1.3.9 1.3 1.7v1.9c0 1-.8 1.8-1.8 1.8C10.6 20.3 4.5 14.2 4.5 5.2z" /></svg>
+        {highlights.loading ? (
+          <div style={officialCardNote}>
+            Loading the latest update…
           </div>
-          <div style={css('position:relative;width:24px;height:3px;border-radius:2px;background:#D9A63F')} />
-          <div style={css('position:relative;margin-top:9px;font-size:14.5px;font-weight:700;letter-spacing:-.25px')}>Gold Analysis</div>
-          <div style={css('position:relative;margin-top:5px;font-size:12.5px;color:#64748B;line-height:1.55')}>Buy Above 3365</div>
-          <div style={css('position:relative;font-size:12.5px;color:#64748B;line-height:1.55')}>SL 3358 | TP 3380</div>
-          <div style={css('position:relative;margin-top:13px;display:flex;align-items:center;gap:9px')}>
-            <div style={css('width:31px;height:31px;border-radius:9px;background:#FEF1F1;display:flex;align-items:center;justify-content:center;cursor:pointer')}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth={1.8} strokeLinejoin="round"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg>
-            </div>
-            <div style={css('width:31px;height:31px;border-radius:9px;background:#EDF3FE;display:flex;align-items:center;justify-content:center;cursor:pointer')}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#0B5FEF" strokeWidth={1.8} strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3.4" /><circle cx="9" cy="10" r="1.7" /><path d="M4.6 17.4l4.5-4.3 3.3 3.1 2.6-2.4 4.4 4" /></svg>
-            </div>
-            <div style={css('width:38px;height:31px;border-radius:9px;background:#0F172A;display:flex;align-items:center;justify-content:center;cursor:pointer')}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="#FFFFFF"><path d="M8.5 5.5l10 6.5-10 6.5z" /></svg>
-            </div>
-            <div style={css('flex:1')} />
-            <div style={css('font-size:11px;color:#94A3B8;white-space:nowrap')}>8:00 AM</div>
+        ) : highlights.error ? (
+          <div style={officialCardNote}>
+            {highlights.error}
           </div>
-        </div>
+        ) : highlights.official ? (
+          <OfficialUpdateCard
+            post={highlights.official}
+            onOpen={() => navigate(`/analysis?post=${highlights.official!.id}`)}
+          />
+        ) : (
+          <div style={officialCardNote}>
+            No official updates yet. Analysis and signals from the team will appear here.
+          </div>
+        )}
 
         <div style={css('flex:none;padding:20px 20px 12px;font-size:15px;font-weight:700;letter-spacing:-.3px')}>Recent Posts</div>
-        <div onClick={() => navigate('/community')} style={css('flex:none;margin:0 20px;display:flex;align-items:center;gap:11px;cursor:pointer')}>
-          <div style={css('width:38px;height:38px;border-radius:50%;background:#E4E9F7;color:#3C5A8A;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:none')}>MO</div>
-          <div style={css('flex:1;display:flex;flex-direction:column;gap:2px;min-width:0')}>
-            <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px')}>Market Outlook</div>
-            <div style={css('font-size:11.5px;color:#94A3B8')}>Nifty likely to open positive</div>
+        {highlights.loading ? (
+          <div style={homeNoteRow}>Loading recent posts…</div>
+        ) : highlights.error ? (
+          <div style={homeNoteRow}>{highlights.error}</div>
+        ) : highlights.recent.length === 0 ? (
+          <div style={homeNoteRow}>
+            No community posts yet. Be the first to share a setup.
           </div>
-          <div style={css('font-size:11px;color:#94A3B8;flex:none;white-space:nowrap')}>Yesterday</div>
-        </div>
-        <div onClick={() => navigate('/analysis')} style={css('flex:none;margin:16px 20px 0;padding-top:15px;border-top:1px solid #F1F4F9;display:flex;align-items:center;gap:11px;cursor:pointer')}>
-          <div style={css('width:38px;height:38px;border-radius:50%;background:#E7E3F7;color:#55488C;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:none')}>GA</div>
-          <div style={css('flex:1;display:flex;flex-direction:column;gap:2px;min-width:0')}>
-            <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px')}>Gold Analysis</div>
-            <div style={css('font-size:11.5px;color:#94A3B8')}>Buy above 3365, SL 3358</div>
-          </div>
-          <div style={css('font-size:11px;color:#94A3B8;flex:none;white-space:nowrap')}>Yesterday</div>
-        </div>
+        ) : (
+          highlights.recent.map((post, i) => (
+            <RecentPostRow
+              key={post.id}
+              post={post}
+              index={i}
+              onOpen={() => navigate(`/analysis?post=${post.id}`)}
+            />
+          ))
+        )}
         <div style={css('height:20px;flex:none')} />
         </div>
       </div>
