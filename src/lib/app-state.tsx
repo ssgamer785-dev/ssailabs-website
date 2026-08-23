@@ -1,54 +1,42 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import { useAuth } from './auth-context';
 
-export interface Notif {
-  id: string;
-  when: 'today' | 'earlier';
-  cat: 'Signals' | 'Chat' | 'Community';
-  kind: 'signal' | 'chat' | 'like' | 'comment' | 'target' | 'session';
-  title: string;
-  body: string;
-  time: string;
-  unread: boolean;
-}
-
-export const NOTIFS: Notif[] = [
-  { id: 'n1', when: 'today', cat: 'Signals', kind: 'signal', title: 'New Gold Analysis posted', body: 'Buy Above 3365 · SL 3358 | TP 3380', time: '8:02 AM', unread: true },
-  { id: 'n2', when: 'today', cat: 'Chat', kind: 'chat', title: 'Admin sent you a PDF', body: 'Gold_Analysis.pdf · 2.4 MB', time: '10:30 AM', unread: true },
-  { id: 'n3', when: 'today', cat: 'Community', kind: 'like', title: 'Rahul and 12 others liked your post', body: '“Gold looks bullish today.”', time: '11:14 AM', unread: true },
-  { id: 'n4', when: 'today', cat: 'Community', kind: 'comment', title: 'Aman commented on your post', body: 'Can someone explain ICT setup?', time: '12:40 PM', unread: false },
-  { id: 'n5', when: 'earlier', cat: 'Signals', kind: 'target', title: 'Target hit on EUR/USD', body: 'TP 1.0925 reached · +42 pips', time: 'Yesterday', unread: false },
-  { id: 'n6', when: 'earlier', cat: 'Community', kind: 'session', title: 'Live session starts in 30 min', body: 'Risk management masterclass', time: 'Yesterday', unread: false },
-  { id: 'n7', when: 'earlier', cat: 'Chat', kind: 'chat', title: 'Vivek replied to your message', body: 'Okay', time: '2 days ago', unread: false },
-];
+/**
+ * Small cross-screen UI state.
+ *
+ * This module used to also export seven invented notifications, with invented
+ * people in them, plus the read-tracking state that went with them.
+ * Notifications have come from Supabase since Phase 2D, so that data was dead:
+ * nothing outside this file read it. It is gone, along with the helpers that
+ * only ever tracked those fake rows. The live implementation in
+ * lib/notifications/useNotifications.ts is untouched.
+ *
+ * `userName` used to be the literal string of a person who does not exist,
+ * shown to every real user on Home, Profile, Create Post and Community. It now
+ * comes from the signed-in profile.
+ */
 
 interface AppState {
+  /** The signed-in user's real name. Empty until the profile has loaded. */
   userName: string;
+  /** "Post with my real name" — session-scoped, as it has always been. */
   reveal: boolean;
   toggleReveal: () => void;
-  readMap: Record<string, boolean>;
-  markRead: (id: string) => void;
-  markAllRead: () => void;
 }
 
 const AppStateContext = createContext<AppState | null>(null);
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
+  const { profile } = useAuth();
   const [reveal, setReveal] = useState(false);
-  const [readMap, setReadMap] = useState<Record<string, boolean>>({});
-  const userName = 'Rahul Trader';
+
+  const userName = profile?.full_name?.trim() ?? '';
 
   const value = useMemo<AppState>(() => ({
     userName,
     reveal,
     toggleReveal: () => setReveal(v => !v),
-    readMap,
-    markRead: (id: string) => setReadMap(p => ({ ...p, [id]: true })),
-    markAllRead: () => setReadMap(() => {
-      const read: Record<string, boolean> = {};
-      NOTIFS.forEach(n => { read[n.id] = true; });
-      return read;
-    }),
-  }), [reveal, readMap]);
+  }), [userName, reveal]);
 
   return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;
 }
@@ -59,6 +47,13 @@ export function useAppState() {
   return ctx;
 }
 
+/** "Rahul Sharma" -> "RS". Empty in, empty out, so a loading avatar stays blank. */
 export function initials(name: string) {
-  return name.split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(w => w[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
 }

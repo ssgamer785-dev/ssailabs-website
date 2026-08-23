@@ -17,7 +17,6 @@ import { AnalysisDetailScreen } from './screens/AnalysisDetailScreen';
 import { NotificationsScreen } from './screens/NotificationsScreen';
 import { AdminInboxScreen } from './screens/AdminInboxScreen';
 import { NameVisibilityScreen } from './screens/NameVisibilityScreen';
-import { CommunityAdminPreviewScreen, CommunityMemberPreviewScreen } from './screens/CommunityPreviewScreens';
 
 export default function App() {
   return (
@@ -30,8 +29,6 @@ export default function App() {
             <Route path="/signup" element={<RedirectIfAuthed><SignupScreen /></RedirectIfAuthed>} />
             <Route path="/home" element={<RequireAuth><HomeScreen /></RequireAuth>} />
             <Route path="/community" element={<RequireAuth><CommunityPage /></RequireAuth>} />
-            <Route path="/community/admin-view" element={<RequireAuth><CommunityAdminPreviewScreen /></RequireAuth>} />
-            <Route path="/community/member-view" element={<RequireAuth><CommunityMemberPreviewScreen /></RequireAuth>} />
             <Route path="/create-post" element={<RequireAuth><CreatePostScreen /></RequireAuth>} />
             <Route path="/calculator" element={<RequireAuth><RiskCalculatorScreen /></RequireAuth>} />
             <Route path="/news" element={<RequireAuth><MarketNewsScreen /></RequireAuth>} />

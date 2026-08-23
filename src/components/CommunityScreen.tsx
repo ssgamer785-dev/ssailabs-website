@@ -140,12 +140,13 @@ function DeleteBar({ onDelete, onCancel }: { onDelete: () => void; onCancel: () 
   );
 }
 
-export function CommunityScreen({ initialTab = 'official', adminView = false, asOthers = false, reveal: revealProp, userName = 'Rahul Trader', onToggleReveal }: {
+export function CommunityScreen({ initialTab = 'official', adminView = false, asOthers = false, reveal: revealProp, userName, onToggleReveal }: {
   initialTab?: 'official' | 'students';
   adminView?: boolean;
   asOthers?: boolean;
   reveal?: boolean;
-  userName?: string;
+  /** The signed-in user's real name; supplied by the caller from the profile. */
+  userName: string;
   onToggleReveal?: () => void;
 }) {
   const navigate = useNavigate();

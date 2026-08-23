@@ -214,19 +214,24 @@ export function HomeScreen() {
           <div onClick={() => navigate('/profile')} style={css('width:44px;height:44px;border-radius:50%;background:#DCE7F7;color:#29527F;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex:none;box-shadow:0 2px 8px rgba(15,23,42,.10);cursor:pointer')}>{initials(userName)}</div>
         </div>
 
-        <div style={css('flex:none;margin:0 20px;border-radius:20px;background:linear-gradient(150deg,#1C6EF6 0%,#0A4FDD 100%);box-shadow:0 14px 28px rgba(11,95,239,.28);padding:16px 18px 12px;color:#FFFFFF')}>
+        {/* Market Overview.
+
+            This card used to assert a market sentiment, a percentage move and
+            a sparkline, all three hard-coded — there is no market-data source
+            behind this app — so a trader was shown an invented read on the
+            market every time they opened it. The card keeps its place and its
+            styling; the claim is gone until a real feed backs it. */}
+        <div style={css('flex:none;margin:0 20px;border-radius:20px;background:linear-gradient(150deg,#1C6EF6 0%,#0A4FDD 100%);box-shadow:0 14px 28px rgba(11,95,239,.28);padding:16px 18px 18px;color:#FFFFFF')}>
           <div style={css('display:flex;align-items:center;justify-content:space-between')}>
             <div style={css('font-size:14.5px;font-weight:600;letter-spacing:-.2px;white-space:nowrap')}>Market Overview</div>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.85)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M6 9.5l6 6 6-6" /></svg>
+            <div style={css('height:22px;padding:0 9px;border-radius:7px;background:rgba(255,255,255,.16);display:flex;align-items:center;font-size:10.5px;font-weight:600;letter-spacing:.02em;white-space:nowrap')}>Coming soon</div>
           </div>
-          <div style={css('margin-top:11px;font-size:11.5px;color:rgba(255,255,255,.72);white-space:nowrap')}>Market Sentiment</div>
-          <div style={css('margin-top:2px;display:flex;align-items:center;justify-content:space-between')}>
-            <div style={css('font-size:31px;font-weight:800;letter-spacing:-1px;line-height:1.15;white-space:nowrap')}>Bullish</div>
-            <div style={css('height:26px;padding:0 10px;border-radius:9px;background:#22C55E;display:flex;align-items:center;font-size:11.5px;font-weight:700;color:#FFFFFF')}>+1.42%</div>
+          <div style={css('margin-top:12px;font-size:13px;color:rgba(255,255,255,.86);line-height:1.5')}>
+            Live market data isn't connected yet.
           </div>
-          <svg width="100%" height="62" viewBox="0 0 322 48" preserveAspectRatio="none" fill="none" style={css('display:block;margin-top:6px')}>
-            <polyline points="0,34 7,28 14,36 21,24 28,32 35,20 42,30 49,18 56,26 63,16 70,24 77,30 84,22 91,34 98,26 105,38 112,28 119,40 126,30 133,42 140,32 147,44 154,34 161,42 168,30 175,38 182,26 189,34 196,24 203,32 210,20 217,30 224,18 231,28 238,16 245,26 252,14 259,24 266,12 273,22 280,10 287,20 294,8 301,18 308,6 315,14 322,4" stroke="#FFFFFF" strokeWidth={1.7} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-          </svg>
+          <div style={css('margin-top:5px;font-size:11.5px;color:rgba(255,255,255,.62);line-height:1.5')}>
+            Sentiment and index moves will appear here once a real feed is in place.
+          </div>
         </div>
 
         <div style={css('flex:none;padding:20px 18px 0;display:flex;justify-content:space-between')}>

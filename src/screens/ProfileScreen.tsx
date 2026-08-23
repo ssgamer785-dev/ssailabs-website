@@ -23,8 +23,14 @@ const rowIcon = css('flex:none');
 export function ProfileScreen() {
   const navigate = useNavigate();
   const { userName, reveal } = useAppState();
-  const { signOut } = useAuth();
+  const { signOut, user, profile } = useAuth();
   const myIdentity = reveal ? userName : 'Unknown User';
+
+  // The email always exists on the session; the phone is nullable on profiles
+  // and most accounts will not have one, so it gets a prompt rather than a
+  // blank line or an invented number.
+  const email = user?.email ?? '';
+  const phone = profile?.phone?.trim() ?? '';
 
   async function handleLogout() {
     await signOut();
@@ -38,9 +44,11 @@ export function ProfileScreen() {
       <div style={css('flex:none;padding:10px 24px 22px;display:flex;align-items:center;gap:18px')}>
         <div style={css('width:86px;height:86px;border-radius:50%;background:#DCE7F7;color:#29527F;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;flex:none;box-shadow:0 6px 18px rgba(15,23,42,.10)')}>{initials(userName)}</div>
         <div style={css('flex:1;display:flex;flex-direction:column;gap:5px;min-width:0')}>
-          <div style={css('font-size:18px;font-weight:800;letter-spacing:-.45px')}>{userName}</div>
-          <div style={css('font-size:12.5px;color:#8794A8')}>rahultrader@gmail.com</div>
-          <div style={css('font-size:12.5px;color:#8794A8')}>+91 98765 43210</div>
+          <div style={css('font-size:18px;font-weight:800;letter-spacing:-.45px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>{userName}</div>
+          {email && <div style={css('font-size:12.5px;color:#8794A8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>{email}</div>}
+          <div style={{ ...css('font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'), color: phone ? '#8794A8' : '#B6BFCC' }}>
+            {phone || 'No phone number added'}
+          </div>
         </div>
       </div>
       <div style={css('flex:none;height:1px;background:#F1F4F9;margin:0 20px')} />
