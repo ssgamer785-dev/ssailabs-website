@@ -236,7 +236,9 @@ await scenario('Production slip prints as many A4 sheets as it reports', async (
  * ------------------------------------------------------------------ */
 await scenario('Bill prints on one clean A4 sheet', async ({ page }) => {
   await createOrder(page, {
-    name: 'Bill Client', phone: '9555500002', garments: ['FULL COAT PANT', 'SHIRT'],
+    name: 'Bill Client', phone: '9555500002',
+    city: 'Jalandhar', address: 'Model Town Market',
+    garments: ['FULL COAT PANT', 'SHIRT'],
     measurements: FULL_MEASUREMENTS
   });
   await finishOrder(page);
@@ -250,7 +252,8 @@ await scenario('Bill prints on one clean A4 sheet', async ({ page }) => {
   report.check('bill shows the correct customer', billText.includes('Bill Client'));
   report.check('bill shows the correct order number', billText.includes('ORDER NO.') && billText.includes('RT-00001'));
   report.check('bill lists every garment', billText.includes('Full Coat Pant') && billText.includes('Shirt'));
-  report.check('bill shows the customer address, not a dash', !/ADDRESS\s*:\s*—/.test(billText), billText.match(/ADDRESS[^\n]*/)?.[0]);
+  report.check('bill shows the recorded customer address', /Model Town Market/.test(billText),
+    billText.match(/ADDRESS[\s\S]{0,60}/)?.[0]?.replace(/\n/g, ' '));
 
   await page.emulateMedia({ media: 'print' });
   await page.waitForTimeout(500);

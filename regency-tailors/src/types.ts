@@ -169,8 +169,10 @@ export interface OrderItem {
 }
 
 export interface Order {
-  id: string; // e.g. "RT-0001" or "REG-2026-089"
+  id: string; // the showroom-facing order number, e.g. "1"
   orderNumber?: string;
+  /** Database primary key. Absent on the browser-storage path. */
+  dbId?: string;
   customerId: string;
   customerName: string;
   customerPhone: string;
@@ -286,5 +288,5 @@ export interface ShowroomProfile {
   email: string;
   gstin: string;
   activeUser: string;
-  activeRole: 'Admin' | 'Receptionist';
+  activeRole: 'Admin';
 }

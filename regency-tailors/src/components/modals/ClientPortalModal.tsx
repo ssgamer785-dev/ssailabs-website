@@ -77,7 +77,7 @@ export const ClientPortalModal: React.FC<ClientPortalModalProps> = ({
         phone: firstOrd.customerPhone,
         email: firstOrd.customerEmail || '',
         address: firstOrd.customerAddress || '',
-        city: 'Jalandhar',
+        city: '',
         totalOrders: matchedOrders.length,
         lifetimeSpend: matchedOrders.reduce((sum, ord) => sum + (ord.totalAmount || 0), 0),
         lastVisitDate: firstOrd.orderDate,

@@ -142,7 +142,7 @@ export const ProductionSlipPage: React.FC<ProductionSlipPageProps> = ({
                   SPECIAL INSTRUCTIONS & CLIENT FIT PREFERENCES
                 </span>
                 <p className="text-xs font-semibold text-[#071426]">
-                  {order.specialInstructions || order.notes || 'Standard bespoke tailoring specifications.'}
+                  {order.specialInstructions || order.notes || '\u2014'}
                 </p>
               </div>
             )}
@@ -159,7 +159,7 @@ export const ProductionSlipPage: React.FC<ProductionSlipPageProps> = ({
                   </span>
                 </div>
                 <p className="text-xs font-medium text-amber-950 italic">
-                  {order.productionNotes || 'Cutting queue verified. Ready for tailor assignment.'}
+                  {order.productionNotes || '\u2014'}
                 </p>
               </div>
             )}

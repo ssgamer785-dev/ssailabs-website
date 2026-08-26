@@ -6,8 +6,21 @@ actually lands in the browser database and on printed paper.
 ## Running
 
 ```bash
-npm run dev          # in one terminal (serves on :3000)
+npm run dev:local    # in one terminal — browser-storage mode on :3000
 npm run test:e2e     # in another
+```
+
+The workflow suite runs against `dev:local` on purpose: it exercises the
+business logic without needing a Supabase project. Authorisation itself is
+tested where it is actually enforced — `npm run test:db`.
+
+To check the sign-in gate, run a dev server in Supabase mode and point the gate
+suite at it:
+
+```bash
+VITE_SUPABASE_URL=https://example.supabase.co \
+VITE_SUPABASE_ANON_KEY=not-a-real-key npx vite --port=3001
+E2E_BASE_URL=http://localhost:3001 node e2e/auth-gate.mjs
 ```
 
 Set `CHROME_PATH` if Playwright's bundled Chromium is not where the harness
@@ -31,3 +44,4 @@ CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e
 | Backup round trip | Export → wipe → import restores every record, relationship and the order-number mark |
 | Hostile backups | Empty, truncated, non-JSON, foreign-app, oversized and structurally broken files are rejected or repaired without data loss |
 | Storage failure | Corrupt localStorage and a full quota degrade to a warning, never a blank screen |
+| Auth gate (`auth-gate.mjs`) | An unauthenticated visitor sees the sign-in screen only: no dashboard, no records, no data written to browser storage, deep links do not bypass it |

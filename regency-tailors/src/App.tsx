@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   initialCustomers,
   initialMeasurements,
@@ -47,53 +47,131 @@ import { PrintProductionSlipModal } from './components/modals/PrintProductionSli
 import { PrintBillModal } from './components/modals/PrintBillModal';
 import { ProductionSlipDetailModal } from './components/modals/ProductionSlipDetailModal';
 import { RegencyBackupPayload, normalizeRestoredPayload } from './utils/backupManager';
+import { convertLegacyDataset } from './data/legacyImport';
 import { readArray, readObject, writeJson, onStorageFailure } from './utils/safeStorage';
+import { usesSupabase } from './lib/supabase';
+import { useAuth } from './lib/auth';
+import * as repo from './data/supabaseRepository';
+import type { ShowroomDataset } from './data/supabaseRepository';
 import { highestNumberInData, raiseHighWaterMark, extractOrderNumber } from './utils/orderNumbering';
 import { StorageAlertBanner } from './components/StorageAlertBanner';
 
 const STORAGE_KEY = 'REGENCY_TAILORS_DB_V3';
 
+/**
+ * Initial state for a collection.
+ *
+ * On the Supabase path the database is the only source of truth, so the app
+ * starts empty and fills from the server after sign-in. Browser storage is
+ * never read for business data there — it is not a cross-device database and
+ * must not shadow one.
+ */
+function bootstrap<T>(key: string, fallback: T[]): T[] {
+  return usesSupabase ? fallback : readArray<T>(key, fallback);
+}
+
 export default function App() {
   // Persistence state setup
   const [customers, setCustomers] = useState<Customer[]>(() =>
-    readArray<Customer>(`${STORAGE_KEY}_CUSTOMERS`, initialCustomers)
+    bootstrap<Customer>(`${STORAGE_KEY}_CUSTOMERS`, initialCustomers)
   );
 
   const [measurements, setMeasurements] = useState<MeasurementRecord[]>(() =>
-    readArray<MeasurementRecord>(`${STORAGE_KEY}_MEASUREMENTS`, initialMeasurements)
+    bootstrap<MeasurementRecord>(`${STORAGE_KEY}_MEASUREMENTS`, initialMeasurements)
   );
 
   const [orders, setOrders] = useState<Order[]>(() =>
-    readArray<Order>(`${STORAGE_KEY}_ORDERS`, initialOrders)
+    bootstrap<Order>(`${STORAGE_KEY}_ORDERS`, initialOrders)
   );
 
   const [fittings, setFittings] = useState<Fitting[]>(() =>
-    readArray<Fitting>(`${STORAGE_KEY}_FITTINGS`, initialFittings)
+    bootstrap<Fitting>(`${STORAGE_KEY}_FITTINGS`, initialFittings)
   );
 
   const [workers, setWorkers] = useState<Worker[]>(() =>
-    readArray<Worker>(`${STORAGE_KEY}_WORKERS`, initialWorkers)
+    bootstrap<Worker>(`${STORAGE_KEY}_WORKERS`, initialWorkers)
   );
 
   const [invoices, setInvoices] = useState<Invoice[]>(() =>
-    readArray<Invoice>(`${STORAGE_KEY}_INVOICES`, initialInvoices)
+    bootstrap<Invoice>(`${STORAGE_KEY}_INVOICES`, initialInvoices)
   );
 
   const [expenses, setExpenses] = useState<Expense[]>(() =>
-    readArray<Expense>(`${STORAGE_KEY}_EXPENSES`, initialExpenses)
+    bootstrap<Expense>(`${STORAGE_KEY}_EXPENSES`, initialExpenses)
   );
 
   const [trash, setTrash] = useState<TrashItem[]>(() =>
-    readArray<TrashItem>(`${STORAGE_KEY}_TRASH`, initialTrash)
+    bootstrap<TrashItem>(`${STORAGE_KEY}_TRASH`, initialTrash)
   );
 
   const [profile, setProfile] = useState<ShowroomProfile>(() =>
-    readObject<ShowroomProfile>(`${STORAGE_KEY}_PROFILE`, initialProfile)
+    usesSupabase ? initialProfile : readObject<ShowroomProfile>(`${STORAGE_KEY}_PROFILE`, initialProfile)
   );
 
   // Surfaced to the user when the browser refuses to persist (quota full, private mode)
   const [storageAlert, setStorageAlert] = useState<string | null>(null);
   useEffect(() => onStorageFailure(f => setStorageAlert(f.message)), []);
+
+  // ---------------------------------------------------------------------
+  // Supabase persistence
+  //
+  // The database is authoritative. Signing in on any device loads the same
+  // showroom, and every mutation is written through and then re-read, so what
+  // is on screen is what is stored rather than an optimistic guess.
+  // ---------------------------------------------------------------------
+  const { profile: staffProfile, user, signOut } = useAuth();
+  const displayName = staffProfile?.full_name || user?.email || 'Showroom Owner';
+
+  const [isLoadingData, setIsLoadingData] = useState(usesSupabase);
+  const [dataError, setDataError] = useState<string | null>(null);
+
+  const applyDataset = useCallback((data: ShowroomDataset) => {
+    setCustomers(data.customers);
+    setOrders(data.orders);
+    setMeasurements(data.measurements);
+    setFittings(data.fittings);
+    setWorkers(data.workers);
+    setInvoices(data.invoices);
+    setExpenses(data.expenses);
+    setTrash(data.trash);
+    setProfile(data.profile);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    if (!usesSupabase) return;
+    try {
+      applyDataset(await repo.loadDataset(displayName));
+      setDataError(null);
+    } catch (err: any) {
+      setDataError(err?.message || 'Could not reach the showroom database.');
+    }
+  }, [applyDataset, displayName]);
+
+  useEffect(() => {
+    if (!usesSupabase) return;
+    let cancelled = false;
+    setIsLoadingData(true);
+    refresh().finally(() => {
+      if (!cancelled) setIsLoadingData(false);
+    });
+    return () => { cancelled = true; };
+  }, [refresh]);
+
+  /**
+   * Runs a database write, then re-reads. On failure the message is surfaced
+   * and the screen is resynced from the server, so the UI never silently keeps
+   * a change the database rejected.
+   */
+  const push = useCallback(async (write: () => Promise<unknown>) => {
+    try {
+      await write();
+      setDataError(null);
+    } catch (err: any) {
+      setDataError(err?.message || 'That change could not be saved.');
+    } finally {
+      await refresh();
+    }
+  }, [refresh]);
 
   // Keep a second browser tab from overwriting the first tab's work. Each tab
   // holds the whole database in memory and writes it back wholesale, so without
@@ -139,7 +217,6 @@ export default function App() {
   // Navigation & Modal States
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeRole, setActiveRole] = useState<'Admin' | 'Receptionist'>('Admin');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [clientPortalOpen, setClientPortalOpen] = useState(false);
 
@@ -188,43 +265,56 @@ export default function App() {
 
   // Sync to localStorage
   useEffect(() => {
+    if (usesSupabase) return;
     writeJson(`${STORAGE_KEY}_CUSTOMERS`, customers);
   }, [customers]);
 
   useEffect(() => {
+    if (usesSupabase) return;
     writeJson(`${STORAGE_KEY}_MEASUREMENTS`, measurements);
   }, [measurements]);
 
   useEffect(() => {
+    if (usesSupabase) return;
     writeJson(`${STORAGE_KEY}_ORDERS`, orders);
   }, [orders]);
 
   useEffect(() => {
+    if (usesSupabase) return;
     writeJson(`${STORAGE_KEY}_FITTINGS`, fittings);
   }, [fittings]);
 
   useEffect(() => {
+    if (usesSupabase) return;
     writeJson(`${STORAGE_KEY}_WORKERS`, workers);
   }, [workers]);
 
   useEffect(() => {
+    if (usesSupabase) return;
     writeJson(`${STORAGE_KEY}_INVOICES`, invoices);
   }, [invoices]);
 
   useEffect(() => {
+    if (usesSupabase) return;
     writeJson(`${STORAGE_KEY}_EXPENSES`, expenses);
   }, [expenses]);
 
   useEffect(() => {
+    if (usesSupabase) return;
     writeJson(`${STORAGE_KEY}_TRASH`, trash);
   }, [trash]);
 
   useEffect(() => {
+    if (usesSupabase) return;
     writeJson(`${STORAGE_KEY}_PROFILE`, profile);
   }, [profile]);
 
   // Handlers: Customers
   const handleSaveCustomer = (customer: Customer) => {
+    if (usesSupabase) {
+      void push(() => repo.saveCustomer(customer));
+      return;
+    }
     setCustomers(prev => {
       const exists = prev.some(c => c.id === customer.id);
       if (exists) return prev.map(c => c.id === customer.id ? customer : c);
@@ -234,6 +324,10 @@ export default function App() {
 
   const handleDeleteCustomer = (customer: Customer) => {
     if (confirm(`Move customer "${customer.name}" to trash?`)) {
+      if (usesSupabase) {
+        void push(() => repo.softDeleteCustomer(customer.id));
+        return;
+      }
       setCustomers(prev => prev.filter(c => c.id !== customer.id));
       setTrash(prev => [
         {
@@ -250,7 +344,41 @@ export default function App() {
   };
 
   // Handlers: Orders
-  const handleSaveOrder = (order: Order) => {
+  const handleSaveOrder = async (order: Order): Promise<Order | void> => {
+    if (usesSupabase) {
+      // The order number comes from the database sequence, so the saved row is
+      // the authoritative record — the wizard shows what the server returned.
+      try {
+        const saved = await repo.saveOrder(order);
+        if (order.measurementsSnapshot) {
+          await repo.saveMeasurement({
+            id: '',
+            customerId: saved.customerId,
+            customerName: saved.customerName,
+            customerPhone: saved.customerPhone,
+            garmentType: (saved.items || []).map(i => i.garmentType).join(', '),
+            unit: order.measurementsSnapshot.unit || 'inches',
+            fitPreference: order.measurementsSnapshot.fitPreference,
+            fittingNotes: order.measurementsSnapshot.fittingNotes,
+            garmentRemarks: order.measurementsSnapshot.garmentRemarks,
+            lastUpdated: saved.orderDate,
+            coat: order.measurementsSnapshot.coat,
+            pant: order.measurementsSnapshot.pant,
+            shirt: order.measurementsSnapshot.shirt,
+            kurta: order.measurementsSnapshot.kurta,
+            pajama: order.measurementsSnapshot.pajama
+          });
+        }
+        setDataError(null);
+        await refresh();
+        return saved;
+      } catch (err: any) {
+        setDataError(err?.message || 'The order could not be saved.');
+        await refresh();
+        throw err;
+      }
+    }
+
     // Retire this order number permanently so it can never be re-issued,
     // even if the order is later deleted and the trash emptied.
     raiseHighWaterMark(STORAGE_KEY, extractOrderNumber(order.orderNumber || order.id));
@@ -395,7 +523,7 @@ export default function App() {
         scheduledDate: order.trialDate,
         scheduledTime: '03:00 PM',
         status: 'Scheduled',
-        adjustmentNotes: 'First trial fitting for canvas structure, chest balance, and sleeve drape.'
+        adjustmentNotes: ''
       };
       setFittings(prev => [newFitting, ...prev.filter(f => f.orderId !== order.id)]);
     }
@@ -407,6 +535,12 @@ export default function App() {
 
   const handleRecordOrderPayment = (orderId: string, amount: number, method: string, note?: string) => {
     if (amount <= 0) return;
+
+    if (usesSupabase) {
+      const target = orders.find(o => o.id === orderId);
+      if (target?.dbId) void push(() => repo.recordOrderPayment(target.dbId!, amount, method, note));
+      return;
+    }
 
     const today = new Date().toISOString().split('T')[0];
     const newPaymentRecord = {
@@ -457,6 +591,14 @@ export default function App() {
 
   const handleDeleteOrder = (order: Order) => {
     if (confirm(`Move order "${order.id}" to trash?`)) {
+      if (usesSupabase) {
+        if (order.dbId) void push(() => repo.softDeleteOrder(order.dbId!));
+        if (selectedOrderForDetail?.id === order.id) {
+          setIsOrderDetailModalOpen(false);
+          setSelectedOrderForDetail(null);
+        }
+        return;
+      }
       setOrders(prev => prev.filter(o => o.id !== order.id));
       setTrash(prev => [
         {
@@ -477,6 +619,11 @@ export default function App() {
   };
 
   const handleUpdateOrderStatus = (orderId: string, newStatus: OrderStatus) => {
+    if (usesSupabase) {
+      const target = orders.find(o => o.id === orderId);
+      if (target?.dbId) void push(() => repo.updateOrderStatus(target.dbId!, newStatus));
+      return;
+    }
     setOrders(prev =>
       prev.map(o => {
         if (o.id === orderId) {
@@ -493,6 +640,11 @@ export default function App() {
 
   // Handlers: Production Slips
   const handleUpdateProductionStatus = (orderId: string, status: ProductionStatus) => {
+    if (usesSupabase) {
+      const target = orders.find(o => o.id === orderId);
+      if (target?.dbId) void push(() => repo.updateProductionStatus(target.dbId!, status));
+      return;
+    }
     setOrders(prev =>
       prev.map(o => {
         if (o.id === orderId) {
@@ -511,6 +663,11 @@ export default function App() {
   };
 
   const handleUpdateProductionNotes = (orderId: string, notes: string) => {
+    if (usesSupabase) {
+      const target = orders.find(o => o.id === orderId);
+      if (target?.dbId) void push(() => repo.updateProductionNotes(target.dbId!, notes));
+      return;
+    }
     setOrders(prev =>
       prev.map(o => {
         if (o.id === orderId) {
@@ -545,6 +702,10 @@ export default function App() {
 
   // Handlers: Measurements
   const handleSaveMeasurement = (record: MeasurementRecord) => {
+    if (usesSupabase) {
+      void push(() => repo.saveMeasurement(record));
+      return;
+    }
     setMeasurements(prev => {
       const exists = prev.some(m => m.id === record.id);
       if (exists) return prev.map(m => m.id === record.id ? record : m);
@@ -554,6 +715,10 @@ export default function App() {
 
   const handleDeleteMeasurement = (record: MeasurementRecord) => {
     if (confirm(`Move measurement profile for "${record.customerName}" to trash?`)) {
+      if (usesSupabase) {
+        void push(() => repo.softDeleteMeasurement(record.id));
+        return;
+      }
       setMeasurements(prev => prev.filter(m => m.id !== record.id));
       setTrash(prev => [
         {
@@ -571,17 +736,29 @@ export default function App() {
 
   // Handlers: Fittings
   const handleUpdateFittingStatus = (fittingId: string, status: Fitting['status'], notes?: string) => {
+    if (usesSupabase) {
+      void push(() => repo.updateFittingStatus(fittingId, status, notes));
+      return;
+    }
     setFittings(prev =>
       prev.map(f => (f.id === fittingId ? { ...f, status, adjustmentNotes: notes || f.adjustmentNotes } : f))
     );
   };
 
   const handleDeleteFitting = (fittingId: string) => {
+    if (usesSupabase) {
+      void push(() => repo.deleteFitting(fittingId));
+      return;
+    }
     setFittings(prev => prev.filter(f => f.id !== fittingId));
   };
 
   // Handlers: Workers
   const handleRecordAdvance = (workerId: string, amount: number) => {
+    if (usesSupabase) {
+      void push(() => repo.recordWorkerAdvance(workerId, amount));
+      return;
+    }
     setWorkers(prev =>
       prev.map(w => {
         if (w.id === workerId) {
@@ -598,6 +775,10 @@ export default function App() {
   };
 
   const handleMarkPayoutPaid = (workerId: string) => {
+    if (usesSupabase) {
+      void push(() => repo.markWorkerPayoutPaid(workerId));
+      return;
+    }
     setWorkers(prev =>
       prev.map(w => {
         if (w.id === workerId) {
@@ -633,6 +814,10 @@ export default function App() {
   };
 
   const handleAddExpense = (exp: Omit<Expense, 'id'>) => {
+    if (usesSupabase) {
+      void push(() => repo.addExpense(exp));
+      return;
+    }
     const newExp: Expense = {
       id: `EXP-${Math.floor(100 + Math.random() * 900)}`,
       ...exp
@@ -642,6 +827,10 @@ export default function App() {
 
   // Handlers: Trash & Restore
   const handleRestoreItem = (item: TrashItem) => {
+    if (usesSupabase) {
+      void push(() => repo.restoreTrashItem(item));
+      return;
+    }
     if (item.itemType === 'Customer') setCustomers(prev => [item.originalData, ...prev]);
     if (item.itemType === 'Order') setOrders(prev => [item.originalData, ...prev]);
     if (item.itemType === 'Measurement') setMeasurements(prev => [item.originalData, ...prev]);
@@ -650,15 +839,44 @@ export default function App() {
   };
 
   const handlePermanentDelete = (itemId: string) => {
+    if (usesSupabase) {
+      const item = trash.find(t => t.id === itemId);
+      if (item) void push(() => repo.purgeTrashItem(item));
+      return;
+    }
     setTrash(prev => prev.filter(t => t.id !== itemId));
   };
 
   const handleEmptyTrash = () => {
+    if (usesSupabase) {
+      void push(() => repo.emptyTrash(trash));
+      return;
+    }
     setTrash([]);
   };
 
   // Handlers: Backup & Atomic Restore
-  const handleRestoreBackup = (incoming: RegencyBackupPayload) => {
+  const handleRestoreBackup = async (incoming: RegencyBackupPayload) => {
+    if (usesSupabase) {
+      // A v2 file carries the exact Postgres payload; an older file is
+      // converted first. Either way the replacement happens inside a single
+      // database transaction, so a failure leaves production untouched.
+      const dbPayload =
+        incoming.database ||
+        convertLegacyDataset({
+          customers: incoming.customers,
+          orders: incoming.orders,
+          measurements: incoming.measurements,
+          fittings: incoming.fittings,
+          workers: incoming.workers,
+          expenses: incoming.expenses,
+          orderSequence: incoming.metadata?.orderSequence
+        }).payload;
+
+      await push(() => repo.restoreBackupPayload(dbPayload as Record<string, unknown>, 'backup import'));
+      return;
+    }
+
     // Repair any structurally-broken records before they reach the UI, so a
     // hand-edited or truncated backup can never blank the screen.
     const payload = normalizeRestoredPayload(incoming);
@@ -700,6 +918,21 @@ export default function App() {
     );
   };
 
+  // The database is authoritative, so the showroom waits for it rather than
+  // rendering an empty dashboard that looks like data loss.
+  if (usesSupabase && isLoadingData) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-[#F7F3EA] bg-chevron-pattern">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-9 h-9 rounded-full border-2 border-[#C9A24A]/30 border-t-[#C9A24A] animate-spin" />
+          <div className="text-[10px] font-bold tracking-[0.25em] text-[#8C7E6A] uppercase">
+            Loading showroom records
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen bg-[#F7F3EA] text-[#071426] overflow-hidden print-app-root">
       {/* Sidebar Navigation */}
@@ -707,9 +940,8 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onOpenClientPortal={() => setClientPortalOpen(true)}
-        activeRole={activeRole}
-        setActiveRole={setActiveRole}
-        userName={profile.activeUser}
+        userName={displayName}
+        onSignOut={usesSupabase ? () => { void signOut(); } : undefined}
         mobileOpen={mobileOpen}
         setMobileOpen={setMobileOpen}
       />
@@ -729,11 +961,12 @@ export default function App() {
             setActiveTab('orders');
           }}
           onOpenMobileMenu={() => setMobileOpen(true)}
-          userName={profile.activeUser}
-          userRole={`${profile.subtitle} / ${activeRole}`}
+          userName={displayName}
+          userRole={profile.subtitle}
         />
 
         <StorageAlertBanner message={storageAlert} onDismiss={() => setStorageAlert(null)} />
+        <StorageAlertBanner message={dataError} onDismiss={() => setDataError(null)} />
 
         {/* Dynamic View Scroll Container */}
         <main ref={mainContentRef} className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 bg-chevron-pattern w-full overscroll-contain">
@@ -958,6 +1191,7 @@ export default function App() {
               trash={trash}
               profile={profile}
               onRestoreBackup={handleRestoreBackup}
+              onRefresh={refresh}
             />
           )}
 

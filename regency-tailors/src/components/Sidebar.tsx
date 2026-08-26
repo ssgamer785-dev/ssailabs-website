@@ -9,6 +9,7 @@ import {
   Database,
   Trash2,
   ExternalLink,
+  LogOut,
   X
 } from 'lucide-react';
 import { RegencyLogo } from './RegencyLogo';
@@ -30,9 +31,8 @@ interface SidebarProps {
   activeTab: NavTab;
   setActiveTab: (tab: NavTab) => void;
   onOpenClientPortal: () => void;
-  activeRole: string;
-  setActiveRole: (role: 'Admin' | 'Receptionist') => void;
   userName?: string;
+  onSignOut?: () => void;
   mobileOpen?: boolean;
   setMobileOpen?: (open: boolean) => void;
 }
@@ -41,9 +41,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   setActiveTab,
   onOpenClientPortal,
-  activeRole,
-  setActiveRole,
-  userName = 'Hardik Nagpal',
+  userName = 'Showroom Owner',
+  onSignOut,
   mobileOpen = false,
   setMobileOpen
 }) => {
@@ -128,16 +127,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <div className="truncate">
               <div className="text-[11px] font-bold text-[#F7F3EA] truncate">{userName}</div>
-              <div className="text-[9px] text-[#A39682]">{activeRole}</div>
+              <div className="text-[9px] text-[#A39682]">Admin</div>
             </div>
           </div>
-          <button
-            onClick={() => setActiveRole(activeRole === 'Admin' ? 'Receptionist' : 'Admin')}
-            className="px-2 py-0.5 rounded text-[9px] font-bold bg-[#132338] text-[#C9A24A] hover:bg-[#1C3352] border border-[#233754] transition-colors cursor-pointer"
-            title="Click to toggle role"
-          >
-            {activeRole}
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span
+              className="px-2 py-0.5 rounded text-[9px] font-bold bg-[#132338] text-[#C9A24A] border border-[#233754] select-none"
+              title="Showroom access level"
+            >
+              ADMIN
+            </span>
+            {onSignOut && (
+              <button
+                onClick={onSignOut}
+                className="p-1.5 rounded text-[#A39682] hover:text-[#C9A24A] hover:bg-[#132338] transition-colors cursor-pointer"
+                title="Sign out"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Footer Credit */}

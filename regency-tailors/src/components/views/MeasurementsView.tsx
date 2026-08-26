@@ -91,7 +91,7 @@ export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
   // Helper to extract city
   const getCustomerCity = (m: MeasurementRecord) => {
     const c = customers.find(cust => cust.id === m.customerId);
-    return c ? c.city : 'Jalandhar';
+    return c ? c.city : '';
   };
 
   // Statistics

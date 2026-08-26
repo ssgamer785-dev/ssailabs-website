@@ -19,6 +19,8 @@ export interface BackupMetadata {
   exportSource: string;
   /** Highest order number ever issued. Restored so retired numbers stay retired. */
   orderSequence?: number;
+  /** 'supabase' for files exported from the production database. */
+  exportedFrom?: 'supabase' | 'browser-storage';
   stats: {
     customersCount: number;
     ordersCount: number;
@@ -43,6 +45,13 @@ export interface RegencyBackupPayload {
   expenses: Expense[];
   trash: TrashItem[];
   profile?: ShowroomProfile;
+  /**
+   * Exact Postgres row payload, present in files exported from the Supabase
+   * database (backupVersion 2). Restoring this reproduces the database
+   * verbatim; the collections above stay for readability and so that a v1
+   * file from the browser-storage era still imports.
+   */
+  database?: Record<string, unknown>;
 }
 
 /** Relationship problems found in a backup. Reported, never silently ignored. */
@@ -69,8 +78,8 @@ export interface BackupValidationResult {
 /** Refuse absurdly large files rather than freezing the browser tab. */
 export const MAX_BACKUP_BYTES = 64 * 1024 * 1024;
 
-const BACKUP_FORMAT_VERSION = 1;
-const APP_SCHEMA_VERSION = '2.0.0';
+const BACKUP_FORMAT_VERSION = 2;
+const APP_SCHEMA_VERSION = '3.0.0';
 const APP_NAME = 'Regency Tailors';
 
 /**
@@ -87,6 +96,7 @@ export function buildBackupSnapshot(data: {
   trash: TrashItem[];
   profile: ShowroomProfile;
   orderSequence?: number;
+  database?: Record<string, unknown>;
 }): RegencyBackupPayload {
   // Count total garments across all orders
   const garmentsCount = data.orders.reduce((acc, order) => {
@@ -94,16 +104,19 @@ export function buildBackupSnapshot(data: {
   }, 0);
 
   // Sanitize profile to ensure no secret tokens or credentials
+  // Carried through verbatim. Earlier builds substituted invented showroom
+  // details (a London address, a placeholder GSTIN) whenever a field was
+  // blank, which then travelled into every exported backup.
   const safeProfile: ShowroomProfile = {
-    name: data.profile.name || 'Regency Tailors',
-    subtitle: data.profile.subtitle || 'Master Bespoke Tailoring & Royal Suiting',
-    city: data.profile.city || 'London / Mumbai',
-    address: data.profile.address || '42 Savile Row / High Street Commercial Hub',
-    phone: data.profile.phone || '+91 98765 43210',
-    email: data.profile.email || 'concierge@regencytailors.com',
-    gstin: data.profile.gstin || '27AABCR1234F1Z8',
-    activeUser: data.profile.activeUser || 'Master Raymond',
-    activeRole: data.profile.activeRole || 'Admin'
+    name: data.profile.name || '',
+    subtitle: data.profile.subtitle || '',
+    city: data.profile.city || '',
+    address: data.profile.address || '',
+    phone: data.profile.phone || '',
+    email: data.profile.email || '',
+    gstin: data.profile.gstin || '',
+    activeUser: data.profile.activeUser || '',
+    activeRole: 'Admin'
   };
 
   const metadata: BackupMetadata = {
@@ -114,6 +127,7 @@ export function buildBackupSnapshot(data: {
     createdAt: new Date().toISOString(),
     exportSource: 'Regency Tailors Management Suite',
     orderSequence: data.orderSequence,
+    exportedFrom: data.database ? 'supabase' : 'browser-storage',
     stats: {
       customersCount: Array.isArray(data.customers) ? data.customers.length : 0,
       ordersCount: Array.isArray(data.orders) ? data.orders.length : 0,
@@ -137,7 +151,8 @@ export function buildBackupSnapshot(data: {
     invoices: Array.isArray(data.invoices) ? data.invoices : [],
     expenses: Array.isArray(data.expenses) ? data.expenses : [],
     trash: Array.isArray(data.trash) ? data.trash : [],
-    profile: safeProfile
+    profile: safeProfile,
+    ...(data.database ? { database: data.database } : {})
   };
 }
 
@@ -272,6 +287,7 @@ export function validateBackupContent(
       createdAt: metadata?.createdAt || parsed.exportDate || new Date().toISOString(),
       exportSource: metadata?.exportSource || 'Regency Tailors Management Suite',
       orderSequence: typeof metadata?.orderSequence === 'number' ? metadata.orderSequence : undefined,
+      exportedFrom: metadata?.exportedFrom === 'supabase' ? 'supabase' : 'browser-storage',
       stats
     },
     customers,
@@ -282,7 +298,11 @@ export function validateBackupContent(
     invoices,
     expenses,
     trash,
-    profile: parsed.profile && typeof parsed.profile === 'object' ? parsed.profile : undefined
+    profile: parsed.profile && typeof parsed.profile === 'object' ? parsed.profile : undefined,
+    database:
+      parsed.database && typeof parsed.database === 'object' && !Array.isArray(parsed.database)
+        ? (parsed.database as Record<string, unknown>)
+        : undefined
   };
 
   // Coerce every record into a shape the UI can render. A hand-edited or

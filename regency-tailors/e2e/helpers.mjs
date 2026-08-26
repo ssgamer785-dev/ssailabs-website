@@ -26,7 +26,7 @@ export async function readDb(page) {
 }
 
 // Runs the full New Order wizard. garments: array of GARMENT_CONFIGS labels e.g. 'FULL COAT PANT'
-export async function createOrder(page, { name, phone, garments = ['FULL COAT PANT'], remarks = {}, measurements = {} }) {
+export async function createOrder(page, { name, phone, city, address, garments = ['FULL COAT PANT'], remarks = {}, measurements = {} }) {
   await page.getByRole('button', { name: /Dashboard Hub/i }).click().catch(() => {});
   await page.waitForTimeout(250);
   await page.getByRole('button', { name: /New Order/i }).first().click();
@@ -35,6 +35,8 @@ export async function createOrder(page, { name, phone, garments = ['FULL COAT PA
 
   await page.getByPlaceholder('e.g. Vikram Malhotra').fill(name);
   await page.getByPlaceholder('e.g. 9876543210').fill(phone);
+  if (city) await page.getByPlaceholder('e.g. Jalandhar').fill(city);
+  if (address) await page.getByPlaceholder('e.g. Model Town, Jalandhar').fill(address);
   await page.getByRole('button', { name: /^Continue$/ }).click();
   await page.waitForTimeout(250);
   await page.getByRole('button', { name: /^Continue$/ }).click();  // step 2 defaults

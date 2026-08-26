@@ -19,7 +19,7 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
-  const [city, setCity] = useState('Jalandhar');
+  const [city, setCity] = useState('');
   const [notes, setNotes] = useState('');
 
   useEffect(() => {
@@ -28,14 +28,14 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
       setPhone(initialCustomer.phone);
       setEmail(initialCustomer.email || '');
       setAddress(initialCustomer.address);
-      setCity(initialCustomer.city || 'Jalandhar');
+      setCity(initialCustomer.city || '');
       setNotes(initialCustomer.notes || '');
     } else {
       setName('');
       setPhone('');
       setEmail('');
       setAddress('');
-      setCity('Jalandhar');
+      setCity('');
       setNotes('');
     }
   }, [initialCustomer, isOpen]);

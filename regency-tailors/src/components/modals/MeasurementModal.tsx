@@ -122,7 +122,7 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
   // New Customer inline fields
   const [newCustomerName, setNewCustomerName] = useState('');
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
-  const [newCustomerCity, setNewCustomerCity] = useState('Jalandhar');
+  const [newCustomerCity, setNewCustomerCity] = useState('');
 
   // Order link & Unit
   const [orderNumber, setOrderNumber] = useState('');
@@ -130,10 +130,10 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
   const [copyFeedback, setCopyFeedback] = useState(false);
 
   // Garment Selection (supports multiple)
-  const [selectedGarments, setSelectedGarments] = useState<GarmentKey[]>(['Coat', 'Pant']);
+  const [selectedGarments, setSelectedGarments] = useState<GarmentKey[]>([]);
 
   // Fit & Notes
-  const [fitPreference, setFitPreference] = useState<string>('Italian Cut');
+  const [fitPreference, setFitPreference] = useState<string>('');
   const [postureNotes, setPostureNotes] = useState('');
   const [fittingNotes, setFittingNotes] = useState('');
 
@@ -205,7 +205,7 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
       setSelectedCustomerId(initialMeasurement.customerId);
       setOrderNumber(initialMeasurement.orderNumber || '');
       setUnit(initialMeasurement.unit || 'inches');
-      setFitPreference(initialMeasurement.fitPreference || 'Italian Cut');
+      setFitPreference(initialMeasurement.fitPreference || '');
       setPostureNotes(initialMeasurement.postureNotes || '');
       setFittingNotes(initialMeasurement.fittingNotes || '');
 
@@ -219,7 +219,6 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
         if (initialMeasurement.shirt) inferred.push('Shirt');
         if (initialMeasurement.kurta) inferred.push('Kurta');
         if (initialMeasurement.pajama) inferred.push('Pajama');
-        if (inferred.length === 0) inferred.push('Coat', 'Pant');
         setSelectedGarments(inferred);
       }
 
@@ -299,18 +298,26 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
     }
   }, [initialMeasurement, preselectedCustomer, customers, isOpen]);
 
+  /**
+   * A new measurement sheet opens completely blank.
+   *
+   * Earlier builds pre-filled every field with plausible numbers (chest 40,
+   * waist 34, and so on). Saving without editing wrote invented body
+   * measurements into a real client's record and then onto a workshop slip.
+   * The placeholders on each input still show the expected format.
+   */
   const resetMeasurementDefaults = () => {
     setOrderNumber('');
     setUnit('inches');
-    setSelectedGarments(['Coat', 'Pant']);
-    setFitPreference('Italian Cut');
+    setSelectedGarments([]);
+    setFitPreference('');
     setPostureNotes('');
     setFittingNotes('');
-    setCoat({ length: '30', chest: '40', stomach: '36', hip: '41', shoulder: '18.5', sleeve: '25', xBack: '17.5', collar: '16', jacketLength: '30.5', waistcoatLength: '23' });
-    setPant({ length: '40', waist: '34', hip: '40.5', thigh: '24.5', inLeg: '31', bottom: '15', body: '11' });
-    setShirt({ length: '30', chest: '40', stomach: '36', hip: '41', shoulder: '18.5', sleeve: '24.5', collar: '16', cuff: '9.5' });
-    setKurta({ length: '42', chest: '42', stomach: '38', hip: '43', shoulder: '19', sleeve: '25', bicep: '15', cuff: '11', collar: '16.5' });
-    setPajama({ length: '40', waist: '35', hip: '42', thigh: '25', inLeg: '30', bottom: '15', body: '11.5' });
+    setCoat({ length: '', chest: '', stomach: '', hip: '', shoulder: '', sleeve: '', xBack: '', collar: '', jacketLength: '', waistcoatLength: '' });
+    setPant({ length: '', waist: '', hip: '', thigh: '', inLeg: '', bottom: '', body: '' });
+    setShirt({ length: '', chest: '', stomach: '', hip: '', shoulder: '', sleeve: '', collar: '', cuff: '' });
+    setKurta({ length: '', chest: '', stomach: '', hip: '', shoulder: '', sleeve: '', bicep: '', cuff: '', collar: '' });
+    setPajama({ length: '', waist: '', hip: '', thigh: '', inLeg: '', bottom: '', body: '' });
   };
 
   const applyPreviousMeasurement = (prev: MeasurementRecord) => {
@@ -418,8 +425,8 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
         name: newCustomerName.trim(),
         phone: newCustomerPhone.trim(),
         email: '',
-        address: newCustomerCity.trim() || 'Jalandhar',
-        city: newCustomerCity.trim() || 'Jalandhar',
+        address: '',
+        city: newCustomerCity.trim(),
         totalOrders: 1,
         lifetimeSpend: 0,
         lastVisitDate: new Date().toISOString().split('T')[0],
@@ -1027,6 +1034,7 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
                     onChange={(e) => setFitPreference(e.target.value)}
                     className="bg-[#FAF8F5] border border-[#E0D8CB] px-2.5 py-1 rounded-lg text-xs font-bold text-[#071426] outline-none"
                   >
+                    <option value="">Select fit preference…</option>
                     <option value="Italian Cut">Italian Cut</option>
                     <option value="Slim Fit">Slim Fit</option>
                     <option value="Classic Tailored">Classic Tailored</option>

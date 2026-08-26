@@ -1,3 +1,5 @@
+// No seeded business data. The showroom's own details come from the
+// showroom_settings table; nothing here is invented.
 import { Customer, MeasurementRecord, Order, Fitting, Worker, Invoice, Expense, TrashItem, ShowroomProfile } from '../types';
 
 export const initialCustomers: Customer[] = [];
@@ -19,12 +21,11 @@ export const initialTrash: TrashItem[] = [];
 export const initialProfile: ShowroomProfile = {
   name: 'REGENCY TAILORS',
   subtitle: 'Bespoke Showroom & Tailoring Suite',
-  city: 'JALANDHAR CITY SHOWROOM',
-  address: '382, Model Town Market, Opposite Gymkhana Club, Jalandhar, Punjab 144003',
-  phone: '+91 181 245 8899',
-  email: 'concierge@regencytailors.com',
-  gstin: '03AAAAA0000A1Z5',
+  city: '',
+  address: '',
+  phone: '',
+  email: '',
+  gstin: '',
   activeUser: 'Showroom Owner',
   activeRole: 'Admin'
 };
-

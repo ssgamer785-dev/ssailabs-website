@@ -12,39 +12,41 @@ npm run dev        # http://localhost:3000
 
 | Script | What it does |
 | --- | --- |
-| `npm run dev` | Vite dev server on port 3000 |
+| `npm run dev` | Vite dev server on port 3000 (Supabase mode; sign-in required) |
+| `npm run dev:local` | Dev server in browser-storage mode, no sign-in — development only |
 | `npm run build` | Production build into `dist/` |
 | `npm run preview` | Serve the production build |
 | `npm run lint` | TypeScript type check (`tsc --noEmit`) |
 | `npm test` | Unit tests for the business logic (Vitest) |
-| `npm run test:e2e` | Browser end-to-end suite — needs `npm run dev` running |
+| `npm run test:e2e` | Browser end-to-end suite — needs `npm run dev:local` running |
+| `npm run test:db` | Schema, RLS and restore tests against a throwaway PostgreSQL |
 
 ## Where the data lives
 
-**All showroom data is stored in the browser's `localStorage`**, under keys
-prefixed `REGENCY_TAILORS_DB_V3_`. There is no server and no remote database.
-That has consequences the showroom should know about:
+**PostgreSQL on Supabase is the authoritative database.** Signing in from any
+device loads the same showroom. Setup is in **[SUPABASE_SETUP.md](SUPABASE_SETUP.md)**.
 
-- Data belongs to **one browser profile on one machine**. Clearing site data,
-  switching browser, or using a different computer means starting empty.
-- Browsers cap this storage at roughly 5–10 MB. The suite now warns on screen the
-  moment a save is refused, but the safe habit is a regular
-  **Backup & Recovery → Export Backup**, kept off the machine.
-- `supabase/migrations/20260825_security_and_rls.sql` describes a Postgres schema
-  with RLS policies, but **no part of the application talks to Supabase** —
-  `src/lib/supabase.ts` is not imported anywhere. Treat that migration as a
-  design document for a future server, not as the live database.
-- There is **no authentication**. Anyone who can open the browser can see and
-  change every record. The Admin / Receptionist switch in the sidebar is a label
-  only; it does not restrict anything. Keep the showroom machine locked.
+- **Sign-in is required.** Google account, and only accounts on the showroom's
+  allowlist (`staff_profiles`) receive any data. Row Level Security enforces
+  this in the database, not just in the interface.
+- **One role: Admin.** Every authorised account has full access to the whole
+  application. There is no second permission tier.
+- Browser storage is used only when `VITE_PERSISTENCE=local` is set explicitly,
+  for development and the end-to-end suite. It is never a silent fallback for a
+  misconfigured production build, because that would mean an unauthenticated
+  local copy of client data.
+- Regular **Backup & Recovery → Export Backup** is still worth the habit.
 
 ## Order numbers
 
-Order numbers are issued from a monotonic high-water mark stored alongside the
-data (`..._ORDER_SEQ`) and reserved at the moment the order is placed. A number
-is never re-issued — not after the order is deleted, not after the trash is
-emptied, and not by a second browser tab. Backups carry the mark, so a restored
-database continues from the correct next number.
+Issued by a PostgreSQL sequence with a unique constraint: collision-safe across
+devices and concurrent sessions by construction. A number is never re-issued —
+not after the order is deleted, not after the trash is emptied, not from a
+second device. Backups carry the sequence position, so a restored database
+continues from the correct next number.
+
+On the browser-storage development path the same guarantee is provided by a
+monotonic high-water mark in `src/utils/orderNumbering.ts`.
 
 ## Printing
 

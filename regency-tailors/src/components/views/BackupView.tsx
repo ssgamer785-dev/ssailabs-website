@@ -24,6 +24,9 @@ import {
   validateBackupContent
 } from '../../utils/backupManager';
 import { readHighWaterMark, highestNumberInData } from '../../utils/orderNumbering';
+import { usesSupabase } from '../../lib/supabase';
+import { LegacyMigrationCard } from '../LegacyMigrationCard';
+import { exportBackupPayload } from '../../data/supabaseRepository';
 
 // Must match App.tsx's STORAGE_KEY
 const BACKUP_STORAGE_KEY = 'REGENCY_TAILORS_DB_V3';
@@ -49,7 +52,8 @@ interface BackupViewProps {
   expenses: Expense[];
   trash: TrashItem[];
   profile: ShowroomProfile;
-  onRestoreBackup: (payload: RegencyBackupPayload) => void;
+  onRestoreBackup: (payload: RegencyBackupPayload) => void | Promise<void>;
+  onRefresh?: () => void | Promise<void>;
 }
 
 export const BackupView: React.FC<BackupViewProps> = ({
@@ -62,7 +66,8 @@ export const BackupView: React.FC<BackupViewProps> = ({
   expenses,
   trash,
   profile,
-  onRestoreBackup
+  onRestoreBackup,
+  onRefresh
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -107,6 +112,16 @@ export const BackupView: React.FC<BackupViewProps> = ({
       await new Promise(r => setTimeout(r, 150));
 
       setExportStep('Validating record relationships and data integrity...');
+
+      // On the Supabase path the file carries the exact database payload as
+      // well as the readable collections, so a restore reproduces the database
+      // verbatim rather than being re-derived from the screen's copy.
+      let databasePayload: Record<string, unknown> | undefined;
+      if (usesSupabase) {
+        setExportStep('Reading the showroom database...');
+        databasePayload = await exportBackupPayload();
+      }
+
       const snapshot = buildBackupSnapshot({
         customers,
         orders,
@@ -119,10 +134,10 @@ export const BackupView: React.FC<BackupViewProps> = ({
         profile,
         // Carry the retired-order-number mark so a restored database continues
         // from the correct next number instead of re-issuing a printed one.
-        orderSequence: Math.max(
-          readHighWaterMark(BACKUP_STORAGE_KEY),
-          highestNumberInData(orders, trash)
-        )
+        orderSequence: usesSupabase
+          ? Number((databasePayload as { order_sequence?: number } | undefined)?.order_sequence || highestNumberInData(orders, trash))
+          : Math.max(readHighWaterMark(BACKUP_STORAGE_KEY), highestNumberInData(orders, trash)),
+        database: databasePayload
       });
       await new Promise(r => setTimeout(r, 200));
 
@@ -232,8 +247,10 @@ export const BackupView: React.FC<BackupViewProps> = ({
       }
       await new Promise(r => setTimeout(r, 180));
 
-      // Perform atomic state replace
-      onRestoreBackup(validationResult.payload);
+      // Perform the replacement. On Supabase this is a single database
+      // transaction; a failure throws and is reported below without having
+      // changed anything.
+      await onRestoreBackup(validationResult.payload);
 
       setImportProgressStep('Restore complete');
       await new Promise(r => setTimeout(r, 250));
@@ -276,6 +293,12 @@ export const BackupView: React.FC<BackupViewProps> = ({
         onChange={handleFileSelect}
         accept=".regency.backup,.backup,.json"
         className="hidden"
+      />
+
+      <LegacyMigrationCard
+        liveOrderCount={orders.length}
+        liveCustomerCount={customers.length}
+        onMigrated={() => onRefresh?.()}
       />
 
       {/* Header Banner */}

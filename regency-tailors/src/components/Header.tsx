@@ -22,7 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectCustomer,
   onSelectOrder,
   onOpenMobileMenu,
-  userName = 'Hardik Nagpal',
+  userName = 'Showroom Owner',
   userRole = 'Showroom Owner / Admin'
 }) => {
   const [isSearchFocused, setIsSearchFocused] = useState(false);

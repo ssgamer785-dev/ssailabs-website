@@ -48,7 +48,7 @@ interface OrderModalProps {
     measurementRecord?: MeasurementRecord;
     invoice?: Invoice;
   }) => void;
-  onSave?: (order: Order) => void;
+  onSave?: (order: Order) => void | Order | Promise<Order | void>;
   customers?: Customer[];
   allMeasurements?: MeasurementRecord[];
   measurements?: MeasurementRecord[];
@@ -83,8 +83,6 @@ interface GarmentConfig {
   label: string;
   sublabel: string;
   icon: string;
-  defaultFabric: string;
-  defaultCode: string;
 }
 
 const GARMENT_CONFIGS: GarmentConfig[] = [
@@ -92,41 +90,31 @@ const GARMENT_CONFIGS: GarmentConfig[] = [
     key: 'Full Coat Pant',
     label: 'FULL COAT PANT',
     sublabel: 'Complete Bespoke 2-Piece Suit (Coat + Pant)',
-    icon: '🤵',
-    defaultFabric: 'Loro Piana Super 150s Midnight Navy Wool',
-    defaultCode: 'FB-FCP-150'
+    icon: '🤵'
   },
   {
     key: 'Coat',
     label: 'COAT',
     sublabel: 'Bespoke Coat / Blazer / Suit Jacket',
-    icon: '🧥',
-    defaultFabric: 'Loro Piana Super 150s Midnight Navy Wool',
-    defaultCode: 'FB-ITAL-150'
+    icon: '🧥'
   },
   {
     key: 'Pant',
     label: 'PANT',
     sublabel: 'Custom Tailored Trouser / Pant',
-    icon: '👖',
-    defaultFabric: 'Italian Wool-Silk Blend Dark Navy',
-    defaultCode: 'FB-PANT-NAVY'
+    icon: '👖'
   },
   {
     key: 'Shirt',
     label: 'SHIRT',
     sublabel: 'Hand-Tailored Egyptian Cotton Dress Shirt',
-    icon: '👔',
-    defaultFabric: 'Giza 87 Egyptian 2-Ply Cotton White',
-    defaultCode: 'FB-SHIRT-WHT'
+    icon: '👔'
   },
   {
     key: 'Kurta Pajama',
     label: 'KURTA PAJAMA',
     sublabel: 'Royal Bespoke Kurta with Tailored Pajama',
-    icon: '👘',
-    defaultFabric: 'Benares Raw Silk & Pure Linen Ivory',
-    defaultCode: 'FB-ETHNIC-SILK'
+    icon: '👘'
   }
 ];
 
@@ -246,7 +234,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
 
   // STEP 4: Measurements State
   const [unit, setUnit] = useState<'inches' | 'cm'>('inches');
-  const [fitPreference, setFitPreference] = useState<string>('Italian Cut');
+  const [fitPreference, setFitPreference] = useState<string>('');
   const [fittingNotes, setFittingNotes] = useState('');
   const [usedPreviousFeedback, setUsedPreviousFeedback] = useState(false);
 
@@ -421,7 +409,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
 
     // Step 4: Measurements
     setUnit('inches');
-    setFitPreference('Italian Cut');
+    setFitPreference('');
     setFittingNotes('');
     setCoatMeas({
       length: '',
@@ -565,9 +553,9 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         name: customerName.trim(),
         phone: customerPhone.trim(),
         email: '',
-        city: customerCity.trim() || 'Jalandhar',
-        address: customerAddress.trim() || 'Showroom Client',
-        notes: customerNotes.trim() || '',
+        city: customerCity.trim(),
+        address: customerAddress.trim(),
+        notes: customerNotes.trim(),
         totalOrders: 0,
         lifetimeSpend: 0,
         createdDate: new Date().toISOString().split('T')[0],
@@ -774,7 +762,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   };
 
   // FINAL ORDER SUBMISSION
-  const handleFinalPlaceOrder = () => {
+  const handleFinalPlaceOrder = async () => {
     if (isSubmitting) return;
 
     try {
@@ -843,9 +831,9 @@ export const OrderModal: React.FC<OrderModalProps> = ({
             name: customerName.trim(),
             phone: customerPhone.trim(),
             email: '',
-            city: customerCity.trim() || 'Jalandhar',
-            address: customerAddress.trim() || 'Showroom Client',
-            notes: customerNotes.trim() || '',
+            city: customerCity.trim(),
+            address: customerAddress.trim(),
+            notes: customerNotes.trim(),
             totalOrders: 0,
             lifetimeSpend: 0,
             createdDate: new Date().toISOString().split('T')[0],
@@ -872,9 +860,9 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       const orderItems = activeGarmentsList.map((g, idx) => ({
         id: `ITEM-${issuedOrderNumber}-${idx + 1}`,
         garmentType: g.key as GarmentType,
-        fabricCode: g.fabricCode || 'FB-REG-150',
-        fabricName: g.fabricName || `${g.key} Fabric`,
-        notes: g.styleNotes || 'Hand-tailored bespoke finish',
+        fabricCode: g.fabricCode || '',
+        fabricName: g.fabricName || '',
+        notes: g.styleNotes || '',
         price: 0,
         quantity: g.quantity || 1,
         styleNotes: g.styleNotes,
@@ -972,7 +960,15 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         if (onAddCustomer) {
           onAddCustomer(finalCustomer);
         }
-        onSave(fullOrder);
+        const persisted = await onSave(fullOrder);
+        // The database issues the real order number, so the confirmation
+        // screen and every document printed from it use the stored record.
+        if (persisted && typeof persisted === 'object') {
+          setCreatedOrderSummary(persisted as Order);
+          setIsSuccessScreen(true);
+          setIsSubmitting(false);
+          return;
+        }
       }
 
       // Show Order Success Screen
@@ -1463,7 +1459,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                                 <span>{c.phone}</span>
                               </div>
                               <div className="text-[11px] text-[#8C7E6A]">
-                                {c.city || 'Jalandhar'} • {c.totalOrders || 0} previous orders
+                                {c.city || '\u2014'} • {c.totalOrders || 0} previous orders
                               </div>
                             </div>
                           );
@@ -1508,7 +1504,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                             </div>
                             <div>
                               <span className="text-[#7A7060]">City/Area: </span>
-                              <strong className="text-[#071426]">{customerCity || 'Jalandhar'}</strong>
+                              <strong className="text-[#071426]">{customerCity || '\u2014'}</strong>
                             </div>
                           </div>
                         </div>
@@ -1795,6 +1791,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                         onChange={(e) => setFitPreference(e.target.value)}
                         className="bg-white border border-[#E0D8CB] rounded-xl px-3 py-1.5 text-xs font-bold text-[#071426] outline-none"
                       >
+                        <option value="">Select fit preference…</option>
                         <option value="Italian Cut">Italian Cut</option>
                         <option value="Slim Fit">Slim Fit</option>
                         <option value="Classic Tailored">Classic Tailored</option>
@@ -2286,7 +2283,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                         </div>
                         <div className="flex justify-between">
                           <span className="text-[#7A7060]">City / Area:</span>
-                          <span className="font-semibold text-[#071426]">{customerCity || 'Jalandhar'} {customerAddress ? `• ${customerAddress}` : ''}</span>
+                          <span className="font-semibold text-[#071426]">{customerCity || '\u2014'} {customerAddress ? `• ${customerAddress}` : ''}</span>
                         </div>
                         {customerNotes && (
                           <div className="flex justify-between">
