@@ -11,42 +11,84 @@ export interface ProductionSlipPageData {
   showArtisanSignOff: boolean;
 }
 
+/* ---------------------------------------------------------------------------
+ * A4 page budget, in millimetres.
+ *
+ * These figures were measured from the rendered slip under print media at A4
+ * width (see `e2e/production-slip-print.mjs`), not estimated. The previous
+ * abstract "spatial weight" units under-counted a garment card by roughly a
+ * third, so a page the app labelled "Page 2 of 4" was ~295mm tall and spilled
+ * onto a sixth sheet with the overflow cut in half.
+ *
+ * @page uses `margin: 10mm 12mm`, leaving 297 - 20 = 277mm of printable height.
+ * ------------------------------------------------------------------------- */
+const PRINTABLE_HEIGHT_MM = 277;
+const MASTER_HEADER_MM = 38;        // page 1 workshop header + meta grid (measured 36.2)
+const CONTINUATION_HEADER_MM = 20;  // compact continuation header (measured 18.9)
+const FOOTER_MM = 9;                // per-page footer (measured 7.4)
+const SUMMARY_BLOCK_MM = 52;        // instructions + production notes + sign-off (measured 50.1)
+const CARD_GAP_MM = 5;              // vertical space between garment cards
+
+const CARD_SINGLE_MM = 128;         // one measurement table  (measured 126.1)
+const CARD_DUAL_MM = 176;           // two measurement tables (measured 171.8 - 174.7)
+const REMARK_OVERFLOW_MM = 6;       // per extra wrapped line of remarks
+const REMARK_CHARS_PER_LINE = 90;
+
+export const A4_PAGE_BUDGET_MM = {
+  printable: PRINTABLE_HEIGHT_MM,
+  firstPage: PRINTABLE_HEIGHT_MM - MASTER_HEADER_MM - FOOTER_MM,
+  continuationPage: PRINTABLE_HEIGHT_MM - CONTINUATION_HEADER_MM - FOOTER_MM,
+  summaryBlock: SUMMARY_BLOCK_MM
+};
+
 /**
- * Calculates the relative visual / spatial weight of a garment for A4 page budgeting.
- * Garments with multiple measurement tables (e.g. 2-Piece Suit, Kurta Pajama set) require more space.
+ * Height a garment card occupies on paper, in millimetres.
+ *
+ * Garments that carry two measurement tables (a suit's coat + pant, a kurta
+ * pajama set) are roughly 40% taller than a single-table garment.
  */
-export function getGarmentSpatialWeight(item: OrderItem): number {
-  const gType = (item.garmentType || '').toLowerCase().trim();
+export function getGarmentCardHeightMm(item: OrderItem): number {
+  const gType = (item?.garmentType || '').toLowerCase().trim();
   const isSuit = gType.includes('suit') || gType.includes('full coat pant');
   const isSet = gType.includes('set') || (gType.includes('kurta') && (gType.includes('pajama') || gType.includes('pyjama')));
-  const isSherwaniWithBottom = gType.includes('sherwani') && (gType.includes('pant') || gType.includes('churidar') || gType.includes('pajama'));
+  const isSherwaniWithBottom =
+    gType.includes('sherwani') && (gType.includes('pant') || gType.includes('churidar') || gType.includes('pajama'));
 
-  let weight = 1.0; // Single measurement category (Coat, Pant, Shirt, Kurta, Pajama)
-  if (isSuit || isSet || isSherwaniWithBottom) {
-    weight = 1.45; // Dual measurement category (Coat + Pant, Kurta + Pajama)
+  let height = isSuit || isSet || isSherwaniWithBottom ? CARD_DUAL_MM : CARD_SINGLE_MM;
+
+  // The remarks box grows with its text; budget for every line past the first.
+  const remarkLength = typeof item?.remarks === 'string' ? item.remarks.trim().length : 0;
+  if (remarkLength > REMARK_CHARS_PER_LINE) {
+    height += Math.ceil((remarkLength - REMARK_CHARS_PER_LINE) / REMARK_CHARS_PER_LINE) * REMARK_OVERFLOW_MM;
   }
 
-  // If item has long remarks (> 60 chars), add slight extra weight to ensure comfortable A4 layout
-  if (item.remarks && item.remarks.trim().length > 60) {
-    weight += 0.25;
-  }
-
-  return weight;
+  return height;
 }
 
 /**
- * Intelligently paginates an order's garments across A4 portrait pages.
- * 
+ * Retained for backwards compatibility with the original unit-based API.
+ * One "unit" was roughly one single-table garment card.
+ */
+export function getGarmentSpatialWeight(item: OrderItem): number {
+  return getGarmentCardHeightMm(item) / CARD_SINGLE_MM;
+}
+
+/**
+ * Splits an order's garments across A4 portrait pages.
+ *
  * Rules:
- * 1. Page 1 accommodates the full Regency Tailors Workshop Master Header, Order & Customer Meta Grid,
- *    and Production Status bar (Capacity ~ 2.1 units).
- * 2. Continuation pages (Page 2, 3, etc.) feature a compact continuation header (Capacity ~ 2.7 units).
- * 3. Final summary elements (Special Instructions, Internal Notes, Artisan Sign-off) require ~0.75 units.
- * 4. Garments are kept strictly intact within their logical cards and never split across pages.
+ * 1. A garment card is never split across pages.
+ * 2. Page 1 carries the full master header; later pages carry a compact one.
+ * 3. The final page reserves room for special instructions, production notes
+ *    and the master-cutter sign-off.
+ * 4. A page is only filled to the real printable height, so what the modal
+ *    reports as "4 pages" is what the printer produces.
  */
 export function paginateProductionSlip(order: Order): ProductionSlipPageData[] {
-  const items = order.items || [];
-  const itemsWithIndex = items.map((item, idx) => ({ item, originalIndex: idx }));
+  const items = Array.isArray(order?.items) ? order.items : [];
+  const itemsWithIndex = items
+    .filter(item => item && typeof item === 'object')
+    .map((item, idx) => ({ item, originalIndex: idx }));
 
   if (itemsWithIndex.length === 0) {
     return [
@@ -63,42 +105,47 @@ export function paginateProductionSlip(order: Order): ProductionSlipPageData[] {
     ];
   }
 
-  const rawPages: { items: { item: OrderItem; originalIndex: number }[] }[] = [];
-  let currentPageItems: { item: OrderItem; originalIndex: number }[] = [];
-  let currentCapacity = 2.15; // Page 1 budget
-  let currentUsed = 0;
+  const capacityFor = (pageIndex: number) =>
+    pageIndex === 0 ? A4_PAGE_BUDGET_MM.firstPage : A4_PAGE_BUDGET_MM.continuationPage;
 
-  for (let i = 0; i < itemsWithIndex.length; i++) {
-    const currentItem = itemsWithIndex[i];
-    const weight = getGarmentSpatialWeight(currentItem.item);
+  const rawPages: { items: { item: OrderItem; originalIndex: number }[]; usedMm: number }[] = [];
+  let current: { item: OrderItem; originalIndex: number }[] = [];
+  let usedMm = 0;
 
-    // If adding this garment would overflow the page and we already have at least 1 garment on it
-    if (currentPageItems.length > 0 && (currentUsed + weight > currentCapacity)) {
-      rawPages.push({ items: currentPageItems });
-      currentPageItems = [currentItem];
-      currentCapacity = 2.75; // Continuation page budget
-      currentUsed = weight;
+  for (const entry of itemsWithIndex) {
+    const cardMm = getGarmentCardHeightMm(entry.item);
+    const gap = current.length > 0 ? CARD_GAP_MM : 0;
+    const capacity = capacityFor(rawPages.length);
+
+    if (current.length > 0 && usedMm + gap + cardMm > capacity) {
+      rawPages.push({ items: current, usedMm });
+      current = [entry];
+      usedMm = cardMm;
     } else {
-      currentPageItems.push(currentItem);
-      currentUsed += weight;
+      current.push(entry);
+      usedMm += gap + cardMm;
     }
   }
 
-  if (currentPageItems.length > 0) {
-    rawPages.push({ items: currentPageItems });
+  if (current.length > 0) {
+    rawPages.push({ items: current, usedMm });
   }
 
-  // Ensure the final page has sufficient room for Special Instructions + Notes + Sign-off (~0.75)
-  const lastPageIndex = rawPages.length - 1;
-  const lastPage = rawPages[lastPageIndex];
-  const lastPageCapacity = rawPages.length === 1 ? 2.15 : 2.75;
-  const lastPageItemsWeight = lastPage.items.reduce((sum, it) => sum + getGarmentSpatialWeight(it.item), 0);
+  // The closing summary block lives on the final page. If it does not fit,
+  // move the last garment forward rather than letting the block overflow.
+  const lastIdx = rawPages.length - 1;
+  const lastPage = rawPages[lastIdx];
+  const lastCapacity = capacityFor(lastIdx);
 
-  // If last page has multiple items and adding summary causes extreme crowding, shift last item
-  if (lastPage.items.length > 1 && (lastPageItemsWeight + 0.75 > lastPageCapacity)) {
-    const poppedItem = lastPage.items.pop();
-    if (poppedItem) {
-      rawPages.push({ items: [poppedItem] });
+  if (lastPage.usedMm + CARD_GAP_MM + A4_PAGE_BUDGET_MM.summaryBlock > lastCapacity) {
+    if (lastPage.items.length > 1) {
+      const moved = lastPage.items.pop()!;
+      lastPage.usedMm -= getGarmentCardHeightMm(moved.item) + CARD_GAP_MM;
+      rawPages.push({ items: [moved], usedMm: getGarmentCardHeightMm(moved.item) });
+    } else {
+      // A single oversized garment already fills the page — give the summary
+      // block a sheet of its own instead of clipping it.
+      rawPages.push({ items: [], usedMm: 0 });
     }
   }
 

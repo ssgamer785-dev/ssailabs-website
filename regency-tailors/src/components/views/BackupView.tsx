@@ -23,6 +23,10 @@ import {
   downloadBackupFile,
   validateBackupContent
 } from '../../utils/backupManager';
+import { readHighWaterMark, highestNumberInData } from '../../utils/orderNumbering';
+
+// Must match App.tsx's STORAGE_KEY
+const BACKUP_STORAGE_KEY = 'REGENCY_TAILORS_DB_V3';
 import {
   Customer,
   Order,
@@ -74,6 +78,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [importErrorMessage, setImportErrorMessage] = useState<string | null>(null);
   const [importSuccessMessage, setImportSuccessMessage] = useState<string | null>(null);
+  const [integrityNotice, setIntegrityNotice] = useState<string | null>(null);
 
   // -------------------------------------------------------------
   // 1. EXPORT BACKUP FLOW
@@ -111,7 +116,13 @@ export const BackupView: React.FC<BackupViewProps> = ({
         invoices,
         expenses,
         trash,
-        profile
+        profile,
+        // Carry the retired-order-number mark so a restored database continues
+        // from the correct next number instead of re-issuing a printed one.
+        orderSequence: Math.max(
+          readHighWaterMark(BACKUP_STORAGE_KEY),
+          highestNumberInData(orders, trash)
+        )
       });
       await new Promise(r => setTimeout(r, 200));
 
@@ -140,6 +151,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
     setImportErrorMessage(null);
     setImportSuccessMessage(null);
     setExportSuccessMessage(null);
+    setIntegrityNotice(null);
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -203,6 +215,21 @@ export const BackupView: React.FC<BackupViewProps> = ({
       await new Promise(r => setTimeout(r, 180));
 
       setImportProgressStep('Verifying relationships...');
+      const integrity = validationResult.integrity;
+      if (integrity) {
+        const issues: string[] = [];
+        if (integrity.orphanOrders.length)
+          issues.push(`${integrity.orphanOrders.length} order(s) reference a missing customer`);
+        if (integrity.orphanMeasurements.length)
+          issues.push(`${integrity.orphanMeasurements.length} measurement record(s) reference a missing customer`);
+        if (integrity.orphanInvoices.length)
+          issues.push(`${integrity.orphanInvoices.length} invoice(s) reference a missing order`);
+        if (integrity.duplicateOrderIds.length)
+          issues.push(`${integrity.duplicateOrderIds.length} duplicate order number(s) were renumbered`);
+        if (integrity.repairedOrders)
+          issues.push(`${integrity.repairedOrders} order(s) had malformed garment lists repaired`);
+        setIntegrityNotice(issues.length ? issues.join(' • ') : null);
+      }
       await new Promise(r => setTimeout(r, 180));
 
       // Perform atomic state replace
@@ -292,6 +319,28 @@ export const BackupView: React.FC<BackupViewProps> = ({
           <button
             onClick={() => setImportSuccessMessage(null)}
             className="text-xs text-emerald-700 hover:text-emerald-900 font-bold cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Relationship problems found while restoring. Reported, never hidden. */}
+      {integrityNotice && (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3 text-xs sm:text-sm font-medium text-amber-900 animate-fadeIn">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <div className="font-black uppercase tracking-wider text-[11px] mb-1">
+              Data integrity notes from this backup
+            </div>
+            <div>{integrityNotice}</div>
+            <div className="mt-1 text-amber-800">
+              The records were restored — review them before relying on the affected reports.
+            </div>
+          </div>
+          <button
+            onClick={() => setIntegrityNotice(null)}
+            className="text-xs text-amber-800 hover:text-amber-950 font-bold cursor-pointer shrink-0"
           >
             Dismiss
           </button>

@@ -1,0 +1,421 @@
+/**
+ * Regency Tailors — end-to-end suite.
+ *
+ * Drives the real application in Chromium and asserts against the browser
+ * database and the actual print output. See e2e/README.md.
+ */
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { launch, readDb, createOrder, finishOrder, BASE, pdfPageCount, makeReporter } from './helpers.mjs';
+
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'regency-e2e-'));
+const report = makeReporter('E2E');
+const A4 = { format: 'A4', printBackground: true, margin: { top: '10mm', bottom: '10mm', left: '12mm', right: '12mm' } };
+
+const FULL_MEASUREMENTS = {
+  'COAT MEASUREMENTS': {
+    Length: 30.5, Chest: 41, Stomach: 37, 'H.P. / Hip': 42, Shoulder: 18.5,
+    Sleeve: 25, 'X-Back': 17.5, Collar: 16, 'Jacket Length': 30.5, 'Waistcoat Length': 23
+  },
+  'PANT MEASUREMENTS': { Length: 40, Waist: 34, 'H.P. / Hip': 40.5, Thigh: 24.5, 'In-Leg': 31, Bottom: 15, Body: 11 },
+  'SHIRT MEASUREMENTS': { Length: 29, Chest: 40, Stomach: 36, 'H.P. / Hip': 41, Shoulder: 18, Sleeve: 24.5, Collar: 15.5 }
+};
+
+async function scenario(name, fn) {
+  console.log(`\n=== ${name} ===`);
+  const ctx = await launch();
+  try {
+    await ctx.page.goto(BASE, { waitUntil: 'networkidle' });
+    await ctx.page.waitForTimeout(400);
+    await fn(ctx);
+    report.check(`${name}: no uncaught page errors`, ctx.errors.length === 0, ctx.errors.join(' | '));
+  } finally {
+    await ctx.browser.close();
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 1. Full workflow: customer -> order -> garments -> measurements     *
+ * ------------------------------------------------------------------ */
+await scenario('Full order workflow', async ({ page }) => {
+  await createOrder(page, {
+    name: 'Arjun Mehta',
+    phone: '9876543210',
+    garments: ['FULL COAT PANT', 'SHIRT'],
+    remarks: { 'FULL COAT PANT': 'Peak lapel, surgeon cuffs', SHIRT: 'French cuff, no pocket' },
+    measurements: FULL_MEASUREMENTS
+  });
+  await finishOrder(page);
+
+  const db = await readDb(page);
+  const order = db.orders[0];
+  const snap = order.measurementsSnapshot;
+
+  report.check('order is numbered 1 in an empty showroom', order.id === '1' && order.orderNumber === '1', order.id);
+  report.check('order links to the created customer', order.customerId === db.customers[0].id);
+  report.check('both garments are on the order', order.items.length === 2);
+  report.check('per-garment remarks are stored on the line items',
+    order.items[0].remarks === 'Peak lapel, surgeon cuffs' && order.items[1].remarks === 'French cuff, no pocket');
+  report.check('coat measurements are isolated to the coat', snap.coat.chest === '41' && snap.coat.collar === '16');
+  report.check('pant measurements are isolated to the pant', snap.pant.waist === '34' && snap.pant.inLeg === '31');
+  report.check('shirt measurements are isolated to the shirt', snap.shirt.chest === '40' && snap.shirt.collar === '15.5');
+  report.check('shirt-only fields never leak into coat', snap.coat.waist === undefined);
+  report.check('measurement ledger row carries the order number', db.measurements[0].orderNumber === '1');
+  report.check('measurement ledger row carries garment remarks', Boolean(db.measurements[0].garmentRemarks));
+  report.check('an invoice is generated for the order', db.invoices[0]?.orderId === order.id);
+  report.check('customer order count is 1, not double-counted', db.customers[0].totalOrders === 1, String(db.customers[0].totalOrders));
+});
+
+/* ------------------------------------------------------------------ *
+ * 2. Returning customer must not become a duplicate ledger row         *
+ * ------------------------------------------------------------------ */
+await scenario('Returning customer is not duplicated', async ({ page }) => {
+  await createOrder(page, { name: 'Arjun Mehta', phone: '9876543210', garments: ['SHIRT'], measurements: { 'SHIRT MEASUREMENTS': { Chest: 40 } } });
+  await finishOrder(page);
+  await createOrder(page, { name: 'Arjun Mehta', phone: '+91 98765 43210', garments: ['KURTA PAJAMA'], measurements: { 'KURTA MEASUREMENTS': { Chest: 42 } } });
+  await finishOrder(page);
+
+  const db = await readDb(page);
+  report.check('same phone number resolves to one customer', db.customers.length === 1, `${db.customers.length} customers`);
+  report.check('customer shows both orders', db.customers[0].totalOrders === 2, String(db.customers[0].totalOrders));
+  report.check('both orders point at that customer',
+    db.orders.every(o => o.customerId === db.customers[0].id));
+  report.check('shirt measurements survive the later kurta-only order',
+    Boolean(db.measurements[0].shirt) && Boolean(db.measurements[0].kurta));
+});
+
+/* ------------------------------------------------------------------ *
+ * 3. Order numbering: retired numbers stay retired                     *
+ * ------------------------------------------------------------------ */
+await scenario('Order numbers are never re-issued', async ({ page }) => {
+  for (const [n, p] of [['Cust A', '9000000001'], ['Cust B', '9000000002']]) {
+    await createOrder(page, { name: n, phone: p, garments: ['SHIRT'], measurements: { 'SHIRT MEASUREMENTS': { Chest: 40 } } });
+    await finishOrder(page);
+  }
+  let db = await readDb(page);
+  report.check('orders are numbered sequentially', db.orders.map(o => o.id).sort().join(',') === '1,2');
+
+  await page.getByRole('button', { name: /Showroom Orders/i }).click();
+  await page.waitForTimeout(500);
+  await page.locator('tr', { hasText: 'Cust B' }).first().locator('button[title="Delete Order"]').click();
+  await page.waitForTimeout(600);
+
+  await page.getByRole('button', { name: /^Trash$/i }).click();
+  await page.waitForTimeout(500);
+  await page.getByRole('button', { name: /empty trash/i }).first().click();
+  await page.waitForTimeout(700);
+
+  db = await readDb(page);
+  report.check('trash is empty and order 2 is gone', db.trash.length === 0 && !db.orders.some(o => o.id === '2'));
+
+  await createOrder(page, { name: 'Cust C', phone: '9000000003', garments: ['SHIRT'], measurements: { 'SHIRT MEASUREMENTS': { Chest: 40 } } });
+  await finishOrder(page);
+
+  db = await readDb(page);
+  const ids = db.orders.map(o => o.id);
+  report.check('the retired number 2 is not re-issued', !ids.includes('2'), ids.join(','));
+  report.check('no duplicate order numbers exist', new Set(ids).size === ids.length, ids.join(','));
+});
+
+/* ------------------------------------------------------------------ *
+ * 4. Two tabs cannot collide                                           *
+ * ------------------------------------------------------------------ */
+await scenario('Concurrent tabs do not collide', async ({ ctx, page }) => {
+  await createOrder(page, { name: 'Seed Cust', phone: '9111111111', garments: ['SHIRT'], measurements: { 'SHIRT MEASUREMENTS': { Chest: 40 } } });
+  await finishOrder(page);
+
+  const tabB = await ctx.newPage();
+  tabB.on('dialog', d => d.accept());
+  await tabB.goto(BASE, { waitUntil: 'networkidle' });
+  await tabB.waitForTimeout(600);
+
+  await createOrder(page, { name: 'Tab A Cust', phone: '9222222222', garments: ['SHIRT'], measurements: { 'SHIRT MEASUREMENTS': { Chest: 41 } } });
+  await finishOrder(page);
+
+  await createOrder(tabB, { name: 'Tab B Cust', phone: '9333333333', garments: ['SHIRT'], measurements: { 'SHIRT MEASUREMENTS': { Chest: 42 } } });
+  await finishOrder(tabB);
+
+  const db = await readDb(tabB);
+  const ids = db.orders.map(o => o.id);
+  report.check("tab A's order survives tab B's save", db.orders.some(o => o.customerName === 'Tab A Cust'), ids.join(','));
+  report.check('all three orders are present', db.orders.length === 3, String(db.orders.length));
+  report.check('tabs issued distinct numbers', new Set(ids).size === ids.length, ids.join(','));
+});
+
+/* ------------------------------------------------------------------ *
+ * 5. Editing an order must not destroy money or workflow state         *
+ * ------------------------------------------------------------------ */
+await scenario('Editing an order preserves payments and production', async ({ page }) => {
+  await createOrder(page, {
+    name: 'Edit Client', phone: '9444444444', garments: ['FULL COAT PANT'],
+    remarks: { 'FULL COAT PANT': 'Peak lapel' },
+    measurements: { 'COAT MEASUREMENTS': { Chest: 41 }, 'PANT MEASUREMENTS': { Waist: 34 } }
+  });
+  await finishOrder(page);
+
+  // Bring the order to a realistic mid-production state with a part payment.
+  await page.evaluate(() => {
+    const K = 'REGENCY_TAILORS_DB_V3_';
+    const orders = JSON.parse(localStorage.getItem(K + 'ORDERS'));
+    orders[0] = {
+      ...orders[0], status: 'Master Stitching', productionStatus: 'In Production',
+      productionNotes: 'Cut done by Master Singh', totalAmount: 18000, advancePaid: 8000, balanceDue: 10000,
+      paymentHistory: [{ id: 'PAY-1', date: '2026-08-20', amount: 8000, method: 'Cash' }]
+    };
+    localStorage.setItem(K + 'ORDERS', JSON.stringify(orders));
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(600);
+
+  await page.getByRole('button', { name: /Showroom Orders/i }).click();
+  await page.waitForTimeout(500);
+  await page.locator('button[title="Edit Order"]').first().click();
+  await page.waitForTimeout(700);
+  for (let i = 0; i < 4; i++) {
+    await page.getByRole('button', { name: /^Continue$/ }).click();
+    await page.waitForTimeout(250);
+  }
+  await page.getByRole('button', { name: /PLACE ORDER/ }).click();
+  await page.waitForTimeout(800);
+
+  const db = await readDb(page);
+  const o = db.orders[0];
+  report.check('workflow status survives the edit', o.status === 'Master Stitching', o.status);
+  report.check('production status survives the edit', o.productionStatus === 'In Production', String(o.productionStatus));
+  report.check('production notes survive the edit', o.productionNotes === 'Cut done by Master Singh');
+  report.check('order total survives the edit', o.totalAmount === 18000, String(o.totalAmount));
+  report.check('advance payment survives the edit', o.advancePaid === 8000, String(o.advancePaid));
+  report.check('balance due survives the edit', o.balanceDue === 10000, String(o.balanceDue));
+  report.check('payment history survives the edit', (o.paymentHistory || []).length === 1);
+  report.check('editing does not create a second order', db.orders.length === 1);
+  report.check('customer order count is not double-counted', db.customers[0].totalOrders === 1, String(db.customers[0].totalOrders));
+  report.check('invoice keeps the recorded payment', db.invoices[0].amountPaid === 8000 && db.invoices[0].status === 'Partial');
+});
+
+/* ------------------------------------------------------------------ *
+ * 6. Production slip prints the number of sheets it promises           *
+ * ------------------------------------------------------------------ */
+await scenario('Production slip prints as many A4 sheets as it reports', async ({ page }) => {
+  await createOrder(page, {
+    name: 'Vikram Malhotra', phone: '9876500001',
+    garments: ['FULL COAT PANT', 'COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'],
+    remarks: { 'FULL COAT PANT': 'Peak lapel, surgeon cuffs, working buttonholes, contrast lining in burgundy silk' },
+    measurements: FULL_MEASUREMENTS
+  });
+  await finishOrder(page);
+
+  await page.getByRole('button', { name: /Showroom Orders/i }).click();
+  await page.waitForTimeout(500);
+  await page.locator('button[title="Download PDF or Print Production Slip"]').first().click();
+  await page.waitForTimeout(1200);
+
+  const reported = parseInt((await page.locator('text=/\\d+ PAGES?/').first().innerText()).replace(/\D/g, ''), 10);
+  const rendered = await page.locator('.a4-production-page').count();
+  report.check('rendered page count matches the reported count', reported === rendered, `${reported} vs ${rendered}`);
+
+  await page.emulateMedia({ media: 'print' });
+  await page.waitForTimeout(500);
+  const pdf = await page.pdf(A4);
+  fs.writeFileSync(path.join(TMP, 'slip.pdf'), pdf);
+  const sheets = pdfPageCount(pdf);
+  report.check('printed sheets match the reported page count', sheets === reported, `${sheets} sheets vs ${reported} reported`);
+
+  const shellVisible = await page.evaluate(() =>
+    [...document.querySelectorAll('.print-app-shell')].some(el => getComputedStyle(el).display !== 'none'));
+  report.check('showroom navigation is not on the printed slip', !shellVisible);
+
+  const printedText = await page.locator('#printable-production-slip').innerText();
+  report.check('every garment appears on the printed slip',
+    ['FULL COAT PANT', 'COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'].every(g => printedText.includes(g)));
+  report.check('the sign-off block reaches the paper', printedText.includes('Master Cutter Sign-Off'));
+});
+
+/* ------------------------------------------------------------------ *
+ * 7. Bill prints on one clean A4 sheet                                 *
+ * ------------------------------------------------------------------ */
+await scenario('Bill prints on one clean A4 sheet', async ({ page }) => {
+  await createOrder(page, {
+    name: 'Bill Client', phone: '9555500002', garments: ['FULL COAT PANT', 'SHIRT'],
+    measurements: FULL_MEASUREMENTS
+  });
+  await finishOrder(page);
+
+  await page.getByRole('button', { name: /Production Slips/i }).click();
+  await page.waitForTimeout(700);
+  await page.locator('button[title="Print Customer Bill"]').first().click();
+  await page.waitForTimeout(1500);
+
+  const billText = await page.locator('#printable-customer-bill').innerText();
+  report.check('bill shows the correct customer', billText.includes('Bill Client'));
+  report.check('bill shows the correct order number', billText.includes('ORDER NO.') && billText.includes('RT-00001'));
+  report.check('bill lists every garment', billText.includes('Full Coat Pant') && billText.includes('Shirt'));
+  report.check('bill shows the customer address, not a dash', !/ADDRESS\s*:\s*—/.test(billText), billText.match(/ADDRESS[^\n]*/)?.[0]);
+
+  await page.emulateMedia({ media: 'print' });
+  await page.waitForTimeout(500);
+  const pdf = await page.pdf(A4);
+  const sheets = pdfPageCount(pdf);
+  report.check('bill prints on a single sheet', sheets === 1, `${sheets} sheets`);
+
+  const shellVisible = await page.evaluate(() =>
+    [...document.querySelectorAll('.print-app-shell')].some(el => getComputedStyle(el).display !== 'none'));
+  report.check('showroom navigation is not on the printed bill', !shellVisible);
+});
+
+/* ------------------------------------------------------------------ *
+ * 8. Backup export -> wipe -> import round trip                        *
+ * ------------------------------------------------------------------ */
+await scenario('Backup export and import restore everything', async ({ page }) => {
+  await createOrder(page, {
+    name: 'Backup Client', phone: '9555500001', garments: ['FULL COAT PANT', 'KURTA PAJAMA'],
+    remarks: { 'FULL COAT PANT': 'Ticket pocket', 'KURTA PAJAMA': 'Ivory silk' },
+    measurements: {
+      'COAT MEASUREMENTS': { Chest: 42, Length: 31 }, 'PANT MEASUREMENTS': { Waist: 35 },
+      'KURTA MEASUREMENTS': { Chest: 43 }, 'PAJAMA MEASUREMENTS': { Waist: 36 }
+    }
+  });
+  await finishOrder(page);
+  const before = await readDb(page);
+
+  await page.getByRole('button', { name: /Backup & Recovery/i }).click();
+  await page.waitForTimeout(600);
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 20000 }),
+    page.getByRole('button', { name: /export/i }).first().click()
+  ]);
+  const file = path.join(TMP, download.suggestedFilename());
+  await download.saveAs(file);
+  const raw = fs.readFileSync(file, 'utf8');
+  const parsed = JSON.parse(raw);
+
+  report.check('backup contains every collection',
+    ['customers', 'orders', 'measurements', 'invoices', 'fittings', 'workers', 'expenses', 'trash'].every(k => Array.isArray(parsed[k])));
+  report.check('backup carries the order-number high-water mark', typeof parsed.metadata.orderSequence === 'number');
+  report.check('backup contains no credentials or API keys', !/api[_-]?key|anon[_-]?key|service[_-]?role|password|secret|token/i.test(raw));
+
+  await page.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('REGENCY_TAILORS_DB_V3')).forEach(k => localStorage.removeItem(k)));
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(700);
+  report.check('wipe cleared the test data', (await readDb(page)).orders.length === 0);
+
+  await page.getByRole('button', { name: /Backup & Recovery/i }).click();
+  await page.waitForTimeout(600);
+  await page.setInputFiles('input[type=file]', file);
+  await page.waitForTimeout(1200);
+  await page.getByRole('button', { name: /RESTORE BACKUP/i }).click();
+  await page.waitForTimeout(3500);
+
+  const after = await readDb(page);
+  report.check('every customer is restored', after.customers.length === before.customers.length);
+  report.check('every order is restored', after.orders.length === before.orders.length);
+  report.check('every measurement record is restored', after.measurements.length === before.measurements.length);
+  report.check('every invoice is restored', after.invoices.length === before.invoices.length);
+  report.check('order keeps its customer link', after.orders[0].customerId === after.customers[0].id);
+  report.check('per-garment remarks survive the round trip',
+    after.orders[0].items.map(i => i.remarks).join('|') === 'Ticket pocket|Ivory silk');
+  report.check('measurements survive the round trip',
+    after.orders[0].measurementsSnapshot.coat.chest === '42' && after.orders[0].measurementsSnapshot.kurta.chest === '43');
+  report.check('order-number mark is restored', after.seq !== null);
+
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(700);
+  report.check('restored data persists across a refresh', (await readDb(page)).orders.length === before.orders.length);
+});
+
+/* ------------------------------------------------------------------ *
+ * 9. Hostile backup files                                              *
+ * ------------------------------------------------------------------ */
+await scenario('Hostile backup files never damage live data', async ({ page }) => {
+  const cases = {
+    'empty.regency.backup': ['', false],
+    'truncated.regency.backup': ['{"metadata": {"application": "Regency Tailors"', false],
+    'notjson.regency.backup': ['this is definitely not json at all', false],
+    'wrongapp.regency.backup': [JSON.stringify({ metadata: { application: 'Some Other App' }, customers: [] }), false],
+    'nocollections.regency.backup': [JSON.stringify({ hello: 'world' }), false],
+    'structurally-broken.regency.backup': [JSON.stringify({
+      metadata: { application: 'Regency Tailors' },
+      customers: [{ id: 'X', name: '<img src=x onerror="window.__XSS=1">', phone: '9' }],
+      orders: [{ id: 'ORPHAN', customerId: 'MISSING', customerName: 'Ghost', items: 'not-an-array', totalAmount: 'NaN' }],
+      measurements: [1, 'str', null]
+    }), true]
+  };
+  for (const [file, [content]] of Object.entries(cases)) fs.writeFileSync(path.join(TMP, file), content);
+
+  await createOrder(page, { name: 'Safe Client', phone: '9000009999', garments: ['SHIRT'], measurements: { 'SHIRT MEASUREMENTS': { Chest: 40 } } });
+  await finishOrder(page);
+  await page.getByRole('button', { name: /Backup & Recovery/i }).click();
+  await page.waitForTimeout(600);
+
+  for (const [file, [, shouldPassValidation]] of Object.entries(cases)) {
+    await page.setInputFiles('input[type=file]', path.join(TMP, file));
+    await page.waitForTimeout(900);
+    const previewOpen = (await page.getByRole('button', { name: /RESTORE BACKUP/i }).count()) > 0;
+    report.check(`${file} is ${shouldPassValidation ? 'accepted for review' : 'rejected'}`, previewOpen === shouldPassValidation);
+    if (previewOpen) {
+      const cancel = page.getByRole('button', { name: /cancel|close/i }).last();
+      if (await cancel.count()) { await cancel.click(); await page.waitForTimeout(400); }
+    }
+  }
+
+  const db = await readDb(page);
+  report.check('live data is untouched after every rejected import', db.orders.length === 1 && db.customers.length === 1);
+  report.check('no script from a backup file executed', !(await page.evaluate(() => Boolean(window.__XSS))));
+
+  // Now actually restore the structurally broken file and browse the app.
+  await page.setInputFiles('input[type=file]', path.join(TMP, 'structurally-broken.regency.backup'));
+  await page.waitForTimeout(900);
+  await page.getByRole('button', { name: /RESTORE BACKUP/i }).click();
+  await page.waitForTimeout(3500);
+  report.check('integrity problems are reported to the user',
+    (await page.locator('text=/Data integrity notes/i').count()) > 0);
+
+  await page.getByRole('button', { name: /Showroom Orders/i }).click();
+  await page.waitForTimeout(1200);
+  const rootSize = await page.evaluate(() => document.getElementById('root').innerHTML.length);
+  report.check('a structurally broken backup does not blank the screen', rootSize > 1000, `root html ${rootSize} bytes`);
+});
+
+/* ------------------------------------------------------------------ *
+ * 10. Storage failures degrade gracefully                              *
+ * ------------------------------------------------------------------ */
+console.log('\n=== Storage failure handling ===');
+for (const [label, seed] of [
+  ['corrupt JSON in orders', () => localStorage.setItem('REGENCY_TAILORS_DB_V3_ORDERS', '{"broken": ')],
+  ['wrong shape in customers', () => localStorage.setItem('REGENCY_TAILORS_DB_V3_CUSTOMERS', '{"a":1}')]
+]) {
+  const { browser, page, errors } = await launch();
+  await page.goto(BASE);
+  await page.evaluate(seed);
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(1000);
+  const size = await page.evaluate(() => document.getElementById('root').innerHTML.length);
+  report.check(`${label}: app still renders`, size > 1000, `root html ${size} bytes`);
+  report.check(`${label}: no uncaught error`, errors.length === 0, errors.join(' | '));
+  await browser.close();
+}
+
+{
+  const { browser, ctx, page } = await launch();
+  await ctx.addInitScript(() => {
+    const orig = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      if (String(k).startsWith('REGENCY_TAILORS_DB_V3')) {
+        const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e;
+      }
+      return orig.call(this, k, v);
+    };
+  });
+  const p2 = await ctx.newPage();
+  await p2.goto(BASE, { waitUntil: 'networkidle' });
+  await p2.waitForTimeout(1200);
+  const size = await p2.evaluate(() => document.getElementById('root').innerHTML.length);
+  report.check('storage quota exhausted: app still renders', size > 1000, `root html ${size} bytes`);
+  report.check('storage quota exhausted: user is warned', (await p2.locator('text=/Data not saved/i').count()) > 0);
+  await browser.close();
+  await page.context().browser()?.close?.().catch(() => {});
+}
+
+const failures = report.summary();
+fs.rmSync(TMP, { recursive: true, force: true });
+process.exit(failures > 0 ? 1 : 0);

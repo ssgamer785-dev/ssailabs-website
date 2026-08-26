@@ -19,6 +19,7 @@ export const PrintProductionSlipModal: React.FC<PrintProductionSlipModalProps> =
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExportingImg, setIsExportingImg] = useState(false);
   const [exportSuccess, setExportSuccess] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const rawOrderNum = order ? (order.orderNumber || order.id || '1') : '—';
   const numericOrderNum = rawOrderNum.replace(/[^0-9]/g, '') || rawOrderNum;
@@ -45,11 +46,14 @@ export const PrintProductionSlipModal: React.FC<PrintProductionSlipModalProps> =
   const handleDownloadPdf = async () => {
     try {
       setIsExportingPdf(true);
+      setExportError(null);
       const filename = `Production_Slip_Order_${numericOrderNum || 'New'}.pdf`;
       const ok = await downloadElementAsPdf('printable-production-slip', filename);
       if (ok) {
         setExportSuccess(`PDF Saved (${pages.length} ${pages.length === 1 ? 'Page' : 'Pages'})!`);
         setTimeout(() => setExportSuccess(null), 3500);
+      } else {
+        setExportError('PDF could not be generated. The browser print dialog was opened instead — use "Save as PDF" there.');
       }
     } finally {
       setIsExportingPdf(false);
@@ -64,6 +68,8 @@ export const PrintProductionSlipModal: React.FC<PrintProductionSlipModalProps> =
       if (ok) {
         setExportSuccess('Image Downloaded!');
         setTimeout(() => setExportSuccess(null), 3000);
+      } else {
+        setExportError('The PNG image could not be generated. Use Download PDF or Print Slip instead.');
       }
     } finally {
       setIsExportingImg(false);
@@ -71,7 +77,7 @@ export const PrintProductionSlipModal: React.FC<PrintProductionSlipModalProps> =
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#071426]/85 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto font-sans modal-print-backdrop">
+    <div className="fixed inset-0 z-50 bg-[#071426]/85 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto font-sans modal-print-backdrop print-document-root">
       
       {/* Container - Screen View with Print Action Bar */}
       <div className="bg-white rounded-3xl border border-[#E6E1D7] max-w-4xl w-full p-4 sm:p-6 shadow-2xl space-y-4 my-auto relative max-h-[96vh] flex flex-col overflow-hidden text-[#071426] modal-print-dialog">
@@ -153,6 +159,18 @@ export const PrintProductionSlipModal: React.FC<PrintProductionSlipModalProps> =
             </button>
           </div>
         </div>
+
+        {exportError && (
+          <div className="no-print shrink-0 p-3 bg-red-50 border border-red-300 rounded-xl flex items-start gap-2.5 text-xs font-semibold text-red-900">
+            <span className="flex-1">{exportError}</span>
+            <button
+              onClick={() => setExportError(null)}
+              className="font-bold text-red-700 hover:text-red-950 cursor-pointer shrink-0"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* PRINTABLE SLIP CONTENT (A4 Multi-Page Layout) */}
         <div className="flex-1 overflow-y-auto pr-1 overscroll-contain">

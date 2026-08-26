@@ -187,7 +187,7 @@ export const ProductionSlipProductCard: React.FC<ProductionSlipProductCardProps>
 
       {/* 2. Product Details (Fabric, Styling / Cut, Special Notes) */}
       {(hasFabric || hasStyle || hasSpecial) && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs bg-[#FAF8F5] p-3 rounded-xl border border-[#E0D8CB]">
+        <div className="production-slip-detail-grid grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs bg-[#FAF8F5] p-3 rounded-xl border border-[#E0D8CB]">
           {hasFabric && (
             <div className="text-[#071426]">
               <span className="text-[10px] font-bold text-[#8C7E6A] uppercase block">Fabric</span>
@@ -233,7 +233,7 @@ export const ProductionSlipProductCard: React.FC<ProductionSlipProductCardProps>
                 {cat.subLabel && <span className="text-[10px] text-[#A39682] font-semibold">{cat.subLabel}</span>}
               </div>
 
-              <div className="p-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 text-xs">
+              <div className="production-measurement-grid p-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 text-xs">
                 {cat.fields.map((f, fIdx) => (
                   <div
                     key={fIdx}

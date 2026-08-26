@@ -136,6 +136,56 @@ button:active:not(:disabled) {
     visibility: hidden !important;
   }
 
+  /* ----------------------------------------------------------------
+     Only the document being printed may reach the paper.
+
+     The showroom shell (sidebar, header, the view behind the modal) used
+     to print alongside the slip/bill, and the modal's own scroll container
+     clipped everything below the fold — a four-page production slip came
+     out as a single truncated page. `.print-document-root` marks the print
+     modals; everything else in the app shell is hidden, and every ancestor
+     of the document is released from its scroll/height constraints.
+     ---------------------------------------------------------------- */
+  .print-app-shell {
+    display: none !important;
+  }
+
+  /* The app root is a fixed-height, overflow-hidden flex viewport on screen;
+     on paper it must simply grow with the document it contains. */
+  .print-app-root {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: transparent !important;
+  }
+
+  /* Neutralise scroll/clip containers between the modal and the document */
+  .print-document-root,
+  .print-document-root * {
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+  }
+
+  .print-document-root {
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* The off-screen export canvas must never reach the printer */
+  .print-export-canvas {
+    display: none !important;
+  }
+
   /* Reset modal overlay when printing */
   .modal-print-backdrop {
     position: static !important;
@@ -201,7 +251,9 @@ button:active:not(:disabled) {
   .a4-production-page {
     width: 100% !important;
     max-width: 190mm !important;
-    min-height: 270mm !important;
+    min-height: 265mm !important;
+    height: auto !important;
+    overflow: visible !important;
     margin: 0 auto !important;
     padding: 0 !important;
     box-sizing: border-box !important;
@@ -225,6 +277,19 @@ button:active:not(:disabled) {
   .production-slip-product-card {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
+  }
+
+  /* A4 paper is ~186mm of content, below Tailwind's `md` breakpoint, so the
+     measurement grid used to collapse from 5 columns to 3 on paper only. That
+     made every garment card ~30mm taller than the on-screen preview and pushed
+     the slip onto extra sheets. Pin the printed layout to the approved
+     desktop layout so preview and paper match. */
+  .production-measurement-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  }
+
+  .production-slip-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 
   #printable-production-slip {

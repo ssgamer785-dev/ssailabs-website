@@ -20,6 +20,7 @@ export const PrintBillModal: React.FC<PrintBillModalProps> = ({
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExportingImg, setIsExportingImg] = useState(false);
   const [exportSuccess, setExportSuccess] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -33,11 +34,14 @@ export const PrintBillModal: React.FC<PrintBillModalProps> = ({
   const handleDownloadPdf = async () => {
     try {
       setIsExportingPdf(true);
+      setExportError(null);
       const filename = `Regency_Tailors_Bill_Order_${numericOrderNum || 'New'}.pdf`;
       const ok = await downloadElementAsPdf('bill-export-canvas', filename);
       if (ok) {
         setExportSuccess('PDF Downloaded!');
         setTimeout(() => setExportSuccess(null), 3000);
+      } else {
+        setExportError('PDF could not be generated. The browser print dialog was opened instead — use "Save as PDF" there.');
       }
     } finally {
       setIsExportingPdf(false);
@@ -52,6 +56,8 @@ export const PrintBillModal: React.FC<PrintBillModalProps> = ({
       if (ok) {
         setExportSuccess('PNG Downloaded!');
         setTimeout(() => setExportSuccess(null), 3000);
+      } else {
+        setExportError('The PNG image could not be generated. Use Download PDF or Print Bill instead.');
       }
     } finally {
       setIsExportingImg(false);
@@ -61,12 +67,13 @@ export const PrintBillModal: React.FC<PrintBillModalProps> = ({
   const isBlank = !order;
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#071426]/90 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto font-['Manrope',sans-serif] modal-print-backdrop">
+    <div className="fixed inset-0 z-50 bg-[#071426]/90 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto font-['Manrope',sans-serif] modal-print-backdrop print-document-root">
       
       {/* ========================================================================= */}
       {/* 1. DEDICATED OFF-SCREEN EXPORT CANVAS (MASTER SOURCE FOR PNG & PDF EXPORT) */}
       {/* ========================================================================= */}
       <div 
+        className="print-export-canvas"
         style={{
           position: 'absolute',
           left: '-99999px',
@@ -160,6 +167,18 @@ export const PrintBillModal: React.FC<PrintBillModalProps> = ({
             </button>
           </div>
         </div>
+
+        {exportError && (
+          <div className="no-print shrink-0 p-3 bg-red-50 border border-red-300 rounded-xl flex items-start gap-2.5 text-xs font-semibold text-red-900">
+            <span className="flex-1">{exportError}</span>
+            <button
+              onClick={() => setExportError(null)}
+              className="font-bold text-red-700 hover:text-red-950 cursor-pointer shrink-0"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* PRINTABLE BILL SHEET (RESPONSIVE SCREEN PREVIEW & NATIVE PRINT CONTAINER) */}
         <div className="flex-1 overflow-y-auto pr-1 flex justify-center items-start print:p-0 print:m-0 print:overflow-visible overscroll-contain">

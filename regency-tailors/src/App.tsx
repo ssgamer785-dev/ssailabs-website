@@ -46,56 +46,95 @@ import { CustomerProfileModal } from './components/modals/CustomerProfileModal';
 import { PrintProductionSlipModal } from './components/modals/PrintProductionSlipModal';
 import { PrintBillModal } from './components/modals/PrintBillModal';
 import { ProductionSlipDetailModal } from './components/modals/ProductionSlipDetailModal';
-import { RegencyBackupPayload } from './utils/backupManager';
+import { RegencyBackupPayload, normalizeRestoredPayload } from './utils/backupManager';
+import { readArray, readObject, writeJson, onStorageFailure } from './utils/safeStorage';
+import { highestNumberInData, raiseHighWaterMark, extractOrderNumber } from './utils/orderNumbering';
+import { StorageAlertBanner } from './components/StorageAlertBanner';
 
 const STORAGE_KEY = 'REGENCY_TAILORS_DB_V3';
 
 export default function App() {
   // Persistence state setup
-  const [customers, setCustomers] = useState<Customer[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_CUSTOMERS`);
-    return saved ? JSON.parse(saved) : initialCustomers;
-  });
+  const [customers, setCustomers] = useState<Customer[]>(() =>
+    readArray<Customer>(`${STORAGE_KEY}_CUSTOMERS`, initialCustomers)
+  );
 
-  const [measurements, setMeasurements] = useState<MeasurementRecord[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_MEASUREMENTS`);
-    return saved ? JSON.parse(saved) : initialMeasurements;
-  });
+  const [measurements, setMeasurements] = useState<MeasurementRecord[]>(() =>
+    readArray<MeasurementRecord>(`${STORAGE_KEY}_MEASUREMENTS`, initialMeasurements)
+  );
 
-  const [orders, setOrders] = useState<Order[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_ORDERS`);
-    return saved ? JSON.parse(saved) : initialOrders;
-  });
+  const [orders, setOrders] = useState<Order[]>(() =>
+    readArray<Order>(`${STORAGE_KEY}_ORDERS`, initialOrders)
+  );
 
-  const [fittings, setFittings] = useState<Fitting[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_FITTINGS`);
-    return saved ? JSON.parse(saved) : initialFittings;
-  });
+  const [fittings, setFittings] = useState<Fitting[]>(() =>
+    readArray<Fitting>(`${STORAGE_KEY}_FITTINGS`, initialFittings)
+  );
 
-  const [workers, setWorkers] = useState<Worker[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_WORKERS`);
-    return saved ? JSON.parse(saved) : initialWorkers;
-  });
+  const [workers, setWorkers] = useState<Worker[]>(() =>
+    readArray<Worker>(`${STORAGE_KEY}_WORKERS`, initialWorkers)
+  );
 
-  const [invoices, setInvoices] = useState<Invoice[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_INVOICES`);
-    return saved ? JSON.parse(saved) : initialInvoices;
-  });
+  const [invoices, setInvoices] = useState<Invoice[]>(() =>
+    readArray<Invoice>(`${STORAGE_KEY}_INVOICES`, initialInvoices)
+  );
 
-  const [expenses, setExpenses] = useState<Expense[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_EXPENSES`);
-    return saved ? JSON.parse(saved) : initialExpenses;
-  });
+  const [expenses, setExpenses] = useState<Expense[]>(() =>
+    readArray<Expense>(`${STORAGE_KEY}_EXPENSES`, initialExpenses)
+  );
 
-  const [trash, setTrash] = useState<TrashItem[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_TRASH`);
-    return saved ? JSON.parse(saved) : initialTrash;
-  });
+  const [trash, setTrash] = useState<TrashItem[]>(() =>
+    readArray<TrashItem>(`${STORAGE_KEY}_TRASH`, initialTrash)
+  );
 
-  const [profile, setProfile] = useState<ShowroomProfile>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY}_PROFILE`);
-    return saved ? JSON.parse(saved) : initialProfile;
-  });
+  const [profile, setProfile] = useState<ShowroomProfile>(() =>
+    readObject<ShowroomProfile>(`${STORAGE_KEY}_PROFILE`, initialProfile)
+  );
+
+  // Surfaced to the user when the browser refuses to persist (quota full, private mode)
+  const [storageAlert, setStorageAlert] = useState<string | null>(null);
+  useEffect(() => onStorageFailure(f => setStorageAlert(f.message)), []);
+
+  // Keep a second browser tab from overwriting the first tab's work. Each tab
+  // holds the whole database in memory and writes it back wholesale, so without
+  // this a stale tab silently erases orders saved elsewhere.
+  useEffect(() => {
+    const handleExternalWrite = (event: StorageEvent) => {
+      if (!event.key || !event.key.startsWith(STORAGE_KEY) || event.newValue === null) return;
+
+      switch (event.key) {
+        case `${STORAGE_KEY}_CUSTOMERS`:
+          setCustomers(readArray<Customer>(event.key, []));
+          break;
+        case `${STORAGE_KEY}_MEASUREMENTS`:
+          setMeasurements(readArray<MeasurementRecord>(event.key, []));
+          break;
+        case `${STORAGE_KEY}_ORDERS`:
+          setOrders(readArray<Order>(event.key, []));
+          break;
+        case `${STORAGE_KEY}_FITTINGS`:
+          setFittings(readArray<Fitting>(event.key, []));
+          break;
+        case `${STORAGE_KEY}_WORKERS`:
+          setWorkers(readArray<Worker>(event.key, []));
+          break;
+        case `${STORAGE_KEY}_INVOICES`:
+          setInvoices(readArray<Invoice>(event.key, []));
+          break;
+        case `${STORAGE_KEY}_EXPENSES`:
+          setExpenses(readArray<Expense>(event.key, []));
+          break;
+        case `${STORAGE_KEY}_TRASH`:
+          setTrash(readArray<TrashItem>(event.key, []));
+          break;
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener('storage', handleExternalWrite);
+    return () => window.removeEventListener('storage', handleExternalWrite);
+  }, []);
 
   // Navigation & Modal States
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
@@ -149,39 +188,39 @@ export default function App() {
 
   // Sync to localStorage
   useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_CUSTOMERS`, JSON.stringify(customers));
+    writeJson(`${STORAGE_KEY}_CUSTOMERS`, customers);
   }, [customers]);
 
   useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_MEASUREMENTS`, JSON.stringify(measurements));
+    writeJson(`${STORAGE_KEY}_MEASUREMENTS`, measurements);
   }, [measurements]);
 
   useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_ORDERS`, JSON.stringify(orders));
+    writeJson(`${STORAGE_KEY}_ORDERS`, orders);
   }, [orders]);
 
   useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_FITTINGS`, JSON.stringify(fittings));
+    writeJson(`${STORAGE_KEY}_FITTINGS`, fittings);
   }, [fittings]);
 
   useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_WORKERS`, JSON.stringify(workers));
+    writeJson(`${STORAGE_KEY}_WORKERS`, workers);
   }, [workers]);
 
   useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_INVOICES`, JSON.stringify(invoices));
+    writeJson(`${STORAGE_KEY}_INVOICES`, invoices);
   }, [invoices]);
 
   useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_EXPENSES`, JSON.stringify(expenses));
+    writeJson(`${STORAGE_KEY}_EXPENSES`, expenses);
   }, [expenses]);
 
   useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_TRASH`, JSON.stringify(trash));
+    writeJson(`${STORAGE_KEY}_TRASH`, trash);
   }, [trash]);
 
   useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY}_PROFILE`, JSON.stringify(profile));
+    writeJson(`${STORAGE_KEY}_PROFILE`, profile);
   }, [profile]);
 
   // Handlers: Customers
@@ -212,42 +251,73 @@ export default function App() {
 
   // Handlers: Orders
   const handleSaveOrder = (order: Order) => {
-    // Keep persistent order sequence counter updated
-    try {
-      const numVal = parseInt(order.id, 10) || parseInt(order.orderNumber || '', 10);
-      if (!isNaN(numVal)) {
-        const curSaved = parseInt(localStorage.getItem(`${STORAGE_KEY}_ORDER_SEQ`) || '0', 10);
-        localStorage.setItem(`${STORAGE_KEY}_ORDER_SEQ`, String(Math.max(numVal, curSaved)));
-      }
-    } catch {
-      // ignore
-    }
+    // Retire this order number permanently so it can never be re-issued,
+    // even if the order is later deleted and the trash emptied.
+    raiseHighWaterMark(STORAGE_KEY, extractOrderNumber(order.orderNumber || order.id));
+
+    // An edit must never reset money, workflow status or production history.
+    // The wizard only owns customer details, dates, garments and measurements;
+    // everything else is carried over from the stored order.
+    const existingOrder = orders.find(o => o.id === order.id) || null;
+    const isEdit = Boolean(existingOrder);
+
+    const mergedOrder: Order = existingOrder
+      ? {
+          ...existingOrder,
+          // fields the order wizard is allowed to change
+          customerId: order.customerId,
+          customerName: order.customerName,
+          customerPhone: order.customerPhone,
+          customerEmail: order.customerEmail ?? existingOrder.customerEmail,
+          customerAddress: order.customerAddress ?? existingOrder.customerAddress,
+          items: order.items,
+          orderDate: order.orderDate,
+          deliveryDate: order.deliveryDate,
+          specialInstructions: order.specialInstructions,
+          notes: order.notes,
+          fittingNotes: order.fittingNotes,
+          measurementsSnapshot: order.measurementsSnapshot
+          // status, productionStatus, productionNotes, totalAmount, subtotal,
+          // discount, taxAmount, advancePaid, balanceDue, paymentHistory,
+          // paymentMethod, trialDate, priority, urgent, invoiceId and fittingId
+          // are intentionally preserved from `existingOrder`.
+        }
+      : order;
 
     setOrders(prev => {
-      const exists = prev.some(o => o.id === order.id);
-      if (exists) return prev.map(o => o.id === order.id ? order : o);
-      return [order, ...prev];
+      const exists = prev.some(o => o.id === mergedOrder.id);
+      if (exists) return prev.map(o => o.id === mergedOrder.id ? mergedOrder : o);
+      return [mergedOrder, ...prev];
     });
 
     // If order has measurements snapshot, update/create customer measurement record
-    if (order.measurementsSnapshot) {
+    if (mergedOrder.measurementsSnapshot) {
+      const snap = mergedOrder.measurementsSnapshot;
+      // Only carry garment sections that this order actually captured, so a
+      // shirt-only order never blanks a previously recorded coat or pant.
+      const capturedSections: Partial<MeasurementRecord> = {};
+      (['coat', 'pant', 'shirt', 'kurta', 'pajama'] as const).forEach(section => {
+        if (snap[section]) (capturedSections as any)[section] = snap[section];
+      });
+
       const newMRecord: MeasurementRecord = {
-        id: `M-${order.id}`,
-        customerId: order.customerId,
-        customerName: order.customerName,
-        customerPhone: order.customerPhone,
-        garmentType: (order.items || []).map(i => i.garmentType).join(', '),
+        id: `M-${mergedOrder.id}`,
+        customerId: mergedOrder.customerId,
+        customerName: mergedOrder.customerName,
+        customerPhone: mergedOrder.customerPhone,
+        orderNumber: mergedOrder.orderNumber || mergedOrder.id,
+        garmentType: (mergedOrder.items || []).map(i => i.garmentType).join(', '),
+        selectedGarments: (mergedOrder.items || []).map(i => String(i.garmentType)),
         lastUpdated: new Date().toISOString().split('T')[0],
-        unit: order.measurementsSnapshot.unit || 'inches',
-        coat: order.measurementsSnapshot.coat,
-        pant: order.measurementsSnapshot.pant,
-        shirt: order.measurementsSnapshot.shirt,
-        kurta: order.measurementsSnapshot.kurta,
-        pajama: order.measurementsSnapshot.pajama,
-        fittingNotes: order.measurementsSnapshot.fittingNotes
+        unit: snap.unit || 'inches',
+        fitPreference: snap.fitPreference,
+        garmentRemarks: snap.garmentRemarks,
+        fittingNotes: snap.fittingNotes,
+        ...capturedSections
       };
+
       setMeasurements(prev => {
-        const existingIdx = prev.findIndex(m => m.customerId === order.customerId);
+        const existingIdx = prev.findIndex(m => m.customerId === mergedOrder.customerId);
         if (existingIdx >= 0) {
           const copy = [...prev];
           copy[existingIdx] = { ...copy[existingIdx], ...newMRecord, id: copy[existingIdx].id };
@@ -257,44 +327,61 @@ export default function App() {
       });
     }
 
-    // Also update customer lifetime spend & total orders
-    setCustomers(prev =>
-      prev.map(c => {
-        if (c.id === order.customerId) {
-          return {
-            ...c,
-            totalOrders: c.totalOrders + 1,
-            lifetimeSpend: c.lifetimeSpend + order.totalAmount
-          };
-        }
-        return c;
-      })
-    );
+    // Customer order/spend totals move only when a genuinely new order is placed.
+    if (!isEdit) {
+      setCustomers(prev =>
+        prev.map(c => {
+          if (c.id === mergedOrder.customerId) {
+            return {
+              ...c,
+              totalOrders: (c.totalOrders || 0) + 1,
+              lifetimeSpend: (c.lifetimeSpend || 0) + (mergedOrder.totalAmount || 0),
+              lastVisitDate: new Date().toISOString().split('T')[0]
+            };
+          }
+          return c;
+        })
+      );
+    }
 
-    // Auto generate corresponding invoice
-    const newInvoice: Invoice = {
-      id: `INV-${order.id}`,
-      orderId: order.id,
-      customerName: order.customerName,
-      customerPhone: order.customerPhone,
-      date: order.orderDate,
-      items: (order.items || []).map(i => ({
-        description: `${i.garmentType} (${i.fabricName || 'Bespoke'})`,
-        qty: i.quantity || 1,
-        rate: i.price,
-        amount: i.price
-      })),
-      subtotal: order.subtotal || order.totalAmount,
-      gstAmount: order.taxAmount || 0,
-      discount: order.discount || 0,
-      grandTotal: order.totalAmount,
-      amountPaid: order.advancePaid,
-      balanceRemaining: order.balanceDue,
-      paymentMode: (order.paymentHistory?.[0]?.method as any) || (order.paymentMethod as any) || 'UPI / GPay',
-      status: order.balanceDue === 0 ? 'Paid' : order.advancePaid > 0 ? 'Partial' : 'Outstanding'
-    };
+    // Auto generate / refresh the corresponding invoice, keeping any payments
+    // already recorded against it.
+    setInvoices(prev => {
+      const priorInvoice = prev.find(i => i.orderId === mergedOrder.id);
+      const amountPaid = priorInvoice
+        ? Math.max(priorInvoice.amountPaid || 0, mergedOrder.advancePaid || 0)
+        : (mergedOrder.advancePaid || 0);
+      const grandTotal = mergedOrder.totalAmount || 0;
+      const balanceRemaining = Math.max(0, grandTotal - amountPaid);
 
-    setInvoices(prev => [newInvoice, ...prev.filter(i => i.orderId !== order.id)]);
+      const refreshedInvoice: Invoice = {
+        id: priorInvoice?.id || `INV-${mergedOrder.id}`,
+        orderId: mergedOrder.id,
+        customerName: mergedOrder.customerName,
+        customerPhone: mergedOrder.customerPhone,
+        date: mergedOrder.orderDate,
+        items: (mergedOrder.items || []).map(i => ({
+          description: `${i.garmentType} (${i.fabricName || 'Bespoke'})`,
+          qty: i.quantity || 1,
+          rate: i.price,
+          amount: (i.price || 0) * (i.quantity || 1)
+        })),
+        subtotal: mergedOrder.subtotal || grandTotal,
+        gstAmount: mergedOrder.taxAmount || 0,
+        discount: mergedOrder.discount || 0,
+        grandTotal,
+        amountPaid,
+        balanceRemaining,
+        paymentMode:
+          (priorInvoice?.paymentMode as any) ||
+          (mergedOrder.paymentHistory?.[0]?.method as any) ||
+          (mergedOrder.paymentMethod as any) ||
+          'UPI / GPay',
+        status: amountPaid > 0 && balanceRemaining === 0 ? 'Paid' : amountPaid > 0 ? 'Partial' : 'Outstanding'
+      };
+
+      return [refreshedInvoice, ...prev.filter(i => i.orderId !== mergedOrder.id)];
+    });
 
     // Auto schedule fitting only if trial date explicitly provided (e.g. from existing orders)
     if (order.trialDate) {
@@ -571,7 +658,11 @@ export default function App() {
   };
 
   // Handlers: Backup & Atomic Restore
-  const handleRestoreBackup = (payload: RegencyBackupPayload) => {
+  const handleRestoreBackup = (incoming: RegencyBackupPayload) => {
+    // Repair any structurally-broken records before they reach the UI, so a
+    // hand-edited or truncated backup can never blank the screen.
+    const payload = normalizeRestoredPayload(incoming);
+
     // 1. Atomic React state replacement
     setCustomers(payload.customers || []);
     setMeasurements(payload.measurements || []);
@@ -585,26 +676,32 @@ export default function App() {
       setProfile(payload.profile);
     }
 
-    // 2. Immediate direct localStorage sync
-    try {
-      localStorage.setItem(`${STORAGE_KEY}_CUSTOMERS`, JSON.stringify(payload.customers || []));
-      localStorage.setItem(`${STORAGE_KEY}_MEASUREMENTS`, JSON.stringify(payload.measurements || []));
-      localStorage.setItem(`${STORAGE_KEY}_ORDERS`, JSON.stringify(payload.orders || []));
-      localStorage.setItem(`${STORAGE_KEY}_FITTINGS`, JSON.stringify(payload.fittings || []));
-      localStorage.setItem(`${STORAGE_KEY}_WORKERS`, JSON.stringify(payload.workers || []));
-      localStorage.setItem(`${STORAGE_KEY}_INVOICES`, JSON.stringify(payload.invoices || []));
-      localStorage.setItem(`${STORAGE_KEY}_EXPENSES`, JSON.stringify(payload.expenses || []));
-      localStorage.setItem(`${STORAGE_KEY}_TRASH`, JSON.stringify(payload.trash || []));
-      if (payload.profile) {
-        localStorage.setItem(`${STORAGE_KEY}_PROFILE`, JSON.stringify(payload.profile));
-      }
-    } catch (e) {
-      console.error('Failed to sync restored backup to localStorage', e);
+    // 2. Immediate direct localStorage sync (fail-soft, reported to the user)
+    writeJson(`${STORAGE_KEY}_CUSTOMERS`, payload.customers || []);
+    writeJson(`${STORAGE_KEY}_MEASUREMENTS`, payload.measurements || []);
+    writeJson(`${STORAGE_KEY}_ORDERS`, payload.orders || []);
+    writeJson(`${STORAGE_KEY}_FITTINGS`, payload.fittings || []);
+    writeJson(`${STORAGE_KEY}_WORKERS`, payload.workers || []);
+    writeJson(`${STORAGE_KEY}_INVOICES`, payload.invoices || []);
+    writeJson(`${STORAGE_KEY}_EXPENSES`, payload.expenses || []);
+    writeJson(`${STORAGE_KEY}_TRASH`, payload.trash || []);
+    if (payload.profile) {
+      writeJson(`${STORAGE_KEY}_PROFILE`, payload.profile);
     }
+
+    // 3. Restore the order-number high-water mark so a restored database
+    //    continues from the correct next number instead of re-issuing one.
+    raiseHighWaterMark(
+      STORAGE_KEY,
+      Math.max(
+        payload.metadata?.orderSequence || 0,
+        highestNumberInData(payload.orders || [], payload.trash || [])
+      )
+    );
   };
 
   return (
-    <div className="flex h-screen bg-[#F7F3EA] text-[#071426] overflow-hidden">
+    <div className="flex h-screen bg-[#F7F3EA] text-[#071426] overflow-hidden print-app-root">
       {/* Sidebar Navigation */}
       <Sidebar
         activeTab={activeTab}
@@ -618,7 +715,7 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+      <div className="flex-1 flex flex-col h-screen overflow-hidden print-app-shell">
         {/* Top Header */}
         <Header
           searchQuery={searchQuery}
@@ -635,6 +732,8 @@ export default function App() {
           userName={profile.activeUser}
           userRole={`${profile.subtitle} / ${activeRole}`}
         />
+
+        <StorageAlertBanner message={storageAlert} onDismiss={() => setStorageAlert(null)} />
 
         {/* Dynamic View Scroll Container */}
         <main ref={mainContentRef} className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 bg-chevron-pattern w-full overscroll-contain">
@@ -733,7 +832,6 @@ export default function App() {
                 setIsOrderDetailModalOpen(true);
               }}
               onPrintProductionSlip={handleOpenPrintProductionSlip}
-              onPrintBill={handleOpenPrintBill}
             />
           )}
 
@@ -850,13 +948,13 @@ export default function App() {
 
           {activeTab === 'backup' && (
             <BackupView
+              invoices={invoices}
               customers={customers}
               orders={orders}
               measurements={measurements}
               fittings={fittings}
               workers={workers}
-              invoices={invoices}
-              expenses={expenses}
+                    expenses={expenses}
               trash={trash}
               profile={profile}
               onRestoreBackup={handleRestoreBackup}
@@ -926,15 +1024,12 @@ export default function App() {
         customer={customers.find(c => c.id === selectedOrderForDetail?.customerId) || null}
         measurements={measurements}
         fittings={fittings}
-        invoices={invoices}
         onUpdateStatus={handleUpdateOrderStatus}
-        onRecordPayment={handleRecordOrderPayment}
         onEditOrder={(order) => {
           setEditingOrder(order);
           setIsOrderModalOpen(true);
         }}
         onPrintProductionSlip={handleOpenPrintProductionSlip}
-        onPrintBill={handleOpenPrintBill}
       />
 
       {/* Customer Profile Modal */}
@@ -948,7 +1043,6 @@ export default function App() {
         orders={orders}
         measurements={measurements}
         fittings={fittings}
-        invoices={invoices}
         onNewOrderForCustomer={(c) => {
           setEditingOrder(null);
           setPreselectedCustomerForOrder(c);

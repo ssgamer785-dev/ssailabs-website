@@ -17,6 +17,8 @@ export interface BackupMetadata {
   schemaVersion: string;
   createdAt: string;
   exportSource: string;
+  /** Highest order number ever issued. Restored so retired numbers stay retired. */
+  orderSequence?: number;
   stats: {
     customersCount: number;
     ordersCount: number;
@@ -43,6 +45,15 @@ export interface RegencyBackupPayload {
   profile?: ShowroomProfile;
 }
 
+/** Relationship problems found in a backup. Reported, never silently ignored. */
+export interface BackupIntegrityReport {
+  orphanOrders: string[];
+  orphanMeasurements: string[];
+  orphanInvoices: string[];
+  duplicateOrderIds: string[];
+  repairedOrders: number;
+}
+
 export interface BackupValidationResult {
   isValid: boolean;
   error?: string;
@@ -52,7 +63,11 @@ export interface BackupValidationResult {
   backupVersion?: number;
   fileName?: string;
   fileSizeBytes?: number;
+  integrity?: BackupIntegrityReport;
 }
+
+/** Refuse absurdly large files rather than freezing the browser tab. */
+export const MAX_BACKUP_BYTES = 64 * 1024 * 1024;
 
 const BACKUP_FORMAT_VERSION = 1;
 const APP_SCHEMA_VERSION = '2.0.0';
@@ -71,6 +86,7 @@ export function buildBackupSnapshot(data: {
   expenses: Expense[];
   trash: TrashItem[];
   profile: ShowroomProfile;
+  orderSequence?: number;
 }): RegencyBackupPayload {
   // Count total garments across all orders
   const garmentsCount = data.orders.reduce((acc, order) => {
@@ -97,6 +113,7 @@ export function buildBackupSnapshot(data: {
     schemaVersion: APP_SCHEMA_VERSION,
     createdAt: new Date().toISOString(),
     exportSource: 'Regency Tailors Management Suite',
+    orderSequence: data.orderSequence,
     stats: {
       customersCount: Array.isArray(data.customers) ? data.customers.length : 0,
       ordersCount: Array.isArray(data.orders) ? data.orders.length : 0,
@@ -157,6 +174,13 @@ export function validateBackupContent(
     return {
       isValid: false,
       error: 'The uploaded backup file is completely empty.'
+    };
+  }
+
+  if (fileSizeBytes > MAX_BACKUP_BYTES || rawContent.length > MAX_BACKUP_BYTES) {
+    return {
+      isValid: false,
+      error: `This file is too large to restore safely (limit ${Math.round(MAX_BACKUP_BYTES / 1024 / 1024)} MB). No data was changed.`
     };
   }
 
@@ -239,7 +263,7 @@ export function validateBackupContent(
     trashCount: trash.length
   };
 
-  const payload: RegencyBackupPayload = {
+  const rawPayload: RegencyBackupPayload = {
     metadata: {
       backupVersion: metadata?.backupVersion || (isLegacy ? 0 : 1),
       application: metadata?.application || APP_NAME,
@@ -247,6 +271,7 @@ export function validateBackupContent(
       schemaVersion: metadata?.schemaVersion || APP_SCHEMA_VERSION,
       createdAt: metadata?.createdAt || parsed.exportDate || new Date().toISOString(),
       exportSource: metadata?.exportSource || 'Regency Tailors Management Suite',
+      orderSequence: typeof metadata?.orderSequence === 'number' ? metadata.orderSequence : undefined,
       stats
     },
     customers,
@@ -257,16 +282,204 @@ export function validateBackupContent(
     invoices,
     expenses,
     trash,
-    profile: parsed.profile
+    profile: parsed.profile && typeof parsed.profile === 'object' ? parsed.profile : undefined
   };
+
+  // Coerce every record into a shape the UI can render. A hand-edited or
+  // partially-written backup used to load fine and then blank the screen the
+  // moment a view touched `order.items.map(...)`.
+  const payload = normalizeRestoredPayload(rawPayload);
+  const integrity = inspectBackupIntegrity(payload);
 
   return {
     isValid: true,
     payload,
-    stats,
+    stats: payload.metadata.stats,
     createdAt: payload.metadata.createdAt,
     backupVersion: payload.metadata.backupVersion,
     fileName,
-    fileSizeBytes
+    fileSizeBytes,
+    integrity
+  };
+}
+
+const asString = (v: unknown, fallback = ''): string =>
+  typeof v === 'string' ? v : v === null || v === undefined ? fallback : String(v);
+
+const asNumber = (v: unknown, fallback = 0): number => {
+  const n = typeof v === 'number' ? v : parseFloat(String(v));
+  return Number.isFinite(n) ? n : fallback;
+};
+
+/**
+ * Repairs structurally-broken records so a bad file can never crash the suite.
+ * Business values are preserved exactly; only missing/mistyped structure is fixed.
+ */
+export function normalizeRestoredPayload(payload: RegencyBackupPayload): RegencyBackupPayload {
+  const seenOrderIds = new Set<string>();
+  let repairedOrders = 0;
+
+  const orders = (payload.orders || [])
+    .filter(o => o && typeof o === 'object')
+    .map((o: any, idx: number) => {
+      const before = JSON.stringify(o.items);
+      const items = (Array.isArray(o.items) ? o.items : [])
+        .filter((i: any) => i && typeof i === 'object')
+        .map((i: any, itemIdx: number) => ({
+          ...i,
+          id: asString(i.id, `ITEM-${asString(o.id, String(idx))}-${itemIdx + 1}`),
+          garmentType: asString(i.garmentType, 'Bespoke Garment'),
+          fabricCode: asString(i.fabricCode),
+          fabricName: asString(i.fabricName),
+          notes: asString(i.notes),
+          remarks: asString(i.remarks),
+          price: asNumber(i.price),
+          quantity: Math.max(1, Math.round(asNumber(i.quantity, 1)))
+        }));
+      if (before !== JSON.stringify(items)) repairedOrders++;
+
+      const totalAmount = asNumber(o.totalAmount);
+      const advancePaid = asNumber(o.advancePaid);
+
+      let id = asString(o.id, asString(o.orderNumber, `RESTORED-${idx + 1}`));
+      while (seenOrderIds.has(id)) id = `${id}-DUP${idx + 1}`;
+      seenOrderIds.add(id);
+
+      return {
+        ...o,
+        id,
+        orderNumber: asString(o.orderNumber, id),
+        customerId: asString(o.customerId),
+        customerName: asString(o.customerName, 'Unknown Customer'),
+        customerPhone: asString(o.customerPhone),
+        items,
+        orderDate: asString(o.orderDate),
+        trialDate: asString(o.trialDate),
+        deliveryDate: asString(o.deliveryDate),
+        status: asString(o.status, 'New'),
+        totalAmount,
+        advancePaid,
+        balanceDue: asNumber(o.balanceDue, Math.max(0, totalAmount - advancePaid)),
+        urgent: Boolean(o.urgent),
+        paymentHistory: Array.isArray(o.paymentHistory) ? o.paymentHistory : [],
+        measurementsSnapshot:
+          o.measurementsSnapshot && typeof o.measurementsSnapshot === 'object' ? o.measurementsSnapshot : undefined
+      } as Order;
+    });
+
+  const customers = (payload.customers || [])
+    .filter(c => c && typeof c === 'object')
+    .map((c: any, idx: number) => ({
+      ...c,
+      id: asString(c.id, `RESTORED-CUST-${idx + 1}`),
+      name: asString(c.name, 'Unknown Customer'),
+      phone: asString(c.phone),
+      email: asString(c.email),
+      address: asString(c.address),
+      city: asString(c.city),
+      totalOrders: Math.max(0, Math.round(asNumber(c.totalOrders))),
+      lifetimeSpend: asNumber(c.lifetimeSpend),
+      lastVisitDate: asString(c.lastVisitDate),
+      createdDate: asString(c.createdDate)
+    })) as Customer[];
+
+  const measurements = (payload.measurements || [])
+    .filter(m => m && typeof m === 'object')
+    .map((m: any, idx: number) => ({
+      ...m,
+      id: asString(m.id, `RESTORED-MEAS-${idx + 1}`),
+      customerId: asString(m.customerId),
+      customerName: asString(m.customerName, 'Unknown Customer'),
+      garmentType: asString(m.garmentType, 'Bespoke Garment'),
+      selectedGarments: Array.isArray(m.selectedGarments) ? m.selectedGarments.map((g: any) => asString(g)) : undefined,
+      garmentRemarks:
+        m.garmentRemarks && typeof m.garmentRemarks === 'object' && !Array.isArray(m.garmentRemarks)
+          ? m.garmentRemarks
+          : undefined,
+      lastUpdated: asString(m.lastUpdated)
+    })) as MeasurementRecord[];
+
+  const invoices = (payload.invoices || [])
+    .filter(i => i && typeof i === 'object')
+    .map((i: any, idx: number) => ({
+      ...i,
+      id: asString(i.id, `RESTORED-INV-${idx + 1}`),
+      orderId: asString(i.orderId),
+      customerName: asString(i.customerName, 'Unknown Customer'),
+      customerPhone: asString(i.customerPhone),
+      items: Array.isArray(i.items) ? i.items : [],
+      subtotal: asNumber(i.subtotal),
+      gstAmount: asNumber(i.gstAmount),
+      discount: asNumber(i.discount),
+      grandTotal: asNumber(i.grandTotal),
+      amountPaid: asNumber(i.amountPaid),
+      balanceRemaining: asNumber(i.balanceRemaining)
+    })) as Invoice[];
+
+  const fittings = (payload.fittings || []).filter(f => f && typeof f === 'object') as Fitting[];
+  const workers = (payload.workers || []).filter(w => w && typeof w === 'object') as Worker[];
+  const expenses = (payload.expenses || []).filter(e => e && typeof e === 'object') as Expense[];
+  const trash = (payload.trash || []).filter(t => t && typeof t === 'object') as TrashItem[];
+
+  const garmentsCount = orders.reduce(
+    (acc, o) => acc + o.items.reduce((sum, it) => sum + (it.quantity || 1), 0),
+    0
+  );
+
+  return {
+    ...payload,
+    metadata: {
+      ...payload.metadata,
+      stats: {
+        customersCount: customers.length,
+        ordersCount: orders.length,
+        garmentsCount,
+        measurementsCount: measurements.length,
+        fittingsCount: fittings.length,
+        workersCount: workers.length,
+        invoicesCount: invoices.length,
+        expensesCount: expenses.length,
+        trashCount: trash.length
+      }
+    },
+    customers,
+    orders,
+    measurements,
+    fittings,
+    workers,
+    invoices,
+    expenses,
+    trash,
+    __repairedOrders: repairedOrders
+  } as RegencyBackupPayload & { __repairedOrders: number };
+}
+
+/**
+ * Real relationship verification — the import screen previously claimed to
+ * "verify relationships" without checking anything.
+ */
+export function inspectBackupIntegrity(payload: RegencyBackupPayload): BackupIntegrityReport {
+  const customerIds = new Set((payload.customers || []).map(c => c.id));
+  const orderIds = new Set((payload.orders || []).map(o => o.id));
+
+  const seen = new Set<string>();
+  const duplicateOrderIds: string[] = [];
+  (payload.orders || []).forEach(o => {
+    if (seen.has(o.id)) duplicateOrderIds.push(o.id);
+    seen.add(o.id);
+  });
+
+  return {
+    orphanOrders: (payload.orders || [])
+      .filter(o => o.customerId && !customerIds.has(o.customerId))
+      .map(o => o.orderNumber || o.id),
+    orphanMeasurements: (payload.measurements || [])
+      .filter(m => m.customerId && !customerIds.has(m.customerId))
+      .map(m => m.id),
+    orphanInvoices: (payload.invoices || [])
+      .filter(i => i.orderId && !orderIds.has(i.orderId))
+      .map(i => i.id),
+    duplicateOrderIds,
+    repairedOrders: (payload as any).__repairedOrders || 0
   };
 }

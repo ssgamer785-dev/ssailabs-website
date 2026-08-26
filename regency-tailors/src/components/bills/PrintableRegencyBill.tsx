@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { MapPin, Phone, User, FileText } from 'lucide-react';
 import { Order } from '../../types';
 import regencyLogoImg from '../../assets/images/regency-tailors-logo.jpg';
@@ -17,6 +17,19 @@ export const PrintableRegencyBill: React.FC<PrintableRegencyBillProps> = ({
   order,
   id = 'printable-customer-bill'
 }) => {
+  // The shipped logo asset can fail to decode (see README — the bundled JPEG is
+  // corrupt). A customer-facing bill must never show a broken-image icon, so we
+  // fall back to the same engraved RT monogram the sidebar already uses.
+  const [logoSrc, setLogoSrc] = useState<string>(regencyLogoImg);
+  const [logoFailed, setLogoFailed] = useState(false);
+  const handleLogoError = () => {
+    if (logoSrc !== '/regency-tailors-logo.jpg') {
+      setLogoSrc('/regency-tailors-logo.jpg');
+    } else {
+      setLogoFailed(true);
+    }
+  };
+
   const isBlank = !order;
   const rawOrderNum = order ? (order.orderNumber || order.id || '1') : '—';
   const numericOrderNum = rawOrderNum.replace(/[^0-9]/g, '') || rawOrderNum;
@@ -130,22 +143,32 @@ export const PrintableRegencyBill: React.FC<PrintableRegencyBillProps> = ({
         >
           {/* TOP LEFT: OFFICIAL REGENCY LOGO ASSET */}
           <div className="flex flex-col items-start justify-center pr-2" style={{ boxSizing: 'border-box' }}>
-            <img
-              src={regencyLogoImg}
-              alt="Regency Tailors Logo"
-              onError={(e) => {
-                const target = e.currentTarget;
-                if (!target.src.endsWith('/regency-tailors-logo.jpg')) {
-                  target.src = '/regency-tailors-logo.jpg';
-                }
-              }}
-              referrerPolicy="no-referrer"
-              className="w-full max-w-[110px] h-auto object-contain select-none"
-              style={{
-                objectFit: 'contain',
-                maxHeight: '78px'
-              }}
-            />
+            {logoFailed ? (
+              <div
+                className="flex flex-col items-center justify-center select-none"
+                style={{ maxHeight: '78px' }}
+                aria-label="Regency Tailors"
+              >
+                <div className="w-11 h-11 rounded-full border-2 border-[#C9A24A] flex items-center justify-center text-[#D4AF5A] font-black text-base" style={{ fontFamily: "'Cinzel', serif" }}>
+                  RT
+                </div>
+                <span className="text-[7px] font-extrabold tracking-[0.18em] text-[#D4AF5A] uppercase mt-1">
+                  EST. REGENCY
+                </span>
+              </div>
+            ) : (
+              <img
+                src={logoSrc}
+                alt="Regency Tailors Logo"
+                onError={handleLogoError}
+                referrerPolicy="no-referrer"
+                className="w-full max-w-[110px] h-auto object-contain select-none"
+                style={{
+                  objectFit: 'contain',
+                  maxHeight: '78px'
+                }}
+              />
+            )}
           </div>
 
           {/* TOP CENTER / RIGHT: REGENCY TAILORS BRAND CENTERPIECE & TAGLINE */}
@@ -555,18 +578,19 @@ export const PrintableRegencyBill: React.FC<PrintableRegencyBillProps> = ({
 
           {/* Center Regency Monogram */}
           <div className="w-6.5 h-6.5 rounded-full border border-[#C9A24A]/80 overflow-hidden flex items-center justify-center bg-[#071426] shadow-xs shrink-0">
-            <img
-              src={regencyLogoImg}
-              alt="Regency Tailors"
-              onError={(e) => {
-                const target = e.currentTarget;
-                if (!target.src.endsWith('/regency-tailors-logo.jpg')) {
-                  target.src = '/regency-tailors-logo.jpg';
-                }
-              }}
-              referrerPolicy="no-referrer"
-              className="w-full h-full object-cover"
-            />
+            {logoFailed ? (
+              <span className="text-[9px] font-black text-[#D4AF5A] tracking-wider" style={{ fontFamily: "'Cinzel', serif" }}>
+                RT
+              </span>
+            ) : (
+              <img
+                src={logoSrc}
+                alt="Regency Tailors"
+                onError={handleLogoError}
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover"
+              />
+            )}
           </div>
 
           {/* Showroom Mobile Right */}

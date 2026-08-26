@@ -21,6 +21,7 @@ import {
   ShoppingBag,
   FileText
 } from 'lucide-react';
+import { peekNextOrderNumber, allocateOrderNumber } from '../../utils/orderNumbering';
 import { 
   Order, 
   GarmentType, 
@@ -62,6 +63,15 @@ interface OrderModalProps {
   onPrintProductionSlip?: (order: Order) => void;
   onPrintBill?: (order: Order) => void;
 }
+
+// Must match App.tsx's STORAGE_KEY — the order-number high-water mark lives there.
+const ORDER_STORAGE_KEY = 'REGENCY_TAILORS_DB_V3';
+
+/** Last 10 digits, so "+91 98765 43210" and "9876543210" are the same client. */
+const normalisePhone = (phone?: string): string => {
+  const digits = String(phone || '').replace(/\D/g, '');
+  return digits.length > 10 ? digits.slice(-10) : digits;
+};
 
 // 5 CLEAN STEPS: 1 Customer -> 2 Order Details -> 3 Garments -> 4 Measurements -> 5 Review
 type OrderStep = 1 | 2 | 3 | 4 | 5;
@@ -312,37 +322,15 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   // Dynamic Sequential Order Number (Order #1, Order #2, Order #3...)
   // Only consumed upon final successful order placement
   // -------------------------------------------------------------
+  // Preview only. The number actually issued is allocated at submit time from
+  // the persisted high-water mark, so a number retired by a delete + empty-trash
+  // (or already taken by another browser tab) can never be handed out twice.
   const displayOrderNumber = useMemo(() => {
     if (initialOrder) {
       return initialOrder.orderNumber || initialOrder.id;
     }
-
-    let maxNum = 0;
-    ordersPool.forEach(o => {
-      const raw = o.orderNumber || o.id || '';
-      // Extract numeric portion
-      const match = raw.match(/\d+/g);
-      if (match) {
-        const fullNum = parseInt(match.join(''), 10);
-        if (!isNaN(fullNum) && fullNum > maxNum && fullNum < 1000000) {
-          maxNum = fullNum;
-        }
-      }
-    });
-
-    trashItems.filter(t => t.itemType === 'Order').forEach(t => {
-      const raw = t.originalData?.orderNumber || t.originalData?.id || '';
-      const match = String(raw).match(/\d+/g);
-      if (match) {
-        const fullNum = parseInt(match.join(''), 10);
-        if (!isNaN(fullNum) && fullNum > maxNum && fullNum < 1000000) {
-          maxNum = fullNum;
-        }
-      }
-    });
-
-    return String(maxNum + 1);
-  }, [ordersPool, trashItems, initialOrder]);
+    return peekNextOrderNumber(ORDER_STORAGE_KEY, ordersPool, trashItems);
+  }, [ordersPool, trashItems, initialOrder, isOpen]);
 
   // Clean Reset Function for New Order
   const resetToCleanNewOrder = () => {
@@ -625,6 +613,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       fabricCode: string;
       styleNotes: string;
       specialInstructions: string;
+      remarks?: string;
     }> = [];
 
     (Object.entries(selectedGarments) as [GarmentKey, {
@@ -634,6 +623,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       fabricCode: string;
       styleNotes: string;
       specialInstructions: string;
+      remarks?: string;
     } | undefined][]).forEach(([key, data]) => {
       if (data && data.selected) {
         const cfg = GARMENT_CONFIGS.find(c => c.key === key);
@@ -819,25 +809,49 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         return;
       }
 
+      // 0. Reserve the order number now, at commit time, from the persisted
+      //    high-water mark. Editing keeps the original number.
+      const issuedOrderNumber = initialOrder
+        ? (initialOrder.orderNumber || initialOrder.id)
+        : allocateOrderNumber(ORDER_STORAGE_KEY, ordersPool, trashItems);
+
       // 1. Resolve Customer
       let finalCustomer: Customer;
       let isNew = false;
 
       if (customerMode === 'new') {
-        isNew = true;
-        finalCustomer = {
-          id: `CUST-${Math.floor(1000 + Math.random() * 9000)}`,
-          name: customerName.trim(),
-          phone: customerPhone.trim(),
-          email: '',
-          city: customerCity.trim() || 'Jalandhar',
-          address: customerAddress.trim() || 'Showroom Client',
-          notes: customerNotes.trim() || '',
-          totalOrders: 1,
-          lifetimeSpend: 0,
-          createdDate: new Date().toISOString().split('T')[0],
-          lastVisitDate: new Date().toISOString().split('T')[0]
-        };
+        const typedPhone = normalisePhone(customerPhone);
+        // A returning client typed in as "new" must not become a second record.
+        const existingByPhone = typedPhone
+          ? customers.find(c => normalisePhone(c.phone) === typedPhone)
+          : undefined;
+
+        if (existingByPhone) {
+          finalCustomer = {
+            ...existingByPhone,
+            name: customerName.trim() || existingByPhone.name,
+            phone: customerPhone.trim() || existingByPhone.phone,
+            city: customerCity.trim() || existingByPhone.city,
+            address: customerAddress.trim() || existingByPhone.address,
+            notes: customerNotes.trim() || existingByPhone.notes,
+            lastVisitDate: new Date().toISOString().split('T')[0]
+          };
+        } else {
+          isNew = true;
+          finalCustomer = {
+            id: `CUST-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`,
+            name: customerName.trim(),
+            phone: customerPhone.trim(),
+            email: '',
+            city: customerCity.trim() || 'Jalandhar',
+            address: customerAddress.trim() || 'Showroom Client',
+            notes: customerNotes.trim() || '',
+            totalOrders: 0,
+            lifetimeSpend: 0,
+            createdDate: new Date().toISOString().split('T')[0],
+            lastVisitDate: new Date().toISOString().split('T')[0]
+          };
+        }
       } else {
         const found = customers.find(c => c.id === selectedCustomerId);
         if (!found) {
@@ -850,14 +864,13 @@ export const OrderModal: React.FC<OrderModalProps> = ({
           city: customerCity.trim() || found.city,
           address: customerAddress.trim() || found.address,
           notes: customerNotes.trim() || found.notes,
-          totalOrders: (found.totalOrders || 0) + 1,
           lastVisitDate: new Date().toISOString().split('T')[0]
         };
       }
 
       // 2. Build Order Items
       const orderItems = activeGarmentsList.map((g, idx) => ({
-        id: `ITEM-${displayOrderNumber}-${idx + 1}`,
+        id: `ITEM-${issuedOrderNumber}-${idx + 1}`,
         garmentType: g.key as GarmentType,
         fabricCode: g.fabricCode || 'FB-REG-150',
         fabricName: g.fabricName || `${g.key} Fabric`,
@@ -900,7 +913,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         customerId: finalCustomer.id,
         customerName: finalCustomer.name,
         customerPhone: finalCustomer.phone,
-        orderNumber: displayOrderNumber,
+        orderNumber: issuedOrderNumber,
         garmentType: activeGarmentsList.map(g => g.key).join(', '),
         selectedGarments: activeGarmentsList.map(g => g.key),
         unit,
@@ -916,12 +929,13 @@ export const OrderModal: React.FC<OrderModalProps> = ({
 
       // 5. Build Final Order Object
       const fullOrder: Order = {
-        id: displayOrderNumber,
-        orderNumber: displayOrderNumber,
+        id: issuedOrderNumber,
+        orderNumber: issuedOrderNumber,
         customerId: finalCustomer.id,
         customerName: finalCustomer.name,
         customerPhone: finalCustomer.phone,
-        customerEmail: '',
+        customerEmail: finalCustomer.email || '',
+        customerAddress: [finalCustomer.address, finalCustomer.city].filter(Boolean).join(', '),
         items: orderItems,
         orderDate,
         trialDate: '',
@@ -953,10 +967,12 @@ export const OrderModal: React.FC<OrderModalProps> = ({
           measurementRecord
         });
       } else if (onSave) {
-        onSave(fullOrder);
-        if (isNew && onAddCustomer) {
+        // Persist the customer first so the order-save handler can find it and
+        // update the correct ledger row.
+        if (onAddCustomer) {
           onAddCustomer(finalCustomer);
         }
+        onSave(fullOrder);
       }
 
       // Show Order Success Screen

@@ -21,6 +21,8 @@ export type NavTab =
   | 'productionslips'
   | 'fittings'
   | 'workers'
+  | 'billings'
+  | 'finances'
   | 'backup'
   | 'trash';
 
@@ -149,13 +151,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   return (
     <>
       {/* Desktop Sidebar */}
-      <aside className="hidden md:block h-screen sticky top-0 z-30">
+      <aside className="hidden md:block h-screen sticky top-0 z-30 print-app-shell">
         {sidebarContent}
       </aside>
 
       {/* Mobile Drawer */}
       {mobileOpen && (
-        <div className="fixed inset-0 z-50 flex md:hidden">
+        <div className="fixed inset-0 z-50 flex md:hidden print-app-shell">
           <div
             className="fixed inset-0 bg-black/60 backdrop-blur-xs"
             onClick={() => setMobileOpen && setMobileOpen(false)}
