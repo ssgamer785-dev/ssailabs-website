@@ -158,7 +158,7 @@ export const ClientPortalModal: React.FC<ClientPortalModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#071426]/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto font-sans">
+    <div className="fixed inset-0 z-50 bg-[#071426]/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto font-sans print-app-shell">
       <div className="bg-[#FAF8F5] border border-[#E0D8CB] text-[#071426] rounded-3xl max-w-4xl w-full p-4 sm:p-7 shadow-2xl relative space-y-5 my-4 max-h-[94vh] flex flex-col overflow-hidden">
         
         {/* Top Floating Close Button */}

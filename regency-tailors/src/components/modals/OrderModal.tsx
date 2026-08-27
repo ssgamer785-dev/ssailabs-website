@@ -19,7 +19,8 @@ import {
   Sparkles, 
   Eye,
   ShoppingBag,
-  FileText
+  FileText,
+  ReceiptText
 } from 'lucide-react';
 import { peekNextOrderNumber, allocateOrderNumber } from '../../utils/orderNumbering';
 import { 
@@ -62,6 +63,8 @@ interface OrderModalProps {
   onViewOrderDetails?: (order: Order) => void;
   onPrintProductionSlip?: (order: Order) => void;
   onPrintBill?: (order: Order) => void;
+  /** Customer-facing bill with no financial information. */
+  onPrintOrderBill?: (order: Order) => void;
 }
 
 // Must match App.tsx's STORAGE_KEY — the order-number high-water mark lives there.
@@ -134,7 +137,8 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   onAddCustomer,
   onViewOrderDetails,
   onPrintProductionSlip,
-  onPrintBill
+  onPrintBill,
+  onPrintOrderBill
 }) => {
   const measurementsPool = allMeasurements && allMeasurements.length > 0 ? allMeasurements : measurements || [];
   const ordersPool = existingOrders && existingOrders.length > 0 ? existingOrders : orders || [];
@@ -985,7 +989,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#F7F3EA] text-[#071426] flex flex-col h-screen w-screen overflow-hidden select-none">
+    <div className="fixed inset-0 z-50 bg-[#F7F3EA] text-[#071426] flex flex-col h-screen w-screen overflow-hidden select-none print-app-shell">
       
       {/* ======================================================== */}
       {/* FULL-SCREEN TOP BAR */}
@@ -1217,6 +1221,17 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                   </button>
                 )}
 
+                {onPrintOrderBill && (
+                  <button
+                    onClick={() => onPrintOrderBill(createdOrderSummary)}
+                    className="w-full sm:w-auto px-6 py-3.5 bg-[#C9A24A] hover:bg-[#B8913B] text-[#071426] font-black text-xs md:text-sm rounded-2xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer uppercase tracking-wider"
+                    title="Customer bill with the amount left blank to write by hand"
+                  >
+                    <ReceiptText className="w-4 h-4 text-[#071426]" />
+                    <span>PRINT BILL</span>
+                  </button>
+                )}
+
                 {onViewOrderDetails && (
                   <button
                     onClick={() => onViewOrderDetails(createdOrderSummary)}
@@ -1229,7 +1244,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
 
                 <button
                   onClick={handleCloseAttempt}
-                  className="w-full sm:w-auto px-6 py-3.5 bg-[#C9A24A] hover:bg-[#B8913B] text-[#071426] font-extrabold text-xs md:text-sm rounded-2xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full sm:w-auto px-6 py-3.5 bg-[#FAF8F5] hover:bg-[#EFE9DF] text-[#071426] font-extrabold text-xs md:text-sm rounded-2xl border border-[#E0D8CB] transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <span>Back to Dashboard</span>
                   <ArrowRight className="w-4 h-4" />

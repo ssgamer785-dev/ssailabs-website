@@ -1,6 +1,7 @@
 import React from 'react';
 import { Scissors } from 'lucide-react';
 import { OrderItem, MeasurementRecord } from '../../types';
+import { garmentMeasurementBlocks, garmentRemarkFor } from '../../utils/garmentMeasurements';
 
 interface ProductionSlipProductCardProps {
   item: OrderItem;
@@ -8,161 +9,19 @@ interface ProductionSlipProductCardProps {
   snapshot: Partial<MeasurementRecord>;
 }
 
-interface MeasurementField {
-  label: string;
-  value?: string | number;
-  colSpan?: boolean;
-}
-
-interface MeasurementCategory {
-  title: string;
-  subLabel?: string;
-  fields: MeasurementField[];
-}
-
 export const ProductionSlipProductCard: React.FC<ProductionSlipProductCardProps> = ({
   item,
   index,
   snapshot
 }) => {
-  const gType = (item.garmentType || '').toLowerCase().trim();
-
-  // Determine which measurement categories apply for this product
-  const categories: MeasurementCategory[] = [];
-
-  const isSuit = gType.includes('suit');
-  const isCoat = gType.includes('coat') || gType.includes('blazer') || gType.includes('jacket') || 
-                 gType.includes('sherwani') || gType.includes('bandhgala') || gType.includes('tuxedo') || 
-                 gType.includes('safari') || isSuit;
-
-  const isPant = gType.includes('pant') || gType.includes('trouser') || gType.includes('slack') || 
-                 gType.includes('chino') || isSuit;
-
-  const isShirt = gType.includes('shirt');
-
-  const isKurta = gType.includes('kurta');
-  const isPajama = gType.includes('pajama') || gType.includes('pyjama') || gType.includes('salwar') || 
-                   gType.includes('churidar') || gType.includes('dhoti') || (isKurta && (gType.includes('pajama') || gType.includes('pyjama') || gType.includes('set')));
-
-  // 1. Coat measurements (Coat / Blazer / Sherwani / Bandhgala / Tuxedo / Suit / Full Coat Pant)
-  if (isCoat && !isKurta && !isShirt) {
-    categories.push({
-      title: 'COAT MEASUREMENTS',
-      subLabel: 'Jacket / Blazer / Suit',
-      fields: [
-        { label: 'Length', value: snapshot.coat?.length ?? snapshot.jacket?.jacketLength },
-        { label: 'Chest', value: snapshot.coat?.chest ?? snapshot.jacket?.chest },
-        { label: 'Stomach', value: snapshot.coat?.stomach ?? snapshot.jacket?.waist },
-        { label: 'H.P. / Hip', value: snapshot.coat?.hip ?? snapshot.jacket?.hip },
-        { label: 'Shoulder', value: snapshot.coat?.shoulder ?? snapshot.jacket?.shoulderWidth },
-        { label: 'Sleeve', value: snapshot.coat?.sleeve ?? snapshot.jacket?.sleeveLength },
-        { label: 'X-Back', value: snapshot.coat?.xBack ?? snapshot.jacket?.crossBack },
-        { label: 'Collar', value: snapshot.coat?.collar },
-        { label: 'Jacket Length', value: snapshot.coat?.jacketLength },
-        { label: 'Waistcoat Length', value: snapshot.coat?.waistcoatLength }
-      ]
-    });
-  }
-
-  // 2. Pant measurements (Trousers / Pant / Suit / Full Coat Pant)
-  if (isPant && !isKurta && !isShirt) {
-    categories.push({
-      title: 'PANT MEASUREMENTS',
-      subLabel: 'Trouser / Slacks',
-      fields: [
-        { label: 'Length', value: snapshot.pant?.length ?? snapshot.trouser?.outseam },
-        { label: 'Waist', value: snapshot.pant?.waist ?? snapshot.trouser?.waist },
-        { label: 'H.P. / Hip', value: snapshot.pant?.hip ?? snapshot.trouser?.hip },
-        { label: 'Thigh', value: snapshot.pant?.thigh ?? snapshot.trouser?.thigh },
-        { label: 'In-Leg', value: snapshot.pant?.inLeg ?? snapshot.trouser?.inseam },
-        { label: 'Bottom', value: snapshot.pant?.bottom ?? snapshot.trouser?.bottomOpening },
-        { label: 'Body', value: snapshot.pant?.body ?? snapshot.trouser?.rise, colSpan: true }
-      ]
-    });
-  }
-
-  // 3. Shirt measurements (Bespoke Shirt / Casual Shirt)
-  if (isShirt) {
-    categories.push({
-      title: 'SHIRT MEASUREMENTS',
-      subLabel: 'Bespoke Dress Shirt',
-      fields: [
-        { label: 'Length', value: snapshot.shirt?.length },
-        { label: 'Chest', value: snapshot.shirt?.chest },
-        { label: 'Stomach', value: snapshot.shirt?.stomach },
-        { label: 'H.P. / Hip', value: snapshot.shirt?.hip },
-        { label: 'Shoulder', value: snapshot.shirt?.shoulder },
-        { label: 'Sleeve', value: snapshot.shirt?.sleeve },
-        { label: 'Collar', value: snapshot.shirt?.collar },
-        { label: 'Cuff', value: snapshot.shirt?.cuff }
-      ]
-    });
-  }
-
-  // 4. Kurta measurements
-  if (isKurta) {
-    categories.push({
-      title: 'KURTA MEASUREMENTS',
-      subLabel: 'Ethnic Kurta',
-      fields: [
-        { label: 'Length', value: snapshot.kurta?.length },
-        { label: 'Chest', value: snapshot.kurta?.chest },
-        { label: 'Stomach', value: snapshot.kurta?.stomach },
-        { label: 'H.P. / Hip', value: snapshot.kurta?.hip },
-        { label: 'Shoulder', value: snapshot.kurta?.shoulder },
-        { label: 'Sleeve', value: snapshot.kurta?.sleeve },
-        { label: 'Bicep', value: snapshot.kurta?.bicep },
-        { label: 'Cuff', value: snapshot.kurta?.cuff },
-        { label: 'Collar', value: snapshot.kurta?.collar }
-      ]
-    });
-  }
-
-  // 5. Pajama measurements
-  if (isPajama) {
-    categories.push({
-      title: 'PAJAMA MEASUREMENTS',
-      subLabel: 'Churidar / Salwar',
-      fields: [
-        { label: 'Length', value: snapshot.pajama?.length },
-        { label: 'Waist', value: snapshot.pajama?.waist },
-        { label: 'H.P. / Hip', value: snapshot.pajama?.hip },
-        { label: 'Thigh', value: snapshot.pajama?.thigh },
-        { label: 'In-Leg', value: snapshot.pajama?.inLeg },
-        { label: 'Bottom', value: snapshot.pajama?.bottom },
-        { label: 'Body', value: snapshot.pajama?.body, colSpan: true }
-      ]
-    });
-  }
-
-  // Fallback if no specific category matched
-  if (categories.length === 0) {
-    categories.push({
-      title: `${(item.garmentType || 'GARMENT').toUpperCase()} MEASUREMENTS`,
-      subLabel: 'Custom Tailoring',
-      fields: [
-        { label: 'Length', value: snapshot.coat?.length ?? snapshot.pant?.length ?? snapshot.shirt?.length },
-        { label: 'Chest / Waist', value: snapshot.coat?.chest ?? snapshot.pant?.waist ?? snapshot.shirt?.chest },
-        { label: 'Stomach / Hip', value: snapshot.coat?.stomach ?? snapshot.pant?.hip ?? snapshot.shirt?.stomach },
-        { label: 'Shoulder / Thigh', value: snapshot.coat?.shoulder ?? snapshot.pant?.thigh ?? snapshot.shirt?.shoulder },
-        { label: 'Sleeve / In-Leg', value: snapshot.coat?.sleeve ?? snapshot.pant?.inLeg ?? snapshot.shirt?.sleeve },
-        { label: 'Collar / Bottom', value: snapshot.shirt?.collar ?? snapshot.pant?.bottom ?? snapshot.coat?.xBack, colSpan: true }
-      ]
-    });
-  }
+  // Shared with the customer bill so both documents read the same rules.
+  const categories = garmentMeasurementBlocks(item, snapshot);
 
   const hasFabric = Boolean(item.fabricName || item.fabricCode);
   const hasStyle = Boolean(item.styleNotes || item.notes);
   const hasSpecial = Boolean(item.specialInstructions);
 
-  const itemRemarks = (
-    item.remarks ||
-    snapshot.garmentRemarks?.[item.garmentType] ||
-    (item.garmentType.toLowerCase().includes('coat') && snapshot.garmentRemarks?.['Coat']) ||
-    (item.garmentType.toLowerCase().includes('shirt') && snapshot.garmentRemarks?.['Shirt']) ||
-    (item.garmentType.toLowerCase().includes('kurta') && snapshot.garmentRemarks?.['Kurta Pajama']) ||
-    ''
-  ).trim();
+  const itemRemarks = garmentRemarkFor(item, snapshot);
 
   return (
     <div className="p-4 sm:p-5 bg-white border-2 border-[#E0D8CB] rounded-2xl space-y-4 shadow-xs production-slip-product-card break-inside-avoid">

@@ -50,7 +50,7 @@ export const ProductionSlipDetailModal: React.FC<ProductionSlipDetailModalProps>
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#071426]/85 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto font-sans">
+    <div className="fixed inset-0 z-50 bg-[#071426]/85 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto font-sans print-app-shell">
       <div className="bg-white rounded-3xl border border-[#E6E1D7] max-w-4xl w-full p-5 sm:p-7 shadow-2xl space-y-6 my-auto relative max-h-[94vh] flex flex-col overflow-hidden text-[#071426]">
         
         {/* HEADER */}

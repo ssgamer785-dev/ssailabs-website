@@ -292,6 +292,59 @@ button:active:not(:disabled) {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 
+  /* ----------------------------------------------------------------
+     Customer order bill: one A4 sheet per .a4-bill-page, flowing onto as
+     many sheets as the order needs. Same measured budgets as the production
+     slip, so the page count the screen reports is the page count that prints.
+     ---------------------------------------------------------------- */
+  .a4-bill-page {
+    width: 100% !important;
+    max-width: 190mm !important;
+    min-height: 265mm !important;
+    height: auto !important;
+    overflow: visible !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+    background-color: #FAF7F0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+  }
+
+  .a4-bill-page:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+
+  .order-bill-garment-card {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* A4 content is ~186mm, below Tailwind's md breakpoint. Pin the printed
+     measurement grid so paper matches the on-screen preview. */
+  .order-bill-measurement-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  }
+
+  #printable-order-bill {
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+    width: 100% !important;
+    max-width: 190mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+
   #printable-production-slip {
     page-break-inside: auto !important;
     break-inside: auto !important;

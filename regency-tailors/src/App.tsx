@@ -45,6 +45,7 @@ import { OrderDetailModal } from './components/modals/OrderDetailModal';
 import { CustomerProfileModal } from './components/modals/CustomerProfileModal';
 import { PrintProductionSlipModal } from './components/modals/PrintProductionSlipModal';
 import { PrintBillModal } from './components/modals/PrintBillModal';
+import { PrintOrderBillModal } from './components/modals/PrintOrderBillModal';
 import { ProductionSlipDetailModal } from './components/modals/ProductionSlipDetailModal';
 import { RegencyBackupPayload, normalizeRestoredPayload } from './utils/backupManager';
 import { convertLegacyDataset } from './data/legacyImport';
@@ -259,6 +260,10 @@ export default function App() {
 
   const [isPrintBillOpen, setIsPrintBillOpen] = useState(false);
   const [selectedOrderForPrintBill, setSelectedOrderForPrintBill] = useState<Order | null>(null);
+
+  // Customer-facing order bill: full order detail, no financial information.
+  const [isOrderBillOpen, setIsOrderBillOpen] = useState(false);
+  const [selectedOrderForBill, setSelectedOrderForBill] = useState<Order | null>(null);
 
   const [isProductionSlipDetailOpen, setIsProductionSlipDetailOpen] = useState(false);
   const [selectedOrderForSlipDetail, setSelectedOrderForSlipDetail] = useState<Order | null>(null);
@@ -693,6 +698,11 @@ export default function App() {
   const handleOpenPrintBill = (order: Order) => {
     setSelectedOrderForPrintBill(order);
     setIsPrintBillOpen(true);
+  };
+
+  const handleOpenOrderBill = (order: Order) => {
+    setSelectedOrderForBill(order);
+    setIsOrderBillOpen(true);
   };
 
   const handleOpenProductionSlipDetail = (order: Order) => {
@@ -1245,6 +1255,7 @@ export default function App() {
         }}
         onPrintProductionSlip={handleOpenPrintProductionSlip}
         onPrintBill={handleOpenPrintBill}
+        onPrintOrderBill={handleOpenOrderBill}
       />
 
       {/* Order Dossier Detail Modal */}
@@ -1264,6 +1275,7 @@ export default function App() {
           setIsOrderModalOpen(true);
         }}
         onPrintProductionSlip={handleOpenPrintProductionSlip}
+        onPrintOrderBill={handleOpenOrderBill}
       />
 
       {/* Customer Profile Modal */}
@@ -1335,6 +1347,17 @@ export default function App() {
           setSelectedOrderForPrintSlip(null);
         }}
         order={selectedOrderForPrintSlip}
+      />
+
+      {/* Customer Order Bill (no financial information) */}
+      <PrintOrderBillModal
+        isOpen={isOrderBillOpen}
+        onClose={() => {
+          setIsOrderBillOpen(false);
+          setSelectedOrderForBill(null);
+        }}
+        order={selectedOrderForBill}
+        profile={profile}
       />
 
       {/* Print Bill Modal */}

@@ -17,6 +17,12 @@ tested where it is actually enforced — `npm run test:db`.
 To check the sign-in gate, run a dev server in Supabase mode and point the gate
 suite at it:
 
+Bill suite:
+
+```bash
+npm run test:bill
+```
+
 ```bash
 VITE_SUPABASE_URL=https://example.supabase.co \
 VITE_SUPABASE_ANON_KEY=not-a-real-key npx vite --port=3001
@@ -44,4 +50,5 @@ CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e
 | Backup round trip | Export → wipe → import restores every record, relationship and the order-number mark |
 | Hostile backups | Empty, truncated, non-JSON, foreign-app, oversized and structurally broken files are rejected or repaired without data loss |
 | Storage failure | Corrupt localStorage and a full quota degrade to a warning, never a blank screen |
+| Customer bill (`order-bill.mjs`) | The blank-amount bill opens from the order flow, carries every garment with its own fabric, remarks and measurements, prints as the number of A4 sheets it reports, renders the real logo, and contains no financial term, value or currency symbol anywhere |
 | Auth gate (`auth-gate.mjs`) | An unauthenticated visitor sees the sign-in screen only: no dashboard, no records, no data written to browser storage, deep links do not bypass it |

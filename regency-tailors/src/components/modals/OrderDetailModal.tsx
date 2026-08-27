@@ -14,7 +14,8 @@ import {
   Sparkles,
   Phone,
   Mail,
-  MapPin
+  MapPin,
+  ReceiptText
 } from 'lucide-react';
 import { Order, OrderStatus, MeasurementRecord, Fitting, Customer } from '../../types';
 import { RegencyLogo } from '../RegencyLogo';
@@ -29,6 +30,8 @@ interface OrderDetailModalProps {
   onUpdateStatus: (orderId: string, newStatus: OrderStatus) => void;
   onEditOrder?: (order: Order) => void;
   onPrintProductionSlip?: (order: Order) => void;
+  /** Customer-facing bill with no financial information. */
+  onPrintOrderBill?: (order: Order) => void;
 }
 
 const PRODUCTION_STAGES: OrderStatus[] = [
@@ -50,7 +53,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   fittings = [],
   onUpdateStatus,
   onEditOrder,
-  onPrintProductionSlip
+  onPrintProductionSlip,
+  onPrintOrderBill
 }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'garments' | 'measurements' | 'fitting'>('overview');
 
@@ -64,7 +68,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const currentStageIndex = PRODUCTION_STAGES.indexOf(order.status);
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#071426]/85 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto font-sans">
+    <div className="fixed inset-0 z-50 bg-[#071426]/85 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto font-sans print-app-shell">
       <div className="bg-white rounded-3xl border border-[#E6E1D7] max-w-4xl w-full p-5 sm:p-7 shadow-2xl space-y-6 my-auto relative max-h-[94vh] flex flex-col overflow-hidden text-[#071426]">
         
         {/* MODAL HEADER */}
@@ -482,6 +486,18 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               >
                 <Scissors className="w-3.5 h-3.5 text-[#C9A24A]" />
                 <span>Download / Print Slip</span>
+              </button>
+            )}
+
+            {onPrintOrderBill && (
+              <button
+                type="button"
+                onClick={() => onPrintOrderBill(order)}
+                className="px-4 py-2.5 bg-[#C9A24A] hover:bg-[#B8913B] text-[#071426] font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                title="Customer bill with the amount left blank to write by hand"
+              >
+                <ReceiptText className="w-3.5 h-3.5 text-[#071426]" />
+                <span>Print Bill</span>
               </button>
             )}
 

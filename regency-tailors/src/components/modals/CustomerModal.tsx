@@ -65,7 +65,7 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 print-app-shell">
       <div className="bg-white rounded-2xl border border-[#E6E1D7] max-w-lg w-full p-6 shadow-2xl space-y-4">
         <div className="flex items-center justify-between border-b border-[#F2ECE1] pb-3">
           <h2 className="text-lg font-bold text-[#071426] brand-font">

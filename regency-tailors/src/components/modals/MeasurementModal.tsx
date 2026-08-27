@@ -563,7 +563,7 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#071426]/85 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-[#071426]/85 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto print-app-shell">
       <div className="bg-[#FAF8F5] rounded-2xl border border-[#E6E1D7] max-w-6xl w-full p-4 sm:p-6 shadow-2xl space-y-4 my-4 max-h-[94vh] flex flex-col font-sans">
         
         {/* ======================================================== */}

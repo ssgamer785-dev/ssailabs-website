@@ -19,6 +19,7 @@ npm run dev        # http://localhost:3000
 | `npm run lint` | TypeScript type check (`tsc --noEmit`) |
 | `npm test` | Unit tests for the business logic (Vitest) |
 | `npm run test:e2e` | Browser end-to-end suite — needs `npm run dev:local` running |
+| `npm run test:bill` | Customer-bill suite — needs `npm run dev:local` running |
 | `npm run test:db` | Schema, RLS and restore tests against a throwaway PostgreSQL |
 
 ## Where the data lives
@@ -47,6 +48,19 @@ continues from the correct next number.
 
 On the browser-storage development path the same guarantee is provided by a
 monotonic high-water mark in `src/utils/orderNumbering.ts`.
+
+## Documents
+
+Three separate documents, deliberately kept apart:
+
+| Document | Audience | Money shown |
+| --- | --- | --- |
+| **Customer Order Bill** | The customer | **None.** Full order, garment and measurement detail; the amount is written on the printed sheet by hand |
+| **Production Slip** | The workshop | Not applicable — production detail only |
+| **Bill / Receipt** | Admin | Figures, as before |
+
+The Customer Order Bill opens from **Print Bill** on the order confirmation
+screen and from the order detail view.
 
 ## Printing
 
