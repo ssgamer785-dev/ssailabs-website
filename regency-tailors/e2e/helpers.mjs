@@ -26,7 +26,7 @@ export async function readDb(page) {
 }
 
 // Runs the full New Order wizard. garments: array of GARMENT_CONFIGS labels e.g. 'FULL COAT PANT'
-export async function createOrder(page, { name, phone, city, address, garments = ['FULL COAT PANT'], remarks = {}, measurements = {} }) {
+export async function createOrder(page, { name, phone, city, address, garments = ['FULL COAT PANT'], remarks = {}, fabrics = {}, measurements = {} }) {
   await page.getByRole('button', { name: /Dashboard Hub/i }).click().catch(() => {});
   await page.waitForTimeout(250);
   await page.getByRole('button', { name: /New Order/i }).first().click();
@@ -46,6 +46,11 @@ export async function createOrder(page, { name, phone, city, address, garments =
     const card = page.locator(`h3:text-is("${g}")`).locator('xpath=ancestor::div[contains(@class,"rounded-3xl")][1]');
     await card.getByRole('button', { name: /Select/ }).first().click();
     await page.waitForTimeout(250);
+    // The only per-garment field the wizard actually exposes today is the
+    // "Fabric Details / Style" text box, which writes to `item.fabricName`.
+    if (fabrics[g]) {
+      await card.getByPlaceholder('Fabric description...').fill(fabrics[g]);
+    }
   }
   await page.getByRole('button', { name: /^Continue$/ }).click();
   await page.waitForTimeout(350);

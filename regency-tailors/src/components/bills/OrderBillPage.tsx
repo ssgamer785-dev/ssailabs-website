@@ -2,7 +2,7 @@ import React from 'react';
 import { MapPin, Phone, User, FileText } from 'lucide-react';
 import { Order, MeasurementRecord, ShowroomProfile } from '../../types';
 import { OrderBillPageData } from '../../utils/orderBillPagination';
-import { OrderBillGarmentCard } from './OrderBillGarmentCard';
+import { OrderBillGarmentRow } from './OrderBillGarmentRow';
 import regencyLogoImg from '../../assets/images/regency-tailors-logo.jpg';
 import { SHOWROOM_ADDRESS_LINE1, SHOWROOM_ADDRESS_LINE2, SHOWROOM_PHONE } from './PrintableRegencyBill';
 
@@ -14,14 +14,26 @@ export interface OrderBillPageProps {
   profile?: ShowroomProfile | null;
 }
 
+const TABLE_COLUMNS: { label: string; width: string; align?: 'left' | 'center' }[] = [
+  { label: 'S.NO.', width: '5%', align: 'center' },
+  { label: 'PRODUCT / GARMENT', width: '14%' },
+  { label: 'DESCRIPTION / STITCHING DETAILS', width: '23%' },
+  { label: 'FABRIC', width: '15%' },
+  { label: 'QTY.', width: '6%', align: 'center' },
+  { label: 'REMARKS', width: '22%' },
+  { label: 'AMOUNT', width: '15%', align: 'center' }
+];
+
 /**
  * One A4 sheet of the customer order bill.
  *
- * Deliberately carries no financial information of any kind: no price, rate,
- * amount, subtotal, discount, advance, balance, payment or currency, and no
- * empty columns where they used to be. The amount is written by hand on the
- * printed sheet, so the layout is built around order and garment detail
- * instead of a money table.
+ * Two rules this document holds to everywhere, not just in the obvious spot:
+ *   - No measurement of any kind appears here. That is the Production Slip's
+ *     job; this component never imports the measurement-table logic at all.
+ *   - No financial figure is ever computed or pre-filled. A Payment Details
+ *     section exists, per the showroom's request, entirely as blank lines for
+ *     the owner to fill in by hand — never populated from the order's stored
+ *     totals, which is why `order.totalAmount` etc. are never read here.
  */
 export const OrderBillPage: React.FC<OrderBillPageProps> = ({ id, pageData, order, snapshot, profile }) => {
   const { pageIndex, totalPages, isFirstPage, isLastPage, items, showClosing } = pageData;
@@ -39,14 +51,15 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({ id, pageData, orde
   };
 
   const addressLine = [order.customerAddress].filter(Boolean).join(', ').trim();
-  // Showroom settings supply these in production. The confirmed Bootan Mandi
-  // details are the fallback so a customer-facing bill never prints a dash
-  // where the shop's own address and number belong.
+  // Showroom settings (profile) are the source of truth. The confirmed Bootan
+  // Mandi details — the same constants the existing admin bill already uses —
+  // are only a fallback for when settings have not been filled in yet, so this
+  // customer-facing document never prints a dash where the shop's own address
+  // belongs.
   const showroomAddress =
     (profile?.address || '').trim() || `${SHOWROOM_ADDRESS_LINE1} ${SHOWROOM_ADDRESS_LINE2}`;
   const showroomPhone = (profile?.phone || '').trim() || SHOWROOM_PHONE;
   const orderNotes = (order.specialInstructions || order.notes || '').trim();
-  const productionNotes = (order.productionNotes || '').trim();
   const garmentCount = (order.items || []).reduce((sum, i) => sum + (i.quantity || 1), 0);
 
   const metaRow = (label: string, value: string) => (
@@ -59,6 +72,15 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({ id, pageData, orde
     </>
   );
 
+  const paymentLine = (label: string) => (
+    <div className="flex items-baseline gap-2">
+      <span className="text-[9.5px] font-black text-[#071426] uppercase tracking-wide shrink-0" style={{ whiteSpace: 'nowrap' }}>
+        {label}
+      </span>
+      <span className="flex-1 border-b border-[#8C7E6A] h-4" />
+    </div>
+  );
+
   return (
     <div
       id={id}
@@ -69,56 +91,65 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({ id, pageData, orde
       <div className="flex-1">
         {isFirstPage ? (
           <>
-            {/* ============ BRAND HEADER ============ */}
-            <div className="bg-[#071426] text-white px-5 pt-4 pb-3.5">
-              <div style={{ display: 'grid', gridTemplateColumns: '86px 1fr', alignItems: 'center', columnGap: '14px' }}>
+            {/* ============ PREMIUM BRAND HEADER ============ */}
+            <div className="bg-[#071426] text-white px-6 pt-6 pb-4 text-center relative">
+              <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-[#8A6822] via-[#F0D48A] to-[#8A6822]" />
+
+              {/*
+                Sized by WIDTH, not height: a shared print rule elsewhere
+                releases every descendant of the print modal from a fixed
+                `height` (it exists to un-clip scroll containers), which would
+                override a height-based constraint here and blow the logo up
+                to the full column width. Constraining width sidesteps that
+                rule entirely rather than changing it — a print-CSS change
+                broad enough to fix here would also touch the Production Slip
+                and the existing admin bill.
+              */}
+              <div className="mx-auto" style={{ width: '148px' }}>
                 <img
                   src={regencyLogoImg}
                   alt="Regency Tailors"
-                  className="w-full h-auto object-contain select-none"
-                  style={{ maxHeight: '86px', objectFit: 'contain', borderRadius: '6px' }}
+                  className="w-full h-auto object-contain select-none block"
                 />
-
-                <div className="flex flex-col items-center text-center">
-                  <svg width="130" height="12" viewBox="0 0 160 16" fill="#C9A24A" className="opacity-90">
-                    <path d="M80 0 C88 8, 110 10, 160 10 C125 10, 115 16, 80 16 C45 16, 35 10, 0 10 C50 10, 72 8, 80 0 Z" />
-                  </svg>
-                  <h1
-                    className="text-2xl font-black tracking-[0.14em] text-[#D4AF5A] uppercase m-0"
-                    style={{ fontFamily: "'Cinzel', 'Playfair Display', serif", lineHeight: 1.15 }}
-                  >
-                    REGENCY TAILORS
-                  </h1>
-                  <svg width="130" height="12" viewBox="0 0 160 16" fill="#C9A24A" className="opacity-90 rotate-180">
-                    <path d="M80 0 C88 8, 110 10, 160 10 C125 10, 115 16, 80 16 C45 16, 35 10, 0 10 C50 10, 72 8, 80 0 Z" />
-                  </svg>
-                  <div className="text-[8.5px] font-bold text-[#E6D5B8] uppercase tracking-[0.22em] mt-1">
-                    PREMIUM TAILORING &nbsp;•&nbsp; PERFECT FIT &nbsp;•&nbsp; TIMELESS STYLE
-                  </div>
-                </div>
               </div>
 
-              <div className="w-full h-[1.5px] bg-gradient-to-r from-transparent via-[#C9A24A]/70 to-transparent my-2.5" />
+              <svg width="170" height="14" viewBox="0 0 200 18" fill="#C9A24A" className="opacity-90 mx-auto mt-2.5">
+                <path d="M100 0 C110 9, 138 12, 200 12 C155 12, 143 18, 100 18 C57 18, 45 12, 0 12 C62 12, 90 9, 100 0 Z" />
+              </svg>
 
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <MapPin className="w-3.5 h-3.5 text-[#C9A24A] shrink-0" />
-                  <span className="text-[9.5px] font-bold text-[#D8CFBF] uppercase leading-tight">
-                    {showroomAddress}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <Phone className="w-3.5 h-3.5 text-[#C9A24A]" />
-                  <span className="text-[10px] font-bold text-white tracking-wider">{showroomPhone}</span>
-                </div>
+              <h1
+                className="font-black tracking-[0.16em] text-[#D4AF5A] uppercase m-0"
+                style={{ fontFamily: "'Cinzel', 'Playfair Display', serif", lineHeight: 1.15, fontSize: '34px' }}
+              >
+                REGENCY TAILORS
+              </h1>
+
+              <svg width="170" height="14" viewBox="0 0 200 18" fill="#C9A24A" className="opacity-90 mx-auto mt-1 rotate-180">
+                <path d="M100 0 C110 9, 138 12, 200 12 C155 12, 143 18, 100 18 C57 18, 45 12, 0 12 C62 12, 90 9, 100 0 Z" />
+              </svg>
+
+              <div className="text-[10px] font-bold text-[#E6D5B8] uppercase tracking-[0.3em] mt-1.5">
+                PREMIUM TAILORING &nbsp;•&nbsp; PERFECT FIT &nbsp;•&nbsp; TIMELESS STYLE
+              </div>
+
+              <div className="w-full h-[1.5px] bg-gradient-to-r from-transparent via-[#C9A24A]/70 to-transparent my-3" />
+
+              <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                <MapPin className="w-3.5 h-3.5 text-[#C9A24A] shrink-0" />
+                <span className="text-[10.5px] font-bold text-[#D8CFBF] uppercase tracking-wide">
+                  {showroomAddress}
+                </span>
+                <span className="text-[#C9A24A] mx-1">•</span>
+                <Phone className="w-3.5 h-3.5 text-[#C9A24A] shrink-0" />
+                <span className="text-[11px] font-bold text-white tracking-wider">{showroomPhone}</span>
               </div>
             </div>
 
             {/* ============ ORDER + CUSTOMER ============ */}
             <div className="px-5 pt-3.5 pb-2">
               <div className="text-center mb-2.5">
-                <span className="inline-block text-[10px] font-black tracking-[0.28em] text-[#8C7E6A] uppercase border-y border-[#DFD7C7] py-1 px-6">
-                  Customer Order Bill
+                <span className="inline-block text-[11px] font-black tracking-[0.3em] text-[#8C7E6A] uppercase border-y border-[#DFD7C7] py-1.5 px-8">
+                  Customer Bill
                 </span>
               </div>
 
@@ -176,7 +207,8 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({ id, pageData, orde
           </>
         ) : (
           /* ============ CONTINUATION HEADER ============ */
-          <div className="bg-[#071426] text-white px-5 py-2.5 flex items-center justify-between gap-3">
+          <div className="bg-[#071426] text-white px-5 py-2.5 flex items-center justify-between gap-3 relative">
+            <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-[#8A6822] via-[#F0D48A] to-[#8A6822]" />
             <div className="flex items-center gap-2.5 min-w-0">
               <img
                 src={regencyLogoImg}
@@ -203,12 +235,12 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({ id, pageData, orde
           </div>
         )}
 
-        {/* ============ GARMENTS ============ */}
-        <div className="px-5 py-2.5 space-y-2.5">
+        {/* ============ PRODUCT / GARMENT TABLE (no measurements, no computed amounts) ============ */}
+        <div className="px-5 py-2.5">
           {isFirstPage && (
-            <div className="flex items-center justify-between border-b border-[#DFD7C7] pb-1">
+            <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] font-black text-[#071426] uppercase tracking-wider">
-                Garments Ordered
+                Product / Garment Details
               </span>
               <span className="text-[9px] font-bold text-[#8C7E6A] uppercase tracking-wider">
                 {garmentCount} {garmentCount === 1 ? 'Piece' : 'Pieces'}
@@ -216,45 +248,81 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({ id, pageData, orde
             </div>
           )}
 
-          {items.map(({ item, originalIndex }) => (
-            <OrderBillGarmentCard
-              key={item.id || originalIndex}
-              item={item}
-              index={originalIndex}
-              snapshot={snapshot}
-            />
-          ))}
+          <table
+            className="order-bill-table w-full border-collapse rounded-lg overflow-hidden"
+            style={{ tableLayout: 'fixed', width: '100%' }}
+          >
+            <colgroup>
+              {TABLE_COLUMNS.map((c, i) => (
+                <col key={i} style={{ width: c.width }} />
+              ))}
+            </colgroup>
+            <thead>
+              <tr className="bg-[#071426] text-[#D4AF5A]">
+                {TABLE_COLUMNS.map((c, i) => (
+                  <th
+                    key={i}
+                    className="border border-[#071426] px-2 py-1.5 font-black uppercase tracking-wider"
+                    style={{ fontSize: '8.5px', textAlign: c.align === 'center' ? 'center' : 'left' }}
+                  >
+                    {c.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {items.map(({ item, originalIndex }) => (
+                <OrderBillGarmentRow
+                  key={item.id || originalIndex}
+                  item={item}
+                  index={originalIndex}
+                  snapshot={snapshot}
+                />
+              ))}
+            </tbody>
+          </table>
         </div>
 
-        {/* ============ CLOSING ============ */}
+        {/* ============ CLOSING: notes, payment lines, terms, signatures, disclaimer ============ */}
         {isLastPage && showClosing && (
           <div className="px-5 pb-2 space-y-2.5 break-inside-avoid">
-            {(orderNotes || productionNotes) && (
-              <div className="bg-white border border-[#DFD7C7] rounded-xl px-3 py-2 space-y-1.5">
-                {orderNotes && (
-                  <div>
-                    <span className="block text-[8.5px] font-black text-[#8C7E6A] uppercase tracking-wider">
-                      Order Notes
-                    </span>
-                    <p className="text-[10.5px] font-semibold text-[#071426] leading-relaxed m-0 whitespace-pre-wrap">
-                      {orderNotes}
-                    </p>
-                  </div>
-                )}
-                {productionNotes && (
-                  <div>
-                    <span className="block text-[8.5px] font-black text-[#8C7E6A] uppercase tracking-wider">
-                      Tailoring Notes
-                    </span>
-                    <p className="text-[10.5px] font-semibold text-[#071426] leading-relaxed m-0 whitespace-pre-wrap">
-                      {productionNotes}
-                    </p>
-                  </div>
-                )}
+            {orderNotes && (
+              <div className="bg-white border border-[#DFD7C7] rounded-xl px-3 py-2">
+                <span className="block text-[8.5px] font-black text-[#8C7E6A] uppercase tracking-wider">
+                  Order Notes
+                </span>
+                <p className="text-[10.5px] font-semibold text-[#071426] leading-relaxed m-0 whitespace-pre-wrap">
+                  {orderNotes}
+                </p>
               </div>
             )}
 
-            <div className="text-center py-1">
+            {/* PAYMENT DETAILS — blank lines only. Never populated, never calculated. */}
+            <div className="bg-white border-2 border-[#C9A24A] rounded-xl px-4 py-3">
+              <h4 className="text-[10.5px] font-black text-[#071426] uppercase tracking-[0.2em] m-0 mb-2 pb-1.5 border-b border-[#E8E0D2]">
+                Payment Details
+              </h4>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: '20px', rowGap: '9px' }}>
+                {paymentLine('Total Amount')}
+                {paymentLine('Advance Paid')}
+                {paymentLine('Balance')}
+                {paymentLine('Payment Mode')}
+              </div>
+              <div className="mt-2.5">{paymentLine('Payment Date')}</div>
+            </div>
+
+            {/* TERMS & CONDITIONS — short, factual, nothing invented */}
+            <div className="bg-[#FAF7F0] border border-[#DFD7C7] rounded-xl px-3.5 py-2">
+              <span className="block text-[8.5px] font-black text-[#8C7E6A] uppercase tracking-wider mb-1">
+                Terms &amp; Conditions
+              </span>
+              <ul className="text-[9.5px] font-semibold text-[#4A5568] leading-relaxed m-0 pl-3.5 space-y-0.5" style={{ listStyleType: 'disc' }}>
+                <li>Please retain this bill and present it at the time of order collection.</li>
+                <li>Kindly verify all garment details at the time of delivery.</li>
+              </ul>
+            </div>
+
+            <div className="text-center py-0.5">
               <div className="flex items-center justify-center gap-2.5">
                 <div className="h-[1px] bg-gradient-to-r from-transparent to-[#C9A24A] flex-1 max-w-[80px]" />
                 <h4 className="text-[11px] font-black text-[#071426] uppercase tracking-widest m-0">THANK YOU!</h4>
@@ -265,6 +333,7 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({ id, pageData, orde
               </p>
             </div>
 
+            {/* SIGNATURES */}
             <div
               className="bg-white border border-[#DFD7C7] rounded-xl px-3 py-3"
               style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: '24px' }}
@@ -281,6 +350,13 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({ id, pageData, orde
                   For Regency Tailors
                 </span>
               </div>
+            </div>
+
+            {/* REQUIRED FINAL DISCLAIMER — the closing message of the whole document */}
+            <div className="bg-[#071426] rounded-xl px-4 py-2.5 text-center border-2 border-[#C9A24A]">
+              <p className="text-[11px] font-black text-[#F0D48A] uppercase tracking-wide m-0">
+                We are not responsible for clothes after 2 months.
+              </p>
             </div>
           </div>
         )}

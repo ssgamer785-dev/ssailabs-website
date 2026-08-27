@@ -125,7 +125,7 @@ export const PrintOrderBillModal: React.FC<PrintOrderBillModalProps> = ({
         </div>
 
         <div className="no-print shrink-0 px-3 py-2 bg-[#FAF8F5] border border-[#E0D8CB] rounded-xl text-[11px] font-semibold text-[#6E6454]">
-          This bill carries the order and measurement detail only. Write the agreed amount on the printed sheet.
+          This bill carries customer, order and garment detail — no measurements. Write the amount on the printed sheet.
         </div>
 
         {exportError && (

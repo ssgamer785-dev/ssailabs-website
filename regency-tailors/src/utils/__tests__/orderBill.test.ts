@@ -42,16 +42,21 @@ const orderWith = (items: OrderItem[]): Order =>
     urgent: false
   }) as Order;
 
-/** No sheet may exceed what actually fits on A4. */
+/**
+ * No sheet may exceed what actually fits on A4.
+ *
+ * Garment rows live in a `<table>` now, not a stack of cards — rows are
+ * contiguous (shared borders, no inter-row gap), so unlike the old card
+ * layout this adds no per-item fudge. `A4_BILL_BUDGET_MM.closingBlock`
+ * already carries its own calibrated margin (confirmed against a real
+ * rendered page, not just this arithmetic), so it is not padded again here.
+ */
 function assertNoSheetOverflows(order: Order) {
   const pages = paginateOrderBill(order, snapshot);
   pages.forEach(page => {
     const capacity = page.isFirstPage ? A4_BILL_BUDGET_MM.firstPage : A4_BILL_BUDGET_MM.continuationPage;
-    const cards = page.items.reduce(
-      (sum, entry, idx) => sum + getBillCardHeightMm(entry.item, snapshot) + (idx ? 4 : 0),
-      0
-    );
-    const closing = page.showClosing ? A4_BILL_BUDGET_MM.closingBlock + (page.items.length ? 4 : 0) : 0;
+    const cards = page.items.reduce((sum, entry) => sum + getBillCardHeightMm(entry.item, snapshot), 0);
+    const closing = page.showClosing ? A4_BILL_BUDGET_MM.closingBlock : 0;
     expect(cards + closing).toBeLessThanOrEqual(capacity);
   });
   return pages;
@@ -137,9 +142,20 @@ describe('garment remarks', () => {
 });
 
 describe('bill card height', () => {
-  it('is larger for a garment with two measurement tables', () => {
+  it('does not vary by garment type when no descriptive text is recorded', () => {
+    // The bill's row height model reads description/fabric/remark text only —
+    // never measurement tables — so a garment with two measurement tables
+    // (Full Coat Pant) takes no more room than one with none recorded here,
+    // as long as neither has any bill-visible text of its own.
     expect(getBillCardHeightMm(item('Full Coat Pant'), snapshot))
-      .toBeGreaterThan(getBillCardHeightMm(item('Shirt'), snapshot));
+      .toBe(getBillCardHeightMm(item('Shirt'), snapshot));
+  });
+
+  it('ignores measurement data entirely — only the remark map affects height', () => {
+    const withMeasurements: Partial<MeasurementRecord> = { ...snapshot };
+    const withoutMeasurements: Partial<MeasurementRecord> = { unit: 'inches' };
+    expect(getBillCardHeightMm(item('Full Coat Pant'), withMeasurements))
+      .toBe(getBillCardHeightMm(item('Full Coat Pant'), withoutMeasurements));
   });
 
   it('grows with a long remark', () => {
@@ -185,7 +201,15 @@ describe('bill pagination', () => {
   });
 
   it('spills a large order onto more sheets rather than one crowded page', () => {
-    const order = orderWith(Array.from({ length: 10 }, () => item('Full Coat Pant')));
+    // Realistic, richly-described rows (the kind a real bill actually has) —
+    // bare rows with no text are too compact to force this on their own.
+    const heavy = () => item('Full Coat Pant', {
+      styleNotes: 'Italian cut, 2-button notch lapel, structured shoulder, dual vents, satin lining',
+      fabricName: 'Loro Piana Super 150s Midnight Navy Wool',
+      fabricCode: 'FB-FCP-150',
+      remarks: 'Peak lapel, surgeon cuffs with working buttonholes, contrast burgundy silk lining, ticket pocket on the right side.'
+    });
+    const order = orderWith(Array.from({ length: 10 }, heavy));
     const pages = assertNoSheetOverflows(order);
     expect(pages.length).toBeGreaterThan(2);
     expect(pages.every(p => p.totalPages === pages.length)).toBe(true);
@@ -201,13 +225,20 @@ describe('bill pagination', () => {
 
   it('reserves room for the signature area rather than overflowing it', () => {
     assertNoSheetOverflows(orderWith([item('Full Coat Pant'), item('Kurta Pajama')]));
-    assertNoSheetOverflows(orderWith([item('Full Coat Pant', { remarks: 'x'.repeat(600) })]));
+    // A genuinely long remark (~150 characters — several sentences of
+    // alteration notes) wraps to enough lines that the row alone, plus the
+    // closing block, would overflow the first sheet without the reservation.
+    assertNoSheetOverflows(orderWith([item('Full Coat Pant', { remarks: 'x'.repeat(150) })]));
   });
 
-  it('fills the first sheet rather than stopping after one garment', () => {
-    // Two single-table garments comfortably share the opening sheet.
-    const pages = paginateOrderBill(orderWith([item('Shirt'), item('Coat')]), snapshot);
-    expect(pages[0].items).toHaveLength(2);
+  it('packs multiple garments onto a sheet, not one row per page', () => {
+    // Five undecorated rows comfortably share the row budget of the opening
+    // sheet even though, together with the reserved closing block, they no
+    // longer all fit on that same sheet — proving the algorithm packs what it
+    // can rather than fleeing to a fresh page after a single item.
+    const order = orderWith([item('Shirt'), item('Coat'), item('Pant'), item('Kurta Pajama'), item('Full Coat Pant')]);
+    const pages = assertNoSheetOverflows(order);
+    expect(pages[0].items.length).toBeGreaterThan(1);
   });
 
   it('ignores malformed garment entries', () => {

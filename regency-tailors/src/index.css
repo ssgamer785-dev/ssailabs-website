@@ -324,15 +324,17 @@ button:active:not(:disabled) {
     break-after: auto !important;
   }
 
-  .order-bill-garment-card {
+  /* The garment table uses fixed <colgroup> widths rather than any
+     breakpoint-dependent utility class, so — unlike the measurement grids
+     elsewhere in the app — it needs no print override to match the screen
+     preview. A row is still kept intact across a page break. */
+  .order-bill-row {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }
 
-  /* A4 content is ~186mm, below Tailwind's md breakpoint. Pin the printed
-     measurement grid so paper matches the on-screen preview. */
-  .order-bill-measurement-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  .order-bill-table thead {
+    display: table-header-group;
   }
 
   #printable-order-bill {
