@@ -141,6 +141,22 @@ button:active:not(:disabled) {
   margin-right: auto;
 }
 
+/* The production slip previews at true printed size for the same reason the
+   bill does: the page budget is measured in millimetres, so the preview has
+   to wrap its text exactly as the paper will. */
+.a4-production-page {
+  width: 186mm;
+  height: 277mm;
+  box-sizing: border-box;
+  background: #ffffff;
+  color: #000000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: none;
+  padding: 0;
+}
+
 /* ======================================================== */
 /* DEDICATED A4 PRINT LAYOUT FOR REGENCY TAILOR */
 /* ======================================================== */
@@ -283,17 +299,30 @@ button:active:not(:disabled) {
     break-inside: avoid !important;
   }
 
-  /* Dedicated A4 Multi-Page Production Slip Layout */
+  /* ----------------------------------------------------------------
+     Workshop production slip.
+
+     Pinned to the true printable content box — A4 (210x297mm) less the
+     @page margins above — rather than the 190mm it used before, which was
+     wider than the page could actually take. Sized as a fixed box so the
+     measured page budget and the printed sheet agree.
+
+     The height must be restated here: `.print-document-root *` above forces
+     `height: auto` on every descendant to release scroll containers, and this
+     rule wins only by coming later in the cascade.
+     ---------------------------------------------------------------- */
   .a4-production-page {
-    width: 100% !important;
-    max-width: 190mm !important;
-    min-height: 265mm !important;
-    height: auto !important;
-    overflow: visible !important;
+    width: 186mm !important;
+    max-width: 186mm !important;
+    min-height: 0 !important;
+    height: 277mm !important;
+    max-height: 277mm !important;
+    overflow: hidden !important;
     margin: 0 auto !important;
     padding: 0 !important;
     box-sizing: border-box !important;
     background-color: #ffffff !important;
+    color: #000000 !important;
     border: none !important;
     box-shadow: none !important;
     page-break-inside: avoid !important;
@@ -302,7 +331,6 @@ button:active:not(:disabled) {
     break-after: page !important;
     display: flex !important;
     flex-direction: column !important;
-    justify-content: space-between !important;
   }
 
   .a4-production-page:last-child {
@@ -310,22 +338,21 @@ button:active:not(:disabled) {
     break-after: auto !important;
   }
 
+  /* A garment's details and its measurements must never be split down the
+     middle: half a measurement table on the next sheet is how a cutter reads
+     the wrong number. */
   .production-slip-product-card {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }
 
-  /* A4 paper is ~186mm of content, below Tailwind's `md` breakpoint, so the
-     measurement grid used to collapse from 5 columns to 3 on paper only. That
-     made every garment card ~30mm taller than the on-screen preview and pushed
-     the slip onto extra sheets. Pin the printed layout to the approved
-     desktop layout so preview and paper match. */
-  .production-measurement-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
-  }
-
+  /* The measurement grid is a fixed-layout <table> now rather than a
+     breakpoint-driven CSS grid, so it needs no column override to match the
+     on-screen preview — a table's column count cannot collapse at print
+     width the way the old `md:grid-cols-5` silently did. The order meta strip
+     is still a grid and keeps its explicit column count. */
   .production-slip-detail-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
   }
 
   /* ----------------------------------------------------------------

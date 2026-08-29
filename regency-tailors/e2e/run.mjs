@@ -228,7 +228,47 @@ await scenario('Production slip prints as many A4 sheets as it reports', async (
   const printedText = await page.locator('#printable-production-slip').innerText();
   report.check('every garment appears on the printed slip',
     ['FULL COAT PANT', 'COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'].every(g => printedText.includes(g)));
-  report.check('the sign-off block reaches the paper', printedText.includes('Master Cutter Sign-Off'));
+
+  // The slip is a cutting instruction, not a contract: no signature blocks,
+  // and no money of any kind.
+  report.check('the slip carries no signature block',
+    !/Sign-?Off|Signature/i.test(printedText));
+  report.check('the slip carries no financial information',
+    !/\b(Amount|Total|Advance|Balance|Payment|Price|Subtotal|Discount)\b/i.test(printedText) &&
+    !printedText.includes('\u20B9'));
+
+  // Every garment keeps its position number from the order.
+  report.check('every garment is numbered #1..#5 in order',
+    ['#1', '#2', '#3', '#4', '#5'].every(n => printedText.includes(n)));
+
+  // Black and white only — a workshop prints this on a mono laser.
+  const nonMono = await page.evaluate(() => {
+    const isMono = c => {
+      const m = c.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+      if (!m) return true;
+      const v = [+m[1], +m[2], +m[3]];
+      return Math.max(...v) - Math.min(...v) <= 6;
+    };
+    const bad = [];
+    document.querySelectorAll('.a4-production-page, .a4-production-page *').forEach(el => {
+      const cs = getComputedStyle(el);
+      for (const prop of ['color', 'backgroundColor', 'borderTopColor', 'borderBottomColor',
+                          'borderLeftColor', 'borderRightColor']) {
+        const val = cs[prop];
+        if (val && val !== 'rgba(0, 0, 0, 0)' && !isMono(val)) bad.push(`${prop}=${val}`);
+      }
+    });
+    return [...new Set(bad)];
+  });
+  report.check('the slip renders in pure black and white', nonMono.length === 0, nonMono.slice(0, 3).join(' | '));
+
+  // Nothing may spill past the bottom of a sheet.
+  const slipOverflow = await page.evaluate(() =>
+    [...document.querySelectorAll('.a4-production-page')].map(sheet => {
+      const flow = sheet.firstElementChild;
+      return flow.scrollHeight - flow.clientHeight;
+    }));
+  report.check('no production slip sheet overflows', slipOverflow.every(o => o <= 0), slipOverflow.join(','));
 });
 
 /* ------------------------------------------------------------------ *

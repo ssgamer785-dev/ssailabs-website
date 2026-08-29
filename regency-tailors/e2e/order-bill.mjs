@@ -621,7 +621,7 @@ await scenario('Production slip and order editing are unaffected', async ({ page
   report.check('the slip still shows its garments', /FULL COAT PANT/i.test(slipText) && /SHIRT/i.test(slipText));
   report.check('the slip still shows measurements — this document is the one that must', /COAT MEASUREMENTS/.test(slipText));
   report.check('the slip still shows per-garment remarks', slipText.includes('Slip remark intact'));
-  report.check('the slip still carries its workshop sign-off', /Master Cutter Sign-Off/i.test(slipText));
+  report.check('the slip carries no signature block', !/Sign-?Off|Signature/i.test(slipText));
 
   await page.locator('button[title="Close"]').first().click().catch(() => {});
   await page.waitForTimeout(500);

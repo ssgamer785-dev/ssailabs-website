@@ -1,4 +1,5 @@
-import { Order, OrderItem } from '../types';
+import { Order, OrderItem, MeasurementRecord } from '../types';
+import { garmentMeasurementBlocks } from './garmentMeasurements';
 
 export interface ProductionSlipPageData {
   pageIndex: number; // 0-based
@@ -8,58 +9,87 @@ export interface ProductionSlipPageData {
   items: { item: OrderItem; originalIndex: number }[];
   showSpecialInstructions: boolean;
   showProductionNotes: boolean;
-  showArtisanSignOff: boolean;
 }
 
 /* ---------------------------------------------------------------------------
  * A4 page budget, in millimetres.
  *
- * These figures were measured from the rendered slip under print media at A4
- * width (see `e2e/production-slip-print.mjs`), not estimated. The previous
- * abstract "spatial weight" units under-counted a garment card by roughly a
- * third, so a page the app labelled "Page 2 of 4" was ~295mm tall and spilled
- * onto a sixth sheet with the overflow cut in half.
+ * Every figure below was measured from the rendered slip under print media at
+ * the true A4 content width (186mm), not estimated.
+ *
+ * The height of a garment is derived from what it actually contains — how many
+ * detail lines it has, how many measurement categories, how many rows of cells
+ * those categories need — rather than from a flat "single or dual table"
+ * constant. The old flat model charged every coat the same 128mm whether it
+ * carried two recorded measurements or ten, which is what made a five-garment
+ * order claim five sheets.
  *
  * @page uses `margin: 10mm 12mm`, leaving 297 - 20 = 277mm of printable height.
  * ------------------------------------------------------------------------- */
 const PRINTABLE_HEIGHT_MM = 277;
-const MASTER_HEADER_MM = 38;        // page 1 workshop header + meta grid (measured 36.2)
-const CONTINUATION_HEADER_MM = 20;  // compact continuation header (measured 18.9)
-const FOOTER_MM = 9;                // per-page footer (measured 7.4)
-const SUMMARY_BLOCK_MM = 52;        // instructions + production notes + sign-off (measured 50.1)
-const CARD_GAP_MM = 5;              // vertical space between garment cards
 
-const CARD_SINGLE_MM = 128;         // one measurement table  (measured 126.1)
-const CARD_DUAL_MM = 176;           // two measurement tables (measured 171.8 - 174.7)
-const REMARK_OVERFLOW_MM = 6;       // per extra wrapped line of remarks
-const REMARK_CHARS_PER_LINE = 90;
+/* Page bands, read from the rendered sheet under print media. Each carries a
+ * small margin over its measured value for font-substitution drift. */
+const MASTER_HEADER_MM = 18.2;     // brand bar + 5-column meta strip (measured 17.56)
+const CONTINUATION_HEADER_MM = 8;  // single-line header on later sheets (measured 6.4)
+const FOOTER_MM = 4.6;             // per-sheet footer rule (measured 4.23)
+const NOTES_BLOCK_MM = 27;         // special instructions + production notes (measured 24.6)
+const BLOCK_GAP_MM = 1.7;          // vertical gap between garment blocks
+
+/* Per-garment structure, measured the same way. Validated against three real
+ * garments: predicted 33.06 / 46.76 / 53.90 against actual 33.85 / 47.02 /
+ * 54.16, the residual being the block's own border. */
+const BLOCK_BORDER_MM = 0.8;       // the block's top and bottom rule
+const BLOCK_HEADER_MM = 5.9;       // the black "#N GARMENT ... Qty" bar (measured 5.82)
+const DETAIL_ROW_MM = 4.85;        // one Fabric / Style / Notes / Remarks row (measured 4.78)
+const DETAIL_WRAP_MM = 2.45;       // each extra wrapped line of a detail value (measured 2.36)
+const DETAIL_CHARS_PER_LINE = 95;  // value column capacity; deliberately a slight
+                                   // under-estimate, so the prediction errs tall
+const CATEGORY_TITLE_MM = 5.05;    // the black measurement-category bar (measured 4.96)
+const MEASUREMENT_ROW_MM = 4.05;   // one row of five inline label/value cells (measured 3.97)
+const MEASUREMENT_COLUMNS = 5;     // must match ProductionSlipProductCard
 
 export const A4_PAGE_BUDGET_MM = {
   printable: PRINTABLE_HEIGHT_MM,
   firstPage: PRINTABLE_HEIGHT_MM - MASTER_HEADER_MM - FOOTER_MM,
   continuationPage: PRINTABLE_HEIGHT_MM - CONTINUATION_HEADER_MM - FOOTER_MM,
-  summaryBlock: SUMMARY_BLOCK_MM
+  notesBlock: NOTES_BLOCK_MM
 };
 
+/** Wrapped lines a detail value needs in the slip's value column. */
+function detailLines(text: string): number {
+  const trimmed = (text || '').trim();
+  return trimmed ? Math.max(1, Math.ceil(trimmed.length / DETAIL_CHARS_PER_LINE)) : 0;
+}
+
 /**
- * Height a garment card occupies on paper, in millimetres.
- *
- * Garments that carry two measurement tables (a suit's coat + pant, a kurta
- * pajama set) are roughly 40% taller than a single-table garment.
+ * Height a garment's block occupies on paper, in millimetres, derived from the
+ * content it will actually render. Needs the measurement snapshot because the
+ * number of measurement categories — and therefore rows — depends on which
+ * garment it is.
  */
-export function getGarmentCardHeightMm(item: OrderItem): number {
-  const gType = (item?.garmentType || '').toLowerCase().trim();
-  const isSuit = gType.includes('suit') || gType.includes('full coat pant');
-  const isSet = gType.includes('set') || (gType.includes('kurta') && (gType.includes('pajama') || gType.includes('pyjama')));
-  const isSherwaniWithBottom =
-    gType.includes('sherwani') && (gType.includes('pant') || gType.includes('churidar') || gType.includes('pajama'));
+export function getGarmentCardHeightMm(
+  item: OrderItem,
+  snapshot: Partial<MeasurementRecord> = {}
+): number {
+  let height = BLOCK_HEADER_MM + BLOCK_BORDER_MM;
 
-  let height = isSuit || isSet || isSherwaniWithBottom ? CARD_DUAL_MM : CARD_SINGLE_MM;
+  // Detail rows: only the ones the card will actually print.
+  const fabric = `${item?.fabricName || ''} ${item?.fabricCode || ''}`.trim();
+  const style = (item?.styleNotes || item?.notes || '').trim();
+  const special = (item?.specialInstructions || '').trim();
+  const remarks = typeof item?.remarks === 'string' ? item.remarks.trim() : '';
 
-  // The remarks box grows with its text; budget for every line past the first.
-  const remarkLength = typeof item?.remarks === 'string' ? item.remarks.trim().length : 0;
-  if (remarkLength > REMARK_CHARS_PER_LINE) {
-    height += Math.ceil((remarkLength - REMARK_CHARS_PER_LINE) / REMARK_CHARS_PER_LINE) * REMARK_OVERFLOW_MM;
+  for (const value of [fabric, style, special !== style ? special : '', remarks]) {
+    const lines = detailLines(value);
+    if (lines > 0) height += DETAIL_ROW_MM + (lines - 1) * DETAIL_WRAP_MM;
+  }
+
+  // Measurement categories, each a title bar plus however many cell rows the
+  // garment's field list needs at five columns.
+  for (const category of garmentMeasurementBlocks(item, snapshot)) {
+    const rows = Math.ceil(category.fields.length / MEASUREMENT_COLUMNS);
+    height += CATEGORY_TITLE_MM + rows * MEASUREMENT_ROW_MM;
   }
 
   return height;
@@ -67,24 +97,27 @@ export function getGarmentCardHeightMm(item: OrderItem): number {
 
 /**
  * Retained for backwards compatibility with the original unit-based API.
- * One "unit" was roughly one single-table garment card.
+ * One "unit" is roughly one modest single-category garment block.
  */
 export function getGarmentSpatialWeight(item: OrderItem): number {
-  return getGarmentCardHeightMm(item) / CARD_SINGLE_MM;
+  return getGarmentCardHeightMm(item) / 30;
 }
 
 /**
  * Splits an order's garments across A4 portrait pages.
  *
  * Rules:
- * 1. A garment card is never split across pages.
- * 2. Page 1 carries the full master header; later pages carry a compact one.
- * 3. The final page reserves room for special instructions, production notes
- *    and the master-cutter sign-off.
+ * 1. A garment block is never split across pages — half a measurement table on
+ *    the next sheet is how a cutter reads the wrong number.
+ * 2. Page 1 carries the full header; later pages carry a one-line one.
+ * 3. The final page reserves room for the order-level notes.
  * 4. A page is only filled to the real printable height, so what the modal
- *    reports as "4 pages" is what the printer produces.
+ *    reports as "2 pages" is what the printer produces.
  */
-export function paginateProductionSlip(order: Order): ProductionSlipPageData[] {
+export function paginateProductionSlip(
+  order: Order,
+  snapshot: Partial<MeasurementRecord> = order?.measurementsSnapshot || {}
+): ProductionSlipPageData[] {
   const items = Array.isArray(order?.items) ? order.items : [];
   const itemsWithIndex = items
     .filter(item => item && typeof item === 'object')
@@ -99,8 +132,7 @@ export function paginateProductionSlip(order: Order): ProductionSlipPageData[] {
         isLastPage: true,
         items: [],
         showSpecialInstructions: true,
-        showProductionNotes: true,
-        showArtisanSignOff: true
+        showProductionNotes: true
       }
     ];
   }
@@ -113,8 +145,8 @@ export function paginateProductionSlip(order: Order): ProductionSlipPageData[] {
   let usedMm = 0;
 
   for (const entry of itemsWithIndex) {
-    const cardMm = getGarmentCardHeightMm(entry.item);
-    const gap = current.length > 0 ? CARD_GAP_MM : 0;
+    const cardMm = getGarmentCardHeightMm(entry.item, snapshot);
+    const gap = current.length > 0 ? BLOCK_GAP_MM : 0;
     const capacity = capacityFor(rawPages.length);
 
     if (current.length > 0 && usedMm + gap + cardMm > capacity) {
@@ -131,21 +163,33 @@ export function paginateProductionSlip(order: Order): ProductionSlipPageData[] {
     rawPages.push({ items: current, usedMm });
   }
 
-  // The closing summary block lives on the final page. If it does not fit,
-  // move the last garment forward rather than letting the block overflow.
-  const lastIdx = rawPages.length - 1;
-  const lastPage = rawPages[lastIdx];
-  const lastCapacity = capacityFor(lastIdx);
+  // The order-level notes live on the final page. If they do not fit, move the
+  // last garment forward rather than letting the block overflow. Only reserve
+  // the room when there is actually something to print there.
+  const hasNotes = Boolean(
+    (order?.specialInstructions || order?.notes || '').trim() ||
+      (order?.productionNotes || '').trim() ||
+      (snapshot?.fittingNotes || order?.fittingNotes || '').trim()
+  );
 
-  if (lastPage.usedMm + CARD_GAP_MM + A4_PAGE_BUDGET_MM.summaryBlock > lastCapacity) {
-    if (lastPage.items.length > 1) {
-      const moved = lastPage.items.pop()!;
-      lastPage.usedMm -= getGarmentCardHeightMm(moved.item) + CARD_GAP_MM;
-      rawPages.push({ items: [moved], usedMm: getGarmentCardHeightMm(moved.item) });
-    } else {
-      // A single oversized garment already fills the page — give the summary
-      // block a sheet of its own instead of clipping it.
-      rawPages.push({ items: [], usedMm: 0 });
+  if (hasNotes) {
+    const lastIdx = rawPages.length - 1;
+    const lastPage = rawPages[lastIdx];
+    const lastCapacity = capacityFor(lastIdx);
+
+    if (lastPage.usedMm + BLOCK_GAP_MM + A4_PAGE_BUDGET_MM.notesBlock > lastCapacity) {
+      if (lastPage.items.length > 1) {
+        const moved = lastPage.items.pop()!;
+        lastPage.usedMm -= getGarmentCardHeightMm(moved.item, snapshot) + BLOCK_GAP_MM;
+        rawPages.push({
+          items: [moved],
+          usedMm: getGarmentCardHeightMm(moved.item, snapshot)
+        });
+      } else {
+        // A single oversized garment already fills the page — give the notes a
+        // sheet of their own instead of clipping them.
+        rawPages.push({ items: [], usedMm: 0 });
+      }
     }
   }
 
@@ -158,7 +202,6 @@ export function paginateProductionSlip(order: Order): ProductionSlipPageData[] {
     isLastPage: idx === totalPages - 1,
     items: page.items,
     showSpecialInstructions: idx === totalPages - 1,
-    showProductionNotes: idx === totalPages - 1,
-    showArtisanSignOff: idx === totalPages - 1
+    showProductionNotes: idx === totalPages - 1
   }));
 }

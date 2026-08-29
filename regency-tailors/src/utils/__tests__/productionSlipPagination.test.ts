@@ -35,14 +35,32 @@ const orderWith = (items: OrderItem[]): Order =>
     urgent: false
   }) as Order;
 
-/** Every page must fit inside the real printable height of an A4 sheet. */
+/**
+ * Every page must fit inside the real printable height of an A4 sheet.
+ *
+ * The notes block is only charged when the order actually carries notes, which
+ * mirrors what the slip renders — an order with none prints no empty box.
+ */
+const BLOCK_GAP_MM = 1.7;
+
 function assertNoPageOverflows(order: Order) {
   const pages = paginateProductionSlip(order);
+  const hasNotes = Boolean(
+    (order.specialInstructions || order.notes || '').trim() ||
+      (order.productionNotes || '').trim() ||
+      (order.fittingNotes || '').trim()
+  );
   pages.forEach(page => {
     const capacity = page.isFirstPage ? A4_PAGE_BUDGET_MM.firstPage : A4_PAGE_BUDGET_MM.continuationPage;
-    const cardsMm = page.items.reduce((sum, entry, idx) => sum + getGarmentCardHeightMm(entry.item) + (idx ? 5 : 0), 0);
-    const summaryMm = page.isLastPage ? A4_PAGE_BUDGET_MM.summaryBlock + (page.items.length ? 5 : 0) : 0;
-    expect(cardsMm + summaryMm).toBeLessThanOrEqual(capacity);
+    const cardsMm = page.items.reduce(
+      (sum, entry, idx) => sum + getGarmentCardHeightMm(entry.item) + (idx ? BLOCK_GAP_MM : 0),
+      0
+    );
+    const notesMm =
+      page.isLastPage && hasNotes
+        ? A4_PAGE_BUDGET_MM.notesBlock + (page.items.length ? BLOCK_GAP_MM : 0)
+        : 0;
+    expect(cardsMm + notesMm).toBeLessThanOrEqual(capacity);
   });
   return pages;
 }
@@ -69,7 +87,7 @@ describe('paginateProductionSlip', () => {
   it('always produces at least one page, even with no garments', () => {
     const pages = paginateProductionSlip(orderWith([]));
     expect(pages).toHaveLength(1);
-    expect(pages[0].showArtisanSignOff).toBe(true);
+    expect(pages[0].showSpecialInstructions).toBe(true);
   });
 
   it('keeps a single-garment order on one page', () => {
@@ -86,19 +104,28 @@ describe('paginateProductionSlip', () => {
     expect(new Set(seen).size).toBe(5);
   });
 
-  it('produces enough pages for a five-garment order and none of them overflow A4', () => {
+  it('keeps a normal five-garment order on a single sheet', () => {
+    // The whole point of the compact layout: the five garments the order
+    // wizard can produce fit one sheet without the type shrinking.
     const pages = assertNoPageOverflows(
       orderWith([item('Full Coat Pant'), item('Coat'), item('Pant'), item('Shirt'), item('Kurta Pajama')])
     );
-    expect(pages.length).toBeGreaterThanOrEqual(3);
+    expect(pages).toHaveLength(1);
     expect(pages.every(p => p.totalPages === pages.length)).toBe(true);
+  });
+
+  it('spills onto a second sheet only when the content genuinely needs it', () => {
+    const heavy = () => item('Full Coat Pant', 'x'.repeat(300));
+    const pages = assertNoPageOverflows(orderWith(Array.from({ length: 8 }, heavy)));
+    expect(pages.length).toBeGreaterThan(1);
+    expect(pages.flatMap(p => p.items)).toHaveLength(8);
   });
 
   it('shows the closing summary only on the final page', () => {
     const pages = paginateProductionSlip(
       orderWith([item('Full Coat Pant'), item('Coat'), item('Pant'), item('Shirt')])
     );
-    const withSummary = pages.filter(p => p.showSpecialInstructions || p.showProductionNotes || p.showArtisanSignOff);
+    const withSummary = pages.filter(p => p.showSpecialInstructions || p.showProductionNotes);
     expect(withSummary).toHaveLength(1);
     expect(withSummary[0].isLastPage).toBe(true);
   });

@@ -31,11 +31,13 @@ export const PrintProductionSlipModal: React.FC<PrintProductionSlipModalProps> =
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
   const isOverdue = order ? (order.deliveryDate < todayStr && status !== 'Completed') : false;
 
-  // Intelligently calculate multi-page A4 pagination based on garment count & content volume
+  // A4 pagination driven by what each garment actually contains. The snapshot
+  // is passed explicitly because a garment's height depends on how many
+  // measurement categories it resolves to.
   const pages = useMemo(() => {
     if (!order) return [];
-    return paginateProductionSlip(order);
-  }, [order]);
+    return paginateProductionSlip(order, snapshot);
+  }, [order, snapshot]);
 
   if (!isOpen || !order) return null;
 
