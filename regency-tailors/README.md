@@ -1,6 +1,6 @@
-# Regency Tailors — Showroom & Tailoring Suite
+# Regency Tailor — Showroom & Tailoring Suite
 
-Bespoke tailoring management system for the Regency Tailors showroom: customers,
+Bespoke tailoring management system for the Regency Tailor showroom: customers,
 orders, garments, measurements, production slips, bills, backup and recovery.
 
 ## Running locally

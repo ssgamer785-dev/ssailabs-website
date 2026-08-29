@@ -13,7 +13,7 @@ interface ErrorBoundaryState {
  *
  * A single unexpected value (a hand-edited backup, a legacy record missing a
  * field) used to unmount the whole React tree and leave a blank white screen.
- * This boundary keeps the Regency Tailors branding on screen, explains what
+ * This boundary keeps the Regency Tailor branding on screen, explains what
  * happened, and offers a recovery route that never destroys data.
  */
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
@@ -44,7 +44,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         <div className="max-w-lg w-full bg-white rounded-2xl border-2 border-[#C9A24A]/50 shadow-lg p-8 space-y-5">
           <div>
             <div className="text-[10px] font-bold tracking-[0.2em] text-[#C9A24A] uppercase mb-1">
-              REGENCY TAILORS
+              REGENCY TAILOR
             </div>
             <h1 className="text-2xl font-extrabold text-[#071426]">Something went wrong</h1>
           </div>

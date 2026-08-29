@@ -2,7 +2,7 @@ import { Order, TrashItem } from '../types';
 import { readRaw, writeRaw } from './safeStorage';
 
 /**
- * Order number allocation for Regency Tailors.
+ * Order number allocation for Regency Tailor.
  *
  * Numbers are the customer-facing identity printed on production slips and
  * bills, so a number must never be issued twice. Deriving "next number" purely

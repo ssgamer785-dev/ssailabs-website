@@ -214,7 +214,7 @@ await scenario('Single-garment bill carries full detail and no measurements', as
   const text = await bill.innerText();
 
   // Header: exact business identity, large and centered.
-  report.check('the large brand heading reads REGENCY TAILORS', /REGENCY TAILORS/.test(text));
+  report.check('the large brand heading reads REGENCY TAILOR', /REGENCY TAILOR/.test(text));
   report.check('the premium tagline is present', /PREMIUM TAILORING/.test(text) && /PERFECT FIT/.test(text));
   report.check('the "Customer Bill" label is present', /Customer Bill/i.test(text));
   report.check('the showroom address/phone line is present', /BOOTAN MANDI/i.test(text) && /\d{5}\s?\d{5}/.test(text));
@@ -314,7 +314,7 @@ await scenario('Single-garment bill carries full detail and no measurements', as
   });
 
   const logo = art.logo;
-  report.check('the Regency Tailors logo decodes', Boolean(logo && logo.w > 0 && logo.h > 0),
+  report.check('the Regency Tailor logo decodes', Boolean(logo && logo.w > 0 && logo.h > 0),
     logo ? `${logo.w}x${logo.h} source` : 'no logo <img> found');
   report.check('the logo actually paints its artwork', Boolean(logo && logo.nonBlankPixels > 20),
     logo ? `${logo.nonBlankPixels}/1600 pixels differ from a flat fill` : '');
@@ -336,7 +336,7 @@ await scenario('Single-garment bill carries full detail and no measurements', as
 
   // No signature area — the bill closes with the disclaimer only.
   report.check('no signature area is present',
-    !/Customer Signature/i.test(text) && !/For Regency Tailors/i.test(text));
+    !/Customer Signature/i.test(text) && !/For Regency Tailor/i.test(text));
   report.check('the exact required disclaimer is present',
     /WE ARE NOT RESPONSIBLE FOR CLOTHES AFTER 2 MONTHS\./i.test(text));
 });

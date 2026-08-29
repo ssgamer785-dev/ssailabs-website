@@ -1,4 +1,4 @@
-# Regency Tailors — end-to-end tests
+# Regency Tailor — end-to-end tests
 
 Browser tests that drive the real showroom suite in Chromium and assert on what
 actually lands in the browser database and on printed paper.

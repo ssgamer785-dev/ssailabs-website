@@ -233,7 +233,7 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({
               columnGap: 12
             }}
           >
-            {qrTile(instagramQrImg, 'Regency Tailors on Instagram', 'Follow Us On Instagram')}
+            {qrTile(instagramQrImg, 'Regency Tailor on Instagram', 'Follow Us On Instagram')}
 
             <div className="text-center">
               {/*
@@ -249,7 +249,7 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({
               <div className="mx-auto" style={{ width: tokens.logoPx }}>
                 <img
                   src={regencyLogoImg}
-                  alt="Regency Tailors"
+                  alt="Regency Tailor"
                   className="w-full h-auto object-contain select-none block"
                 />
               </div>
@@ -263,7 +263,7 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({
                   marginTop: tokens.sectionGap * 0.5
                 }}
               >
-                REGENCY TAILORS
+                REGENCY TAILOR
               </h1>
 
               <div
@@ -274,7 +274,7 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({
               </div>
             </div>
 
-            {qrTile(googleQrImg, 'Regency Tailors on Google', 'Review Us On Google')}
+            {qrTile(googleQrImg, 'Regency Tailor on Google', 'Review Us On Google')}
           </div>
 
           <div

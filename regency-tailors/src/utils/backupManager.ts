@@ -80,7 +80,7 @@ export const MAX_BACKUP_BYTES = 64 * 1024 * 1024;
 
 const BACKUP_FORMAT_VERSION = 2;
 const APP_SCHEMA_VERSION = '3.0.0';
-const APP_NAME = 'Regency Tailors';
+const APP_NAME = 'Regency Tailor';
 
 /**
  * Generate a complete, secure .regency.backup file snapshot
@@ -125,7 +125,7 @@ export function buildBackupSnapshot(data: {
     appVersion: '1.0.0',
     schemaVersion: APP_SCHEMA_VERSION,
     createdAt: new Date().toISOString(),
-    exportSource: 'Regency Tailors Management Suite',
+    exportSource: 'Regency Tailor Management Suite',
     orderSequence: data.orderSequence,
     exportedFrom: data.database ? 'supabase' : 'browser-storage',
     stats: {
@@ -231,7 +231,7 @@ export function validateBackupContent(
     } else {
       return {
         isValid: false,
-        error: 'Missing required metadata section or valid Regency Tailors collections.'
+        error: 'Missing required metadata section or valid Regency Tailor collections.'
       };
     }
   } else {
@@ -240,7 +240,7 @@ export function validateBackupContent(
       if (!metadata.application.toLowerCase().includes('regency')) {
         return {
           isValid: false,
-          error: `Incompatible backup origin: Expected Regency Tailors, but found "${metadata.application}".`
+          error: `Incompatible backup origin: Expected Regency Tailor, but found "${metadata.application}".`
         };
       }
     }
@@ -285,7 +285,7 @@ export function validateBackupContent(
       appVersion: metadata?.appVersion || '1.0.0',
       schemaVersion: metadata?.schemaVersion || APP_SCHEMA_VERSION,
       createdAt: metadata?.createdAt || parsed.exportDate || new Date().toISOString(),
-      exportSource: metadata?.exportSource || 'Regency Tailors Management Suite',
+      exportSource: metadata?.exportSource || 'Regency Tailor Management Suite',
       orderSequence: typeof metadata?.orderSequence === 'number' ? metadata.orderSequence : undefined,
       exportedFrom: metadata?.exportedFrom === 'supabase' ? 'supabase' : 'browser-storage',
       stats

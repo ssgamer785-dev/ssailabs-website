@@ -1,5 +1,5 @@
 -- =========================================================================
--- REGENCY TAILORS — FUNCTIONS, TRIGGERS AND DERIVED VIEWS
+-- REGENCY TAILOR — FUNCTIONS, TRIGGERS AND DERIVED VIEWS
 --
 -- Every SECURITY DEFINER function below pins search_path. An unpinned
 -- search_path on a SECURITY DEFINER function is a privilege-escalation

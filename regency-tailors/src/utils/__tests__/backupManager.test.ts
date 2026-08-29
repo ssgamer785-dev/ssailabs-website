@@ -9,7 +9,7 @@ import {
 import { Customer, Order, ShowroomProfile } from '../../types';
 
 const profile: ShowroomProfile = {
-  name: 'REGENCY TAILORS',
+  name: 'REGENCY TAILOR',
   subtitle: 'Bespoke Showroom & Tailoring Suite',
   city: 'JALANDHAR CITY SHOWROOM',
   address: 'Bootan Mandi, Jalandhar',

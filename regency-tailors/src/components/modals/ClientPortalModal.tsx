@@ -793,7 +793,7 @@ export const ClientPortalModal: React.FC<ClientPortalModalProps> = ({
 
         {/* Showroom Footer Info */}
         <div className="shrink-0 pt-2 border-t border-[#E6E1D7] flex items-center justify-between text-[11px] text-[#8C7E6A]">
-          <span>Regency Tailors • Jalandhar City Showroom Concierge</span>
+          <span>Regency Tailor • Jalandhar City Showroom Concierge</span>
           <span className="font-mono text-[#9E721D] font-bold">Support: 99887 71631</span>
         </div>
 

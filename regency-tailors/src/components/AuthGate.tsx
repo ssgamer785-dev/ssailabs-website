@@ -119,7 +119,7 @@ export const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
         <div className="px-7 py-3 bg-[#FAF8F5] border-t border-[#E6E1D7] text-center">
           <span className="text-[10px] font-bold text-[#8C7E6A] uppercase tracking-wider">
-            Regency Tailors • Jalandhar
+            Regency Tailor • Jalandhar
           </span>
         </div>
       </div>

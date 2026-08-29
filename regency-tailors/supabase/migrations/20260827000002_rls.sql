@@ -1,5 +1,5 @@
 -- =========================================================================
--- REGENCY TAILORS — ROW LEVEL SECURITY (Admin-only)
+-- REGENCY TAILOR — ROW LEVEL SECURITY (Admin-only)
 --
 -- One access model, one predicate: public.is_authorized_admin().
 -- There are no role tiers, no per-column masking and no policies granting

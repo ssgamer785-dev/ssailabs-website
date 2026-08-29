@@ -1,7 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 /**
- * Supabase client for the Regency Tailors showroom suite.
+ * Supabase client for the Regency Tailor showroom suite.
  *
  * Only the publishable anon key is ever used here. The service-role key must
  * never appear in this file, in .env files that ship, or in the bundle — it

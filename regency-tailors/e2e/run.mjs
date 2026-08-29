@@ -1,5 +1,5 @@
 /**
- * Regency Tailors — end-to-end suite.
+ * Regency Tailor — end-to-end suite.
  *
  * Drives the real application in Chromium and asserts against the browser
  * database and the actual print output. See e2e/README.md.
@@ -332,12 +332,12 @@ await scenario('Backup export and import restore everything', async ({ page }) =
 await scenario('Hostile backup files never damage live data', async ({ page }) => {
   const cases = {
     'empty.regency.backup': ['', false],
-    'truncated.regency.backup': ['{"metadata": {"application": "Regency Tailors"', false],
+    'truncated.regency.backup': ['{"metadata": {"application": "Regency Tailor"', false],
     'notjson.regency.backup': ['this is definitely not json at all', false],
     'wrongapp.regency.backup': [JSON.stringify({ metadata: { application: 'Some Other App' }, customers: [] }), false],
     'nocollections.regency.backup': [JSON.stringify({ hello: 'world' }), false],
     'structurally-broken.regency.backup': [JSON.stringify({
-      metadata: { application: 'Regency Tailors' },
+      metadata: { application: 'Regency Tailor' },
       customers: [{ id: 'X', name: '<img src=x onerror="window.__XSS=1">', phone: '9' }],
       orders: [{ id: 'ORPHAN', customerId: 'MISSING', customerName: 'Ghost', items: 'not-an-array', totalAmount: 'NaN' }],
       measurements: [1, 'str', null]

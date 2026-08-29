@@ -1,5 +1,5 @@
 -- =========================================================================
--- REGENCY TAILORS — SHOWROOM SETTINGS SEED
+-- REGENCY TAILOR — SHOWROOM SETTINGS SEED
 --
 -- These are the details confirmed by the owner as the real showroom address,
 -- and match what already prints on the customer bill. The conflicting
@@ -18,11 +18,11 @@
 insert into public.showroom_settings (id, name, subtitle, city, address_line1, address_line2, phone, email, gstin)
 values (
     true,
-    'REGENCY TAILORS',
+    'REGENCY TAILOR',
     'Bespoke Showroom & Tailoring Suite',
     'JALANDHAR',
     'BOOTAN MANDI,',
-    'JALANDHAR, PUNJAB 144001',
+    'JALANDHAR, PUNJAB 144003',
     '99887 71631',
     null,
     null

@@ -8,7 +8,7 @@ export interface BillExportCanvasProps {
 }
 
 /**
- * Dedicated Standalone A4 Export Canvas for Regency Tailors Bill.
+ * Dedicated Standalone A4 Export Canvas for Regency Tailor Bill.
  * 
  * Sized to standard A4 (210mm × 297mm or 794px × 1123px at 96 DPI / 2480px × 3508px at 300 DPI)
  * Contains the complete bill from top gold flourish border to bottom navy footer,

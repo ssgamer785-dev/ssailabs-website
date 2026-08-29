@@ -1,5 +1,5 @@
 -- =========================================================================
--- REGENCY TAILORS — TRANSACTIONAL BACKUP RESTORE
+-- REGENCY TAILOR — TRANSACTIONAL BACKUP RESTORE
 --
 -- The whole restore runs inside one function call, therefore one
 -- transaction. Any failure — a malformed record, a constraint violation, a

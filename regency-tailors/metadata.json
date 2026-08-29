@@ -1,5 +1,5 @@
 {
-  "name": "Regency Tailors",
+  "name": "Regency Tailor",
   "description": "Bespoke tailoring management system with customer profiles, precision measurement registry, garment crafting orders, fitting schedules, and workshop production slips.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

@@ -1,4 +1,4 @@
-# Regency Tailors — Supabase setup
+# Regency Tailor — Supabase setup
 
 The showroom database is PostgreSQL on Supabase. Sign-in is Google, and only
 accounts on the showroom's allowlist can see any data.

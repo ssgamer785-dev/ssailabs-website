@@ -1,5 +1,5 @@
 -- =========================================================================
--- REGENCY TAILORS — PRODUCTION SCHEMA (Admin-only access model)
+-- REGENCY TAILOR — PRODUCTION SCHEMA (Admin-only access model)
 --
 -- Supersedes 20260825_security_and_rls.sql, which was never applied to any
 -- database and contained an anonymous data-exfiltration RPC
@@ -46,7 +46,7 @@ comment on table public.staff_profiles is
 -- -------------------------------------------------------------------------
 create table if not exists public.showroom_settings (
     id          boolean primary key default true,
-    name        text not null default 'REGENCY TAILORS',
+    name        text not null default 'REGENCY TAILOR',
     subtitle    text not null default 'Bespoke Showroom & Tailoring Suite',
     city        text,
     address_line1 text,

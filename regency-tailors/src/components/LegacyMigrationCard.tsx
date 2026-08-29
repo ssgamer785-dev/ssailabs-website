@@ -42,7 +42,7 @@ export const LegacyMigrationCard: React.FC<LegacyMigrationCardProps> = ({
     if (isRunning) return;
     const total = preview.stats.customers + preview.stats.orders;
     if (!confirm(
-      `Copy ${total} record${total === 1 ? '' : 's'} from this browser into the Regency Tailors database?\n\n` +
+      `Copy ${total} record${total === 1 ? '' : 's'} from this browser into the Regency Tailor database?\n\n` +
       'The browser copy is left untouched, so this can be repeated or abandoned safely.'
     )) return;
 

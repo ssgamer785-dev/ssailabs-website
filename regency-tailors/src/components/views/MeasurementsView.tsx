@@ -662,7 +662,7 @@ export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
               <div className="border-b-2 border-[#C9A24A] pb-4 flex flex-col sm:flex-row sm:items-end justify-between gap-3">
                 <div>
                   <div className="text-2xl font-extrabold text-[#071426] tracking-wider">
-                    REGENCY TAILORS
+                    REGENCY TAILOR
                   </div>
                   <div className="text-[10px] text-[#C9A24A] font-bold tracking-[0.2em] uppercase">
                     HAUTE BESPOKE &amp; MASTER CRAFTSMANSHIP

@@ -65,10 +65,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div>
             <div className="text-xs font-bold tracking-[0.25em] text-[#C9A24A] uppercase mb-1.5 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-[#C9A24A]" />
-              <span>REGENCY TAILORS • SHOWROOM HUB</span>
+              <span>REGENCY TAILOR • SHOWROOM HUB</span>
             </div>
             <h1 className="text-3xl md:text-4xl lg:text-5xl font-black text-[#071426] tracking-tight">
-              REGENCY TAILORS
+              REGENCY TAILOR
             </h1>
             <p className="text-sm md:text-base text-[#574E3E] mt-1.5 font-bold">
               Welcome Back, <span className="text-[#071426] font-extrabold">{userName}</span> • Showroom Owner

@@ -19,7 +19,7 @@ export const initialExpenses: Expense[] = [];
 export const initialTrash: TrashItem[] = [];
 
 export const initialProfile: ShowroomProfile = {
-  name: 'REGENCY TAILORS',
+  name: 'REGENCY TAILOR',
   subtitle: 'Bespoke Showroom & Tailoring Suite',
   city: '',
   address: '',

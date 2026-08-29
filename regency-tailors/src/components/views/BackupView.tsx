@@ -258,7 +258,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
       setShowPreviewModal(false);
       setIsImporting(false);
       setValidationResult(null);
-      setImportSuccessMessage('Backup restored successfully. Your Regency Tailors data has been restored.');
+      setImportSuccessMessage('Backup restored successfully. Your Regency Tailor data has been restored.');
     } catch (err: any) {
       setIsImporting(false);
       setImportProgressStep('');
@@ -402,7 +402,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
                 EXPORT BACKUP
               </h2>
               <p className="text-xs sm:text-sm text-[#7A7060] mt-2 leading-relaxed">
-                Download a complete backup of your Regency Tailors data.
+                Download a complete backup of your Regency Tailor data.
               </p>
             </div>
 
@@ -502,7 +502,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
           <CheckCircle2 className="w-4 h-4 text-[#C9A24A]" />
         </div>
         <div className="leading-relaxed">
-          <strong className="text-[#071426] font-bold">Continuous Local Persistence:</strong> Regency Tailors maintains live persistence in your browser storage. Generating an <span className="font-semibold text-[#071426]">EXPORT BACKUP</span> creates an offline file package that can be safely archived, moved across devices, or restored anytime.
+          <strong className="text-[#071426] font-bold">Continuous Local Persistence:</strong> Regency Tailor maintains live persistence in your browser storage. Generating an <span className="font-semibold text-[#071426]">EXPORT BACKUP</span> creates an offline file package that can be safely archived, moved across devices, or restored anytime.
         </div>
       </div>
 
@@ -558,7 +558,7 @@ export const BackupView: React.FC<BackupViewProps> = ({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs">
                   <span className="text-[#7A7060] font-medium">Application:</span>
                   <span className="font-semibold text-[#071426]">
-                    {validationResult.payload?.metadata?.application || 'Regency Tailors'} (v{validationResult.payload?.metadata?.schemaVersion || '2.0.0'})
+                    {validationResult.payload?.metadata?.application || 'Regency Tailor'} (v{validationResult.payload?.metadata?.schemaVersion || '2.0.0'})
                   </span>
                 </div>
               </div>

@@ -572,7 +572,7 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
         <div className="flex items-center justify-between border-b border-[#E6E1D7] pb-3 shrink-0">
           <div>
             <div className="text-[10px] font-bold text-[#C9A24A] tracking-[0.2em] uppercase">
-              REGENCY TAILORS • BESPOKE MEASUREMENT REGISTER
+              REGENCY TAILOR • BESPOKE MEASUREMENT REGISTER
             </div>
             <h2 className="text-lg sm:text-xl font-extrabold text-[#071426] flex items-center gap-2 mt-0.5">
               <Ruler className="w-5 h-5 text-[#C9A24A]" />

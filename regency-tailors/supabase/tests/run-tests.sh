@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =========================================================================
-# Regency Tailors — database test runner
+# Regency Tailor — database test runner
 #
 # Boots a throwaway PostgreSQL cluster, applies the auth stub and every
 # migration in order, then runs the assertion suite. Nothing here touches a

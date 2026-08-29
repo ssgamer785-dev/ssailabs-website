@@ -3,9 +3,9 @@ import { MapPin, Phone, User, FileText } from 'lucide-react';
 import { Order } from '../../types';
 import regencyLogoImg from '../../assets/images/regency-tailors-logo.jpg';
 
-// Static Showroom Contact Details (Official Regency Tailors)
+// Static Showroom Contact Details (Official Regency Tailor)
 export const SHOWROOM_ADDRESS_LINE1 = 'BOOTAN MANDI,';
-export const SHOWROOM_ADDRESS_LINE2 = 'JALANDHAR, PUNJAB 144001';
+export const SHOWROOM_ADDRESS_LINE2 = 'JALANDHAR, PUNJAB 144003';
 export const SHOWROOM_PHONE = '99887 71631';
 
 export interface PrintableRegencyBillProps {
@@ -131,7 +131,7 @@ export const PrintableRegencyBill: React.FC<PrintableRegencyBillProps> = ({
           boxSizing: 'border-box'
         }}
       >
-        {/* UPPER TIER: OFFICIAL LOGO (LEFT) & REGENCY TAILORS CENTERPIECE */}
+        {/* UPPER TIER: OFFICIAL LOGO (LEFT) & REGENCY TAILOR CENTERPIECE */}
         <div 
           style={{
             display: 'grid',
@@ -147,7 +147,7 @@ export const PrintableRegencyBill: React.FC<PrintableRegencyBillProps> = ({
               <div
                 className="flex flex-col items-center justify-center select-none"
                 style={{ maxHeight: '78px' }}
-                aria-label="Regency Tailors"
+                aria-label="Regency Tailor"
               >
                 <div className="w-11 h-11 rounded-full border-2 border-[#C9A24A] flex items-center justify-center text-[#D4AF5A] font-black text-base" style={{ fontFamily: "'Cinzel', serif" }}>
                   RT
@@ -159,7 +159,7 @@ export const PrintableRegencyBill: React.FC<PrintableRegencyBillProps> = ({
             ) : (
               <img
                 src={logoSrc}
-                alt="Regency Tailors Logo"
+                alt="Regency Tailor Logo"
                 onError={handleLogoError}
                 referrerPolicy="no-referrer"
                 className="w-full max-w-[110px] h-auto object-contain select-none"
@@ -171,7 +171,7 @@ export const PrintableRegencyBill: React.FC<PrintableRegencyBillProps> = ({
             )}
           </div>
 
-          {/* TOP CENTER / RIGHT: REGENCY TAILORS BRAND CENTERPIECE & TAGLINE */}
+          {/* TOP CENTER / RIGHT: REGENCY TAILOR BRAND CENTERPIECE & TAGLINE */}
           <div className="flex flex-col items-center justify-center text-center pl-1 pr-3" style={{ boxSizing: 'border-box' }}>
             {/* Top Ornate Gold Filigree Flourish */}
             <svg width="120" height="12" viewBox="0 0 160 16" fill="#C9A24A" className="mb-0.5 opacity-90">
@@ -189,7 +189,7 @@ export const PrintableRegencyBill: React.FC<PrintableRegencyBillProps> = ({
                 textShadow: '0 1px 2px rgba(0,0,0,0.3)'
               }}
             >
-              REGENCY TAILORS
+              REGENCY TAILOR
             </h1>
 
             {/* Bottom Ornate Gold Filigree Flourish */}
@@ -487,7 +487,7 @@ export const PrintableRegencyBill: React.FC<PrintableRegencyBillProps> = ({
                 className="text-sm sm:text-base font-black text-[#C9A24A] tracking-wider"
                 style={{ fontFamily: "'Cinzel', 'Playfair Display', 'Manrope', serif" }}
               >
-                REGENCY TAILORS.
+                REGENCY TAILOR.
               </p>
             </div>
 
@@ -547,13 +547,13 @@ export const PrintableRegencyBill: React.FC<PrintableRegencyBillProps> = ({
           </div>
 
           <p className="text-[10px] font-semibold text-[#4A5568]" style={{ margin: 0 }}>
-            For choosing Regency Tailors.
+            For choosing Regency Tailor.
           </p>
 
           <div className="pt-0.5">
             <div className="text-[9px] text-[#8C7E6A] font-medium">Regards,</div>
             <div className="text-[11px] font-extrabold text-[#C9A24A] uppercase tracking-wider">
-              Regency Tailors
+              Regency Tailor
             </div>
           </div>
         </div>
@@ -585,7 +585,7 @@ export const PrintableRegencyBill: React.FC<PrintableRegencyBillProps> = ({
             ) : (
               <img
                 src={logoSrc}
-                alt="Regency Tailors"
+                alt="Regency Tailor"
                 onError={handleLogoError}
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover"

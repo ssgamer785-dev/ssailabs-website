@@ -1,5 +1,5 @@
 /**
- * Fault-tolerant localStorage access for the Regency Tailors showroom database.
+ * Fault-tolerant localStorage access for the Regency Tailor showroom database.
  *
  * The whole application persists to localStorage. Before this module, a single
  * corrupted key, a non-array payload, or a full storage quota threw during React

@@ -11,14 +11,14 @@ interface RegencyLogoProps {
 }
 
 /**
- * Official Regency Tailors Brand Logo Component
+ * Official Regency Tailor Brand Logo Component
  * Uses the exact official brand asset with needle-and-thread RP monogram,
- * REGENCY TAILORS typography, and gold flourishes.
+ * REGENCY TAILOR typography, and gold flourishes.
  */
 export const RegencyLogo: React.FC<RegencyLogoProps> = ({
   size = 'md',
   className = '',
-  alt = 'Regency Tailors Official Logo',
+  alt = 'Regency Tailor Official Logo',
   style
 }) => {
   const [imgSrc, setImgSrc] = useState<string>(OFFICIAL_REGENCY_LOGO);
@@ -49,7 +49,7 @@ export const RegencyLogo: React.FC<RegencyLogoProps> = ({
           <div className="w-10 h-10 rounded-full border border-[#C9A24A] flex items-center justify-center text-[#C9A24A] font-serif font-black text-lg mb-1">
             RT
           </div>
-          <span className="text-xs font-extrabold tracking-widest text-[#D4AF5A] uppercase">REGENCY TAILORS</span>
+          <span className="text-xs font-extrabold tracking-widest text-[#D4AF5A] uppercase">REGENCY TAILOR</span>
         </div>
       </div>
     );

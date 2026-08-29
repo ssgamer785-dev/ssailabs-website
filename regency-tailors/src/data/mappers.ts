@@ -345,7 +345,7 @@ export function toShowroomProfile(row: Record<string, unknown> | null, activeUse
   const line1 = str(row?.address_line1);
   const line2 = str(row?.address_line2);
   return {
-    name: str(row?.name, 'REGENCY TAILORS'),
+    name: str(row?.name, 'REGENCY TAILOR'),
     subtitle: str(row?.subtitle, 'Bespoke Showroom & Tailoring Suite'),
     city: str(row?.city),
     address: [line1, line2].filter(Boolean).join(' ').trim(),

@@ -1,5 +1,5 @@
 -- =========================================================================
--- REGENCY TAILORS — ROLLBACK for the 20260827 migration set
+-- REGENCY TAILOR — ROLLBACK for the 20260827 migration set
 --
 -- Destructive: drops every business table and all data in them. Only run
 -- against a database you intend to discard, and only after taking a dump:

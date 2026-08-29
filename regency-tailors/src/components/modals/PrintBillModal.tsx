@@ -105,7 +105,7 @@ export const PrintBillModal: React.FC<PrintBillModalProps> = ({
             <div>
               <span className="text-[10px] font-bold text-[#8C7E6A] uppercase tracking-wider">A4 Customer Bill & Receipt</span>
               <h3 className="text-base font-extrabold text-[#071426]">
-                {isBlank ? 'Blank Bill Template' : `Regency Tailors Bill — Order #${numericOrderNum}`}
+                {isBlank ? 'Blank Bill Template' : `Regency Tailor Bill — Order #${numericOrderNum}`}
               </h3>
             </div>
           </div>
