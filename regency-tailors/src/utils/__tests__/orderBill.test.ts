@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { garmentMeasurementBlocks, garmentRemarkFor, recordedMeasurementCount } from '../garmentMeasurements';
-import { paginateOrderBill, getBillCardHeightMm, A4_BILL_BUDGET_MM } from '../orderBillPagination';
+import {
+  planOrderBill,
+  INITIAL_DENSITY,
+  billRowLines,
+  billTextLoad,
+  densityTokens,
+  tighterDensity,
+  DENSITY_ORDER
+} from '../orderBillLayout';
 import { Order, OrderItem, MeasurementRecord } from '../../types';
 
 const item = (garmentType: string, over: Partial<OrderItem> = {}): OrderItem => ({
@@ -41,26 +49,6 @@ const orderWith = (items: OrderItem[]): Order =>
     balanceDue: 0,
     urgent: false
   }) as Order;
-
-/**
- * No sheet may exceed what actually fits on A4.
- *
- * Garment rows live in a `<table>` now, not a stack of cards — rows are
- * contiguous (shared borders, no inter-row gap), so unlike the old card
- * layout this adds no per-item fudge. `A4_BILL_BUDGET_MM.closingBlock`
- * already carries its own calibrated margin (confirmed against a real
- * rendered page, not just this arithmetic), so it is not padded again here.
- */
-function assertNoSheetOverflows(order: Order) {
-  const pages = paginateOrderBill(order, snapshot);
-  pages.forEach(page => {
-    const capacity = page.isFirstPage ? A4_BILL_BUDGET_MM.firstPage : A4_BILL_BUDGET_MM.continuationPage;
-    const cards = page.items.reduce((sum, entry) => sum + getBillCardHeightMm(entry.item, snapshot), 0);
-    const closing = page.showClosing ? A4_BILL_BUDGET_MM.closingBlock : 0;
-    expect(cards + closing).toBeLessThanOrEqual(capacity);
-  });
-  return pages;
-}
 
 describe('garment measurement mapping', () => {
   it('gives a suit both a coat and a pant table', () => {
@@ -141,118 +129,164 @@ describe('garment remarks', () => {
   });
 });
 
-describe('bill card height', () => {
+
+describe('bill row text load', () => {
   it('does not vary by garment type when no descriptive text is recorded', () => {
-    // The bill's row height model reads description/fabric/remark text only —
+    // The bill's sizing model reads description/fabric/remark text only —
     // never measurement tables — so a garment with two measurement tables
     // (Full Coat Pant) takes no more room than one with none recorded here,
     // as long as neither has any bill-visible text of its own.
-    expect(getBillCardHeightMm(item('Full Coat Pant'), snapshot))
-      .toBe(getBillCardHeightMm(item('Shirt'), snapshot));
+    expect(billRowLines(item('Full Coat Pant'), snapshot))
+      .toBe(billRowLines(item('Shirt'), snapshot));
   });
 
-  it('ignores measurement data entirely — only the remark map affects height', () => {
+  it('ignores measurement data entirely — only the remark map affects size', () => {
     const withMeasurements: Partial<MeasurementRecord> = { ...snapshot };
     const withoutMeasurements: Partial<MeasurementRecord> = { unit: 'inches' };
-    expect(getBillCardHeightMm(item('Full Coat Pant'), withMeasurements))
-      .toBe(getBillCardHeightMm(item('Full Coat Pant'), withoutMeasurements));
+    expect(billRowLines(item('Full Coat Pant'), withMeasurements))
+      .toBe(billRowLines(item('Full Coat Pant'), withoutMeasurements));
   });
 
   it('grows with a long remark', () => {
-    const short = getBillCardHeightMm(item('Shirt', { remarks: 'Short' }), snapshot);
-    const long = getBillCardHeightMm(item('Shirt', { remarks: 'x'.repeat(400) }), snapshot);
+    const short = billRowLines(item('Shirt', { remarks: 'Short' }), snapshot);
+    const long = billRowLines(item('Shirt', { remarks: 'x'.repeat(400) }), snapshot);
     expect(long).toBeGreaterThan(short);
   });
 
   it('grows when fabric and styling were recorded', () => {
-    const bare = getBillCardHeightMm(item('Shirt'), snapshot);
-    const detailed = getBillCardHeightMm(
-      item('Shirt', { fabricName: 'Giza cotton', fabricCode: 'FB-1', styleNotes: 'Cutaway collar' }),
+    const bare = billRowLines(item('Shirt'), snapshot);
+    const detailed = billRowLines(
+      item('Shirt', { fabricName: 'Giza cotton hand-finished', fabricCode: 'FB-1', styleNotes: 'Cutaway collar, french cuffs, no chest pocket' }),
       snapshot
     );
     expect(detailed).toBeGreaterThan(bare);
   });
+
+  it('sums the load across every garment', () => {
+    const items = [item('Shirt'), item('Coat'), item('Pant')];
+    expect(billTextLoad(items, snapshot))
+      .toBe(items.reduce((s, i) => s + billRowLines(i, snapshot), 0));
+  });
+
+  it('never reports less than one line for an empty garment', () => {
+    expect(billRowLines(item('Shirt'), {})).toBe(1);
+    expect(billRowLines({} as OrderItem, {})).toBe(1);
+  });
 });
 
-describe('bill pagination', () => {
-  it('always produces at least one sheet', () => {
-    const pages = paginateOrderBill(orderWith([]), snapshot);
-    expect(pages).toHaveLength(1);
-    expect(pages[0].showClosing).toBe(true);
+describe('bill density tiers', () => {
+  it('tightens monotonically at every step of the ladder', () => {
+    for (let i = 1; i < DENSITY_ORDER.length; i++) {
+      const looser = densityTokens(DENSITY_ORDER[i - 1]);
+      const tighter = densityTokens(DENSITY_ORDER[i]);
+      expect(tighter.rowTextPx).toBeLessThan(looser.rowTextPx);
+      expect(tighter.rowPadY).toBeLessThan(looser.rowPadY);
+      expect(tighter.logoPx).toBeLessThan(looser.logoPx);
+      expect(tighter.qrPx).toBeLessThan(looser.qrPx);
+      expect(tighter.sectionGap).toBeLessThan(looser.sectionGap);
+    }
   });
 
-  it('keeps a small order on a single sheet', () => {
-    const pages = assertNoSheetOverflows(orderWith([item('Shirt')]));
-    expect(pages).toHaveLength(1);
-    expect(pages[0].isFirstPage && pages[0].isLastPage).toBe(true);
+  it('keeps even the tightest tier readable rather than shrinking without limit', () => {
+    const floor = densityTokens(DENSITY_ORDER[DENSITY_ORDER.length - 1]);
+    expect(floor.rowTextPx).toBeGreaterThanOrEqual(7);
+    expect(floor.disclaimerPx).toBeGreaterThanOrEqual(9);
+    // The QR must stay big enough to actually scan off the printed sheet.
+    expect(floor.qrPx).toBeGreaterThanOrEqual(56);
   });
 
-  it('never splits a garment across sheets and never repeats one', () => {
-    const order = orderWith([item('Full Coat Pant'), item('Coat'), item('Pant'), item('Shirt'), item('Kurta Pajama')]);
-    const seen = paginateOrderBill(order, snapshot).flatMap(p => p.items.map(i => i.originalIndex));
-    expect(seen).toEqual([0, 1, 2, 3, 4]);
-    expect(new Set(seen).size).toBe(5);
-  });
-
-  it('keeps garment numbering in order across sheets', () => {
-    const order = orderWith(Array.from({ length: 8 }, (_, i) => item(i % 2 ? 'Shirt' : 'Full Coat Pant')));
-    const indices = paginateOrderBill(order, snapshot).flatMap(p => p.items.map(i => i.originalIndex));
-    expect(indices).toEqual([...indices].sort((a, b) => a - b));
-  });
-
-  it('spills a large order onto more sheets rather than one crowded page', () => {
-    // Realistic, richly-described rows (the kind a real bill actually has) —
-    // bare rows with no text are too compact to force this on their own.
-    const heavy = () => item('Full Coat Pant', {
-      styleNotes: 'Italian cut, 2-button notch lapel, structured shoulder, dual vents, satin lining',
-      fabricName: 'Loro Piana Super 150s Midnight Navy Wool',
-      fabricCode: 'FB-FCP-150',
-      remarks: 'Peak lapel, surgeon cuffs with working buttonholes, contrast burgundy silk lining, ticket pocket on the right side.'
+  it('walks the ladder one step at a time and stops at the floor', () => {
+    // Derived from the ladder rather than spelled out, so adding a tier
+    // extends the check instead of breaking it.
+    DENSITY_ORDER.forEach((tier, i) => {
+      const expected = i < DENSITY_ORDER.length - 1 ? DENSITY_ORDER[i + 1] : null;
+      expect(tighterDensity(tier)).toBe(expected);
     });
-    const order = orderWith(Array.from({ length: 10 }, heavy));
-    const pages = assertNoSheetOverflows(order);
-    expect(pages.length).toBeGreaterThan(2);
-    expect(pages.every(p => p.totalPages === pages.length)).toBe(true);
   });
 
-  it('shows the closing block on the final sheet only', () => {
+  it('starts every bill at the loosest tier', () => {
+    // The tier is not guessed from the order. Every bill renders roomy first
+    // and is tightened only if the sheet it produced actually overflowed, so
+    // the tier that survives is the loosest one that genuinely fits.
+    expect(INITIAL_DENSITY).toBe(DENSITY_ORDER[0]);
+    expect(INITIAL_DENSITY).toBe('roomy');
+  });
+
+  it('hands the wrapping columns more of the table as it tightens', () => {
+    // Widening description and remarks is what buys room at high density:
+    // the same text wraps to fewer lines without the type getting smaller.
+    const roomy = densityTokens('roomy').columns;
+    const floor = densityTokens(DENSITY_ORDER[DENSITY_ORDER.length - 1]).columns;
+    expect(floor.description + floor.remarks).toBeGreaterThan(roomy.description + roomy.remarks);
+  });
+
+  it('keeps every column set summing to a full table width', () => {
+    for (const key of DENSITY_ORDER) {
+      const c = densityTokens(key).columns;
+      const total = c.sno + c.garment + c.description + c.fabric + c.qty + c.remarks + c.amount;
+      expect(total).toBeCloseTo(100, 5);
+    }
+  });
+
+  it('always leaves a writable Amount column, at every tier', () => {
+    for (const key of DENSITY_ORDER) {
+      expect(densityTokens(key).columns.amount).toBeGreaterThanOrEqual(12);
+    }
+  });
+
+  it('falls back to a usable tier for an unknown key', () => {
+    expect(densityTokens('nonsense' as never).rowTextPx).toBeGreaterThan(0);
+  });
+});
+
+describe('single-page bill plan', () => {
+  it('puts every garment on the one sheet, in order', () => {
     const order = orderWith([item('Full Coat Pant'), item('Coat'), item('Pant'), item('Shirt'), item('Kurta Pajama')]);
-    const pages = paginateOrderBill(order, snapshot);
-    const closing = pages.filter(p => p.showClosing);
-    expect(closing).toHaveLength(1);
-    expect(closing[0].isLastPage).toBe(true);
+    const plan = planOrderBill(order, snapshot);
+    expect(plan.items.map(i => i.originalIndex)).toEqual([0, 1, 2, 3, 4]);
   });
 
-  it('reserves room for the signature area rather than overflowing it', () => {
-    assertNoSheetOverflows(orderWith([item('Full Coat Pant'), item('Kurta Pajama')]));
-    // A genuinely long remark (~150 characters — several sentences of
-    // alteration notes) wraps to enough lines that the row alone, plus the
-    // closing block, would overflow the first sheet without the reservation.
-    assertNoSheetOverflows(orderWith([item('Full Coat Pant', { remarks: 'x'.repeat(150) })]));
+  it('never drops a garment, however many the order has', () => {
+    // There is no second page to defer to, so a large order must still
+    // render every row — the layout gets denser, the content stays whole.
+    for (const n of [1, 2, 5, 8, 12, 20, 40]) {
+      const order = orderWith(Array.from({ length: n }, (_, i) => item(`G${i}`)));
+      expect(planOrderBill(order, snapshot).items).toHaveLength(n);
+    }
   });
 
-  it('packs multiple garments onto a sheet, not one row per page', () => {
-    // Five undecorated rows comfortably share the row budget of the opening
-    // sheet even though, together with the reserved closing block, they no
-    // longer all fit on that same sheet — proving the algorithm packs what it
-    // can rather than fleeing to a fresh page after a single item.
-    const order = orderWith([item('Shirt'), item('Coat'), item('Pant'), item('Kurta Pajama'), item('Full Coat Pant')]);
-    const pages = assertNoSheetOverflows(order);
-    expect(pages[0].items.length).toBeGreaterThan(1);
+  it('keeps S.No. stable and unique across the sheet', () => {
+    const order = orderWith(Array.from({ length: 9 }, (_, i) => item(i % 2 ? 'Shirt' : 'Full Coat Pant')));
+    const indices = planOrderBill(order, snapshot).items.map(i => i.originalIndex);
+    expect(indices).toEqual([...indices].sort((a, b) => a - b));
+    expect(new Set(indices).size).toBe(9);
+  });
+
+  it('reports the text load the table has to carry', () => {
+    const items = [item('Shirt', { remarks: 'Cutaway collar' }), item('Coat')];
+    const plan = planOrderBill(orderWith(items), snapshot);
+    expect(plan.textLoad).toBe(billTextLoad(items, snapshot));
+  });
+
+  it('handles an order with no garments', () => {
+    const plan = planOrderBill(orderWith([]), snapshot);
+    expect(plan.items).toHaveLength(0);
+    expect(plan.textLoad).toBe(0);
   });
 
   it('ignores malformed garment entries', () => {
     const order = orderWith([null as any, item('Shirt'), undefined as any]);
-    expect(paginateOrderBill(order, snapshot).flatMap(p => p.items)).toHaveLength(1);
+    expect(planOrderBill(order, snapshot).items).toHaveLength(1);
   });
 
   it('handles an order whose items field is not an array', () => {
     const order = { ...orderWith([]), items: 'broken' as any };
-    expect(() => paginateOrderBill(order, snapshot)).not.toThrow();
-    expect(paginateOrderBill(order, snapshot)).toHaveLength(1);
+    expect(() => planOrderBill(order, snapshot)).not.toThrow();
+    expect(planOrderBill(order, snapshot).items).toHaveLength(0);
   });
 
   it('handles a null order', () => {
-    expect(paginateOrderBill(null, snapshot)).toHaveLength(1);
+    expect(() => planOrderBill(null, snapshot)).not.toThrow();
+    expect(planOrderBill(null, snapshot).items).toHaveLength(0);
   });
 });

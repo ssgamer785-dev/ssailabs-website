@@ -1,33 +1,48 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { MapPin, Phone, User, FileText } from 'lucide-react';
 import { Order, MeasurementRecord, ShowroomProfile } from '../../types';
-import { OrderBillPageData } from '../../utils/orderBillPagination';
+import {
+  BillColumnWidths,
+  BillDensity,
+  INITIAL_DENSITY,
+  densityTokens,
+  planOrderBill,
+  tighterDensity
+} from '../../utils/orderBillLayout';
 import { OrderBillGarmentRow } from './OrderBillGarmentRow';
 import regencyLogoImg from '../../assets/images/regency-tailors-logo.jpg';
+import instagramQrImg from '../../assets/images/regency-instagram-qr.webp';
+import googleQrImg from '../../assets/images/regency-google-qr.webp';
 import { SHOWROOM_ADDRESS_LINE1, SHOWROOM_ADDRESS_LINE2, SHOWROOM_PHONE } from './PrintableRegencyBill';
 
 export interface OrderBillPageProps {
   id: string;
-  pageData: OrderBillPageData;
   order: Order;
   snapshot: Partial<MeasurementRecord>;
   profile?: ShowroomProfile | null;
+  /** Reports the density actually used once the sheet has been measured. */
+  onDensityResolved?: (density: BillDensity) => void;
 }
 
-const TABLE_COLUMNS: { label: string; width: string; align?: 'left' | 'center' }[] = [
-  { label: 'S.NO.', width: '5%', align: 'center' },
-  { label: 'PRODUCT / GARMENT', width: '14%' },
-  { label: 'DESCRIPTION / STITCHING DETAILS', width: '23%' },
-  { label: 'FABRIC', width: '15%' },
-  { label: 'QTY.', width: '6%', align: 'center' },
-  { label: 'REMARKS', width: '22%' },
-  { label: 'AMOUNT', width: '15%', align: 'center' }
+const TABLE_COLUMNS: { label: string; key: keyof BillColumnWidths; align?: 'left' | 'center' }[] = [
+  { label: 'S.NO.', key: 'sno', align: 'center' },
+  { label: 'PRODUCT / GARMENT', key: 'garment' },
+  { label: 'DESCRIPTION / STITCHING DETAILS', key: 'description' },
+  { label: 'FABRIC', key: 'fabric' },
+  { label: 'QTY.', key: 'qty', align: 'center' },
+  { label: 'REMARKS', key: 'remarks' },
+  { label: 'AMOUNT', key: 'amount', align: 'center' }
 ];
 
 /**
- * One A4 sheet of the customer order bill.
+ * The customer order bill — one A4 portrait sheet, always.
  *
- * Two rules this document holds to everywhere, not just in the obvious spot:
+ * Three rules this document holds to everywhere, not just in the obvious spot:
+ *
+ *   - It is never more than one page. The sheet is a fixed-height box, and the
+ *     effect below measures the real rendered content and tightens the density
+ *     tier until it fits. Nothing is clipped or dropped to achieve that: the
+ *     layout gets denser, the content stays whole.
  *   - No measurement of any kind appears here. That is the Production Slip's
  *     job; this component never imports the measurement-table logic at all.
  *   - No financial figure is ever computed or pre-filled. A Payment Details
@@ -35,8 +50,65 @@ const TABLE_COLUMNS: { label: string; width: string; align?: 'left' | 'center' }
  *     the owner to fill in by hand — never populated from the order's stored
  *     totals, which is why `order.totalAmount` etc. are never read here.
  */
-export const OrderBillPage: React.FC<OrderBillPageProps> = ({ id, pageData, order, snapshot, profile }) => {
-  const { pageIndex, totalPages, isFirstPage, isLastPage, items, showClosing } = pageData;
+export const OrderBillPage: React.FC<OrderBillPageProps> = ({
+  id,
+  order,
+  snapshot,
+  profile,
+  onDensityResolved
+}) => {
+  const plan = planOrderBill(order, snapshot);
+  const [density, setDensity] = useState<BillDensity>(INITIAL_DENSITY);
+  // Set only in the extreme case handled below: content that still overflows
+  // at the floor density tier. The garment catalog offers five garment types,
+  // each selectable once, so no order the wizard can produce reaches this —
+  // it exists only so an unusually large imported or hand-edited order is
+  // never silently clipped.
+  const [overflowSafety, setOverflowSafety] = useState(false);
+  const flowRef = useRef<HTMLDivElement>(null);
+
+  // Restart from the loosest tier whenever the order changes, so a bill that
+  // got tightened for a previous order does not stay tight for the next one.
+  const orderKey = order?.id || order?.orderNumber || '';
+  useLayoutEffect(() => {
+    setDensity(INITIAL_DENSITY);
+    setOverflowSafety(false);
+  }, [orderKey]);
+
+  const densityCallback = useRef(onDensityResolved);
+  densityCallback.current = onDensityResolved;
+
+  /**
+   * Measured auto-fit. Runs before paint, so a tightened tier is never seen as
+   * a flicker. One step per commit: setting state re-runs this effect against
+   * the newly rendered tier, walking down only as far as the content needs —
+   * which means the tier that survives is the loosest one that actually fits.
+   */
+  useLayoutEffect(() => {
+    const flow = flowRef.current;
+    if (!flow) return;
+    // scrollHeight vs clientHeight is a direct overflow test on the flex
+    // region that holds the document body — no millimetre conversion, and no
+    // assumption about the print scale factor.
+    const overflows = flow.scrollHeight > flow.clientHeight + 1;
+    if (overflows) {
+      const next = tighterDensity(density);
+      if (next) {
+        setDensity(next);
+        return;
+      }
+      // Already at the floor tier and still too tall. Every field is at its
+      // smallest readable size, so the only remaining choices are to clip
+      // content or let the sheet grow past one page for this one order.
+      // Losing content is never acceptable, so it grows — printing very
+      // slightly onto a second sheet is a far smaller failure than a
+      // customer bill missing a garment the shop is actually making them.
+      setOverflowSafety(true);
+    }
+    densityCallback.current?.(density);
+  }, [density]);
+
+  const tokens = densityTokens(density);
 
   const rawOrderNum = order.orderNumber || order.id || '';
   const numericOrderNum = rawOrderNum.replace(/[^0-9]/g, '') || rawOrderNum;
@@ -64,37 +136,106 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({ id, pageData, orde
 
   const metaRow = (label: string, value: string) => (
     <>
-      <span className="text-[9px] font-bold text-[#4A5568] uppercase tracking-wide" style={{ whiteSpace: 'nowrap' }}>
+      <span
+        className="font-bold text-[#4A5568] uppercase tracking-wide"
+        style={{ whiteSpace: 'nowrap', fontSize: tokens.metaLabelPx }}
+      >
         {label}
       </span>
-      <span className="text-[9.5px] font-bold text-[#4A5568]">:</span>
-      <span className="text-[10.5px] font-black text-[#071426]">{value}</span>
+      <span className="font-bold text-[#4A5568]" style={{ fontSize: tokens.metaLabelPx }}>:</span>
+      <span className="font-black text-[#071426]" style={{ fontSize: tokens.metaValuePx }}>
+        {value}
+      </span>
     </>
   );
 
   const paymentLine = (label: string) => (
     <div className="flex items-baseline gap-2">
-      <span className="text-[9.5px] font-black text-[#071426] uppercase tracking-wide shrink-0" style={{ whiteSpace: 'nowrap' }}>
+      <span
+        className="font-black text-[#071426] uppercase tracking-wide shrink-0"
+        style={{ whiteSpace: 'nowrap', fontSize: tokens.paymentLabelPx }}
+      >
         {label}
       </span>
-      <span className="flex-1 border-b border-[#8C7E6A] h-4" />
+      <span className="flex-1 border-b border-[#8C7E6A]" style={{ height: tokens.paymentLineH }} />
+    </div>
+  );
+
+  /**
+   * A QR tile. Both codes sit on their own white card: the Instagram file has
+   * a fully transparent edge, and a QR needs a light quiet zone around it to
+   * scan reliably — neither can be left to chance on a navy header.
+   *
+   * Both source images place their code across 80% of their own width, so
+   * giving both tiles the same width renders both codes at the same module
+   * size. Height is left to follow the aspect ratio, which is why the
+   * Instagram tile is taller: its file carries its @handle caption beneath
+   * the code, and squeezing that to match would distort the code itself.
+   */
+  const qrTile = (src: string, alt: string, label: string) => (
+    <div className="flex flex-col items-center gap-1" style={{ width: tokens.qrPx }}>
+      <div className="bg-white rounded-lg p-[3px] border border-[#C9A24A]/50" style={{ width: '100%' }}>
+        <img
+          src={src}
+          alt={alt}
+          className="w-full h-auto block"
+          style={{ objectFit: 'contain', imageRendering: 'crisp-edges' }}
+        />
+      </div>
+      <span
+        className="font-bold text-[#D8CFBF] uppercase text-center leading-tight"
+        style={{ fontSize: tokens.qrLabelPx, letterSpacing: '0.04em' }}
+      >
+        {label}
+      </span>
     </div>
   );
 
   return (
     <div
       id={id}
-      data-page-index={pageIndex}
+      data-density={density}
+      data-overflow-safety={overflowSafety || undefined}
       className="a4-bill-page bg-[#FAF7F0] border-2 border-[#C9A24A] rounded-2xl overflow-hidden mx-auto flex flex-col text-[#071426] print:rounded-none print:border-none"
-      style={{ boxSizing: 'border-box', fontFamily: "'Manrope', system-ui, -apple-system, sans-serif" }}
+      style={{
+        boxSizing: 'border-box',
+        fontFamily: "'Manrope', system-ui, -apple-system, sans-serif",
+        // The one documented exception to a fixed one-page height: content
+        // that still overflows at the smallest readable type. See the
+        // overflow-safety branch in the measuring effect above.
+        ...(overflowSafety ? { height: 'auto', maxHeight: 'none', overflow: 'visible' } : {})
+      }}
     >
-      <div className="flex-1">
-        {isFirstPage ? (
-          <>
-            {/* ============ PREMIUM BRAND HEADER ============ */}
-            <div className="bg-[#071426] text-white px-6 pt-6 pb-4 text-center relative">
-              <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-[#8A6822] via-[#F0D48A] to-[#8A6822]" />
+      {/* The measured region: everything except the fixed footer bar. Laid out
+          as a column so the garment table can absorb whatever space the order
+          does not need, which keeps the closing blocks on the bottom edge of
+          the sheet instead of leaving a pool of dead space beneath them. */}
+      <div
+        ref={flowRef}
+        className="a4-bill-flow flex-1 min-h-0 flex flex-col"
+        style={overflowSafety ? { overflow: 'visible', height: 'auto', maxHeight: 'none' } : { overflow: 'hidden' }}
+      >
+        {/* ============ PREMIUM BRAND HEADER ============ */}
+        <div
+          className="bg-[#071426] text-white px-5 relative"
+          style={{ paddingTop: tokens.headerPadY, paddingBottom: tokens.headerPadY * 0.7 }}
+        >
+          <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-[#8A6822] via-[#F0D48A] to-[#8A6822]" />
 
+          {/* QR | brand | QR. The codes occupy the space either side of a
+              centred lockup that would otherwise be empty, which is what keeps
+              the header from growing to accommodate them. */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `${tokens.qrPx}px 1fr ${tokens.qrPx}px`,
+              alignItems: 'center',
+              columnGap: 12
+            }}
+          >
+            {qrTile(instagramQrImg, 'Regency Tailors on Instagram', 'Follow Us On Instagram')}
+
+            <div className="text-center">
               {/*
                 Sized by WIDTH, not height: a shared print rule elsewhere
                 releases every descendant of the print modal from a fixed
@@ -105,7 +246,7 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({ id, pageData, orde
                 broad enough to fix here would also touch the Production Slip
                 and the existing admin bill.
               */}
-              <div className="mx-auto" style={{ width: '148px' }}>
+              <div className="mx-auto" style={{ width: tokens.logoPx }}>
                 <img
                   src={regencyLogoImg}
                   alt="Regency Tailors"
@@ -113,140 +254,150 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({ id, pageData, orde
                 />
               </div>
 
-              <svg width="170" height="14" viewBox="0 0 200 18" fill="#C9A24A" className="opacity-90 mx-auto mt-2.5">
-                <path d="M100 0 C110 9, 138 12, 200 12 C155 12, 143 18, 100 18 C57 18, 45 12, 0 12 C62 12, 90 9, 100 0 Z" />
-              </svg>
-
               <h1
                 className="font-black tracking-[0.16em] text-[#D4AF5A] uppercase m-0"
-                style={{ fontFamily: "'Cinzel', 'Playfair Display', serif", lineHeight: 1.15, fontSize: '34px' }}
+                style={{
+                  fontFamily: "'Cinzel', 'Playfair Display', serif",
+                  lineHeight: 1.12,
+                  fontSize: tokens.brandPx,
+                  marginTop: tokens.sectionGap * 0.5
+                }}
               >
                 REGENCY TAILORS
               </h1>
 
-              <svg width="170" height="14" viewBox="0 0 200 18" fill="#C9A24A" className="opacity-90 mx-auto mt-1 rotate-180">
-                <path d="M100 0 C110 9, 138 12, 200 12 C155 12, 143 18, 100 18 C57 18, 45 12, 0 12 C62 12, 90 9, 100 0 Z" />
-              </svg>
-
-              <div className="text-[10px] font-bold text-[#E6D5B8] uppercase tracking-[0.3em] mt-1.5">
+              <div
+                className="font-bold text-[#E6D5B8] uppercase"
+                style={{ fontSize: tokens.taglinePx, letterSpacing: '0.22em', marginTop: 3 }}
+              >
                 PREMIUM TAILORING &nbsp;•&nbsp; PERFECT FIT &nbsp;•&nbsp; TIMELESS STYLE
               </div>
-
-              <div className="w-full h-[1.5px] bg-gradient-to-r from-transparent via-[#C9A24A]/70 to-transparent my-3" />
-
-              <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                <MapPin className="w-3.5 h-3.5 text-[#C9A24A] shrink-0" />
-                <span className="text-[10.5px] font-bold text-[#D8CFBF] uppercase tracking-wide">
-                  {showroomAddress}
-                </span>
-                <span className="text-[#C9A24A] mx-1">•</span>
-                <Phone className="w-3.5 h-3.5 text-[#C9A24A] shrink-0" />
-                <span className="text-[11px] font-bold text-white tracking-wider">{showroomPhone}</span>
-              </div>
             </div>
 
-            {/* ============ ORDER + CUSTOMER ============ */}
-            <div className="px-5 pt-3.5 pb-2">
-              <div className="text-center mb-2.5">
-                <span className="inline-block text-[11px] font-black tracking-[0.3em] text-[#8C7E6A] uppercase border-y border-[#DFD7C7] py-1.5 px-8">
-                  Customer Bill
-                </span>
-              </div>
+            {qrTile(googleQrImg, 'Regency Tailors on Google', 'Review Us On Google')}
+          </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div className="bg-white p-2.5 rounded-xl border border-[#DFD7C7] space-y-1.5">
-                  <div className="flex items-center gap-1.5 pb-1 border-b border-[#E8E0D2]">
-                    <div className="w-5 h-5 rounded-md bg-[#C9A24A] text-white flex items-center justify-center">
-                      <User className="w-3.5 h-3.5" />
-                    </div>
-                    <h3 className="text-[11px] font-black tracking-wider text-[#071426] uppercase m-0">
-                      CUSTOMER DETAILS
-                    </h3>
-                  </div>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'max-content max-content 1fr',
-                      rowGap: '3.5px',
-                      columnGap: '6px',
-                      alignItems: 'baseline'
-                    }}
-                  >
-                    {metaRow('NAME', order.customerName || '—')}
-                    {metaRow('MOBILE', order.customerPhone || '—')}
-                    {metaRow('ADDRESS', addressLine || '—')}
-                  </div>
-                </div>
+          <div
+            className="w-full h-[1.5px] bg-gradient-to-r from-transparent via-[#C9A24A]/70 to-transparent"
+            style={{ marginTop: tokens.sectionGap * 0.7, marginBottom: tokens.sectionGap * 0.55 }}
+          />
 
-                <div className="bg-white p-2.5 rounded-xl border border-[#DFD7C7] space-y-1.5">
-                  <div className="flex items-center gap-1.5 pb-1 border-b border-[#E8E0D2]">
-                    <div className="w-5 h-5 rounded-md bg-[#C9A24A] text-white flex items-center justify-center">
-                      <FileText className="w-3.5 h-3.5" />
-                    </div>
-                    <h3 className="text-[11px] font-black tracking-wider text-[#071426] uppercase m-0">
-                      ORDER DETAILS
-                    </h3>
-                  </div>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'max-content max-content 1fr',
-                      rowGap: '3.5px',
-                      columnGap: '6px',
-                      alignItems: 'baseline'
-                    }}
-                  >
-                    {metaRow('BILL NO.', billNo)}
-                    {metaRow('ORDER NO.', numericOrderNum || '—')}
-                    {metaRow('ORDER DATE', formatDate(order.orderDate))}
-                    {metaRow('DELIVERY DATE', formatDate(order.deliveryDate))}
-                  </div>
+          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+            <MapPin className="w-3 h-3 text-[#C9A24A] shrink-0" />
+            <span
+              className="font-bold text-[#D8CFBF] uppercase tracking-wide"
+              style={{ fontSize: tokens.metaValuePx }}
+            >
+              {showroomAddress}
+            </span>
+            <span className="text-[#C9A24A] mx-1">•</span>
+            <Phone className="w-3 h-3 text-[#C9A24A] shrink-0" />
+            <span className="font-bold text-white tracking-wider" style={{ fontSize: tokens.metaValuePx }}>
+              {showroomPhone}
+            </span>
+          </div>
+        </div>
+
+        {/* ============ CUSTOMER + ORDER ============ */}
+        <div className="px-5" style={{ paddingTop: tokens.sectionGap, paddingBottom: tokens.sectionGap * 0.5 }}>
+          <div className="text-center" style={{ marginBottom: tokens.sectionGap * 0.8 }}>
+            <span
+              className="inline-block font-black tracking-[0.3em] text-[#8C7E6A] uppercase border-y border-[#DFD7C7] px-8"
+              style={{ fontSize: tokens.metaValuePx, paddingTop: 4, paddingBottom: 4 }}
+            >
+              Customer Bill
+            </span>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div
+              className="bg-white rounded-xl border border-[#DFD7C7]"
+              style={{ padding: tokens.blockPadY }}
+            >
+              <div
+                className="flex items-center gap-1.5 border-b border-[#E8E0D2]"
+                style={{ paddingBottom: 4, marginBottom: 5 }}
+              >
+                <div className="w-4 h-4 rounded-md bg-[#C9A24A] text-white flex items-center justify-center shrink-0">
+                  <User className="w-3 h-3" />
                 </div>
-              </div>
-            </div>
-          </>
-        ) : (
-          /* ============ CONTINUATION HEADER ============ */
-          <div className="bg-[#071426] text-white px-5 py-2.5 flex items-center justify-between gap-3 relative">
-            <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-[#8A6822] via-[#F0D48A] to-[#8A6822]" />
-            <div className="flex items-center gap-2.5 min-w-0">
-              <img
-                src={regencyLogoImg}
-                alt="Regency Tailors"
-                className="w-9 h-9 object-contain rounded shrink-0"
-                style={{ objectFit: 'contain' }}
-              />
-              <div className="min-w-0">
-                <div
-                  className="text-[13px] font-black tracking-[0.12em] text-[#D4AF5A] uppercase leading-tight"
-                  style={{ fontFamily: "'Cinzel', serif" }}
+                <h3
+                  className="font-black tracking-wider text-[#071426] uppercase m-0"
+                  style={{ fontSize: tokens.metaValuePx }}
                 >
-                  REGENCY TAILORS
-                </div>
-                <div className="text-[9px] font-bold text-[#D8CFBF] truncate">
-                  {order.customerName} • {order.customerPhone}
-                </div>
+                  CUSTOMER DETAILS
+                </h3>
+              </div>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'max-content max-content 1fr',
+                  rowGap: 3,
+                  columnGap: 6,
+                  alignItems: 'baseline'
+                }}
+              >
+                {metaRow('NAME', order.customerName || '—')}
+                {metaRow('MOBILE', order.customerPhone || '—')}
+                {metaRow('ADDRESS', addressLine || '—')}
               </div>
             </div>
-            <div className="text-right shrink-0">
-              <div className="text-[9px] font-bold text-[#A39682] uppercase tracking-wider">Continued</div>
-              <div className="text-[11px] font-black text-[#D4AF5A] font-mono">{billNo}</div>
+
+            <div
+              className="bg-white rounded-xl border border-[#DFD7C7]"
+              style={{ padding: tokens.blockPadY }}
+            >
+              <div
+                className="flex items-center gap-1.5 border-b border-[#E8E0D2]"
+                style={{ paddingBottom: 4, marginBottom: 5 }}
+              >
+                <div className="w-4 h-4 rounded-md bg-[#C9A24A] text-white flex items-center justify-center shrink-0">
+                  <FileText className="w-3 h-3" />
+                </div>
+                <h3
+                  className="font-black tracking-wider text-[#071426] uppercase m-0"
+                  style={{ fontSize: tokens.metaValuePx }}
+                >
+                  ORDER DETAILS
+                </h3>
+              </div>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'max-content max-content 1fr',
+                  rowGap: 3,
+                  columnGap: 6,
+                  alignItems: 'baseline'
+                }}
+              >
+                {metaRow('BILL NO.', billNo)}
+                {metaRow('ORDER NO.', numericOrderNum || '—')}
+                {metaRow('ORDER DATE', formatDate(order.orderDate))}
+                {metaRow('DELIVERY DATE', formatDate(order.deliveryDate))}
+              </div>
             </div>
           </div>
-        )}
+        </div>
 
         {/* ============ PRODUCT / GARMENT TABLE (no measurements, no computed amounts) ============ */}
-        <div className="px-5 py-2.5">
-          {isFirstPage && (
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[10px] font-black text-[#071426] uppercase tracking-wider">
-                Product / Garment Details
-              </span>
-              <span className="text-[9px] font-bold text-[#8C7E6A] uppercase tracking-wider">
-                {garmentCount} {garmentCount === 1 ? 'Piece' : 'Pieces'}
-              </span>
-            </div>
-          )}
+        <div
+          className="px-5"
+          style={{ paddingTop: tokens.sectionGap * 0.5, paddingBottom: tokens.sectionGap * 0.6 }}
+        >
+          <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
+            <span
+              className="font-black text-[#071426] uppercase tracking-wider"
+              style={{ fontSize: tokens.metaValuePx }}
+            >
+              Product / Garment Details
+            </span>
+            <span
+              className="font-bold text-[#8C7E6A] uppercase tracking-wider"
+              style={{ fontSize: tokens.metaLabelPx }}
+            >
+              {garmentCount} {garmentCount === 1 ? 'Piece' : 'Pieces'}
+            </span>
+          </div>
 
           <table
             className="order-bill-table w-full border-collapse rounded-lg overflow-hidden"
@@ -254,7 +405,7 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({ id, pageData, orde
           >
             <colgroup>
               {TABLE_COLUMNS.map((c, i) => (
-                <col key={i} style={{ width: c.width }} />
+                <col key={i} style={{ width: `${tokens.columns[c.key]}%` }} />
               ))}
             </colgroup>
             <thead>
@@ -262,8 +413,15 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({ id, pageData, orde
                 {TABLE_COLUMNS.map((c, i) => (
                   <th
                     key={i}
-                    className="border border-[#071426] px-2 py-1.5 font-black uppercase tracking-wider"
-                    style={{ fontSize: '8.5px', textAlign: c.align === 'center' ? 'center' : 'left' }}
+                    className="border border-[#071426] font-black uppercase tracking-wider"
+                    style={{
+                      fontSize: tokens.tableHeadPx,
+                      textAlign: c.align === 'center' ? 'center' : 'left',
+                      paddingTop: 5,
+                      paddingBottom: 5,
+                      paddingLeft: 6,
+                      paddingRight: 6
+                    }}
                   >
                     {c.label}
                   </th>
@@ -271,106 +429,171 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({ id, pageData, orde
               </tr>
             </thead>
             <tbody>
-              {items.map(({ item, originalIndex }) => (
+              {plan.items.map(({ item, originalIndex }) => (
                 <OrderBillGarmentRow
                   key={item.id || originalIndex}
                   item={item}
                   index={originalIndex}
                   snapshot={snapshot}
+                  tokens={tokens}
                 />
               ))}
             </tbody>
           </table>
         </div>
 
+        {/*
+          Flexible spacer. A short order does not fill 277mm on its own, and
+          the closing blocks below are fixed height — so *something* has to
+          absorb the leftover room. The only flex-grow child in this column,
+          so it silently takes whatever the header/details/table/closing did
+          not need, keeping the closing blocks anchored to the bottom edge of
+          the sheet instead of leaving them stranded mid-page.
+        */}
+        <div style={{ flex: '1 1 auto', minHeight: tokens.sectionGap, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="w-full px-10 flex items-center gap-3">
+            <div className="flex-1 border-t border-[#C9A24A]/60" />
+            <div className="border border-[#C9A24A] shrink-0" style={{ width: 6, height: 6, transform: 'rotate(45deg)' }} />
+            <div className="flex-1 border-t border-[#C9A24A]/60" />
+          </div>
+        </div>
+
         {/* ============ CLOSING: notes, payment lines, terms, signatures, disclaimer ============ */}
-        {isLastPage && showClosing && (
-          <div className="px-5 pb-2 space-y-2.5 break-inside-avoid">
+        <div className="px-5" style={{ paddingBottom: tokens.sectionGap * 0.5 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.sectionGap * 0.75 }}>
             {orderNotes && (
-              <div className="bg-white border border-[#DFD7C7] rounded-xl px-3 py-2">
-                <span className="block text-[8.5px] font-black text-[#8C7E6A] uppercase tracking-wider">
+              <div
+                className="bg-white border border-[#DFD7C7] rounded-xl px-3"
+                style={{ paddingTop: tokens.blockPadY * 0.7, paddingBottom: tokens.blockPadY * 0.7 }}
+              >
+                <span
+                  className="block font-black text-[#8C7E6A] uppercase tracking-wider"
+                  style={{ fontSize: tokens.metaLabelPx }}
+                >
                   Order Notes
                 </span>
-                <p className="text-[10.5px] font-semibold text-[#071426] leading-relaxed m-0 whitespace-pre-wrap">
+                <p
+                  className="font-semibold text-[#071426] m-0 whitespace-pre-wrap"
+                  style={{ fontSize: tokens.rowTextPx, lineHeight: tokens.rowLeading }}
+                >
                   {orderNotes}
                 </p>
               </div>
             )}
 
             {/* PAYMENT DETAILS — blank lines only. Never populated, never calculated. */}
-            <div className="bg-white border-2 border-[#C9A24A] rounded-xl px-4 py-3">
-              <h4 className="text-[10.5px] font-black text-[#071426] uppercase tracking-[0.2em] m-0 mb-2 pb-1.5 border-b border-[#E8E0D2]">
+            <div
+              className="bg-white border-2 border-[#C9A24A] rounded-xl px-4"
+              style={{ paddingTop: tokens.blockPadY, paddingBottom: tokens.blockPadY }}
+            >
+              <h4
+                className="font-black text-[#071426] uppercase tracking-[0.2em] m-0 border-b border-[#E8E0D2]"
+                style={{
+                  fontSize: tokens.metaValuePx,
+                  marginBottom: tokens.paymentRowGap * 0.7,
+                  paddingBottom: 5
+                }}
+              >
                 Payment Details
               </h4>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: '20px', rowGap: '9px' }}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  columnGap: 20,
+                  rowGap: tokens.paymentRowGap
+                }}
+              >
                 {paymentLine('Total Amount')}
                 {paymentLine('Advance Paid')}
                 {paymentLine('Balance')}
                 {paymentLine('Payment Mode')}
               </div>
-              <div className="mt-2.5">{paymentLine('Payment Date')}</div>
+              <div style={{ marginTop: tokens.paymentRowGap }}>{paymentLine('Payment Date')}</div>
             </div>
 
             {/* TERMS & CONDITIONS — short, factual, nothing invented */}
-            <div className="bg-[#FAF7F0] border border-[#DFD7C7] rounded-xl px-3.5 py-2">
-              <span className="block text-[8.5px] font-black text-[#8C7E6A] uppercase tracking-wider mb-1">
+            <div
+              className="bg-[#FAF7F0] border border-[#DFD7C7] rounded-xl px-3.5"
+              style={{ paddingTop: tokens.blockPadY * 0.65, paddingBottom: tokens.blockPadY * 0.65 }}
+            >
+              <span
+                className="block font-black text-[#8C7E6A] uppercase tracking-wider"
+                style={{ fontSize: tokens.metaLabelPx, marginBottom: 2 }}
+              >
                 Terms &amp; Conditions
               </span>
-              <ul className="text-[9.5px] font-semibold text-[#4A5568] leading-relaxed m-0 pl-3.5 space-y-0.5" style={{ listStyleType: 'disc' }}>
+              <ul
+                className="font-semibold text-[#4A5568] m-0 pl-3.5"
+                style={{ listStyleType: 'disc', fontSize: tokens.termsPx, lineHeight: 1.45 }}
+              >
                 <li>Please retain this bill and present it at the time of order collection.</li>
                 <li>Kindly verify all garment details at the time of delivery.</li>
               </ul>
             </div>
 
-            <div className="text-center py-0.5">
-              <div className="flex items-center justify-center gap-2.5">
-                <div className="h-[1px] bg-gradient-to-r from-transparent to-[#C9A24A] flex-1 max-w-[80px]" />
-                <h4 className="text-[11px] font-black text-[#071426] uppercase tracking-widest m-0">THANK YOU!</h4>
-                <div className="h-[1px] bg-gradient-to-l from-transparent to-[#C9A24A] flex-1 max-w-[80px]" />
-              </div>
-              <p className="text-[9.5px] font-semibold text-[#4A5568] m-0 mt-0.5">
-                For choosing Regency Tailors.
-              </p>
-            </div>
-
             {/* SIGNATURES */}
             <div
-              className="bg-white border border-[#DFD7C7] rounded-xl px-3 py-3"
-              style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: '24px' }}
+              className="bg-white border border-[#DFD7C7] rounded-xl px-3"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                columnGap: 24,
+                paddingTop: tokens.blockPadY * 0.8,
+                paddingBottom: tokens.blockPadY * 0.8
+              }}
             >
               <div>
-                <div className="border-b border-[#071426] h-7" />
-                <span className="block text-[8.5px] font-bold text-[#8C7E6A] uppercase tracking-wider mt-1">
+                <div className="border-b border-[#071426]" style={{ height: tokens.signatureLineH }} />
+                <span
+                  className="block font-bold text-[#8C7E6A] uppercase tracking-wider"
+                  style={{ fontSize: tokens.metaLabelPx, marginTop: 3 }}
+                >
                   Customer Signature
                 </span>
               </div>
               <div>
-                <div className="border-b border-[#071426] h-7" />
-                <span className="block text-[8.5px] font-bold text-[#8C7E6A] uppercase tracking-wider mt-1">
+                <div className="border-b border-[#071426]" style={{ height: tokens.signatureLineH }} />
+                <span
+                  className="block font-bold text-[#8C7E6A] uppercase tracking-wider"
+                  style={{ fontSize: tokens.metaLabelPx, marginTop: 3 }}
+                >
                   For Regency Tailors
                 </span>
               </div>
             </div>
 
             {/* REQUIRED FINAL DISCLAIMER — the closing message of the whole document */}
-            <div className="bg-[#071426] rounded-xl px-4 py-2.5 text-center border-2 border-[#C9A24A]">
-              <p className="text-[11px] font-black text-[#F0D48A] uppercase tracking-wide m-0">
+            <div
+              className="bg-[#071426] rounded-xl px-4 text-center border-2 border-[#C9A24A]"
+              style={{ paddingTop: tokens.blockPadY * 0.7, paddingBottom: tokens.blockPadY * 0.7 }}
+            >
+              <p
+                className="font-black text-[#F0D48A] uppercase tracking-wide m-0"
+                style={{ fontSize: tokens.disclaimerPx }}
+              >
                 We are not responsible for clothes after 2 months.
               </p>
             </div>
           </div>
-        )}
+        </div>
       </div>
 
-      {/* ============ FOOTER (every sheet) ============ */}
-      <div className="bg-[#071426] text-white px-5 py-2 relative shrink-0">
+      {/* ============ FOOTER ============ */}
+      <div className="bg-[#071426] text-white px-5 py-1.5 relative shrink-0">
         <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-[#8A6822] via-[#E5C16C] to-[#8A6822]" />
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[9px] font-bold text-[#D8CFBF] uppercase tracking-wider truncate">
-            {showroomAddress}
+          <span
+            className="font-bold text-[#D8CFBF] uppercase tracking-wider truncate"
+            style={{ fontSize: tokens.metaLabelPx }}
+          >
+            {showroomAddress} &nbsp;•&nbsp; {showroomPhone}
           </span>
-          <span className="text-[9px] font-black text-[#D4AF5A] font-mono shrink-0">
-            {billNo} • Page {pageIndex + 1} of {totalPages}
+          <span
+            className="font-black text-[#D4AF5A] font-mono shrink-0"
+            style={{ fontSize: tokens.metaLabelPx }}
+          >
+            {billNo}
           </span>
         </div>
       </div>

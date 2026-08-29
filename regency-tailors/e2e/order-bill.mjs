@@ -8,8 +8,9 @@
  * This bill carries customer, order and per-garment detail — never a
  * measurement (that is the Production Slip's job) and never a computed or
  * pre-filled money figure (the showroom writes the amount on the printed
- * sheet by hand). Both guarantees are checked directly against rendered text,
- * not inferred from the code that produced it.
+ * sheet by hand). It is also always exactly ONE A4 sheet. All three
+ * guarantees are checked directly against the rendered document and the PDF
+ * the browser itself produces, not inferred from the code behind them.
  *
  *   npm run dev:local     # in one terminal
  *   npm run test:bill     # in another
@@ -79,6 +80,91 @@ function assertNoMoneyAnywhere(text, label = 'bill') {
   }
   report.check(`${label} text has no currency symbol`, !text.includes('₹'));
   report.check(`${label} text shows no currency-formatted number`, !containsCurrencyValue(text));
+}
+
+/** The A4 content box the sheet is pinned to: 210-24 by 297-20 millimetres. */
+const SHEET_W_MM = 186;
+const SHEET_H_MM = 277;
+
+/**
+ * Measures the sheet the way the printer sees it: real millimetres, taken
+ * from a probe element rather than assumed from a pixel ratio.
+ */
+async function measureSheet(page) {
+  return page.evaluate(() => {
+    const probe = document.createElement('div');
+    probe.style.cssText = 'height:100mm;position:absolute;visibility:hidden';
+    document.body.appendChild(probe);
+    const pxPer100mm = probe.getBoundingClientRect().height;
+    probe.remove();
+    const mm = px => +((px / pxPer100mm) * 100).toFixed(2);
+
+    const sheet = document.querySelector('.a4-bill-page');
+    const flow = document.querySelector('.a4-bill-flow');
+    return {
+      sheets: document.querySelectorAll('.a4-bill-page').length,
+      density: sheet?.getAttribute('data-density') || null,
+      // offsetWidth/Height ignore the preview's scale transform, so these are
+      // the sheet's true layout dimensions — the ones that reach paper.
+      widthMm: sheet ? mm(sheet.offsetWidth) : null,
+      heightMm: sheet ? mm(sheet.offsetHeight) : null,
+      overflowPx: flow ? flow.scrollHeight - flow.clientHeight : null,
+      horizontalOverflow: sheet ? sheet.scrollWidth > sheet.clientWidth + 2 : null,
+      images: [...document.querySelectorAll('#printable-order-bill img')].map(i => {
+        const r = i.getBoundingClientRect();
+        return {
+          src: (i.currentSrc || i.src).split('/').pop().split('?')[0],
+          naturalW: i.naturalWidth,
+          naturalH: i.naturalHeight,
+          renderedW: r.width,
+          renderedH: r.height,
+          widthMm: mm(r.width)
+        };
+      })
+    };
+  });
+}
+
+/** The bill is one sheet, correctly sized, with nothing spilling out of it. */
+function assertOneSheet(m, label) {
+  report.check(`${label}: exactly one A4 sheet is rendered`, m.sheets === 1, `${m.sheets} sheets`);
+  report.check(`${label}: the sheet is A4 content width`,
+    Math.abs(m.widthMm - SHEET_W_MM) <= 1, `${m.widthMm}mm`);
+  report.check(`${label}: the sheet is exactly one A4 page tall`,
+    Math.abs(m.heightMm - SHEET_H_MM) <= 1, `${m.heightMm}mm`);
+  report.check(`${label}: no content overflows the sheet`,
+    m.overflowPx === 0, `${m.overflowPx}px past the bottom`);
+  report.check(`${label}: no horizontal overflow`, m.horizontalOverflow === false);
+}
+
+/**
+ * Both QR codes must be present, undistorted and large enough to scan off
+ * paper. Each source image devotes 80% of its width to the code itself, so
+ * the printed code measures 80% of the rendered tile width.
+ */
+const QR_CODE_SHARE = 0.8;
+const MIN_QR_CODE_MM = 14;
+
+function assertBothQrCodes(m, label) {
+  for (const [name, file] of [['Instagram', 'instagram-qr'], ['Google', 'google-qr']]) {
+    const qr = m.images.find(i => i.src.includes(file));
+    report.check(`${label}: the ${name} QR is on the bill`, Boolean(qr), qr ? qr.src : 'missing');
+    if (!qr) continue;
+
+    report.check(`${label}: the ${name} QR decoded`, qr.naturalW > 0 && qr.naturalH > 0,
+      `${qr.naturalW}x${qr.naturalH} source`);
+
+    // Undistorted: rendered aspect must match the source file's aspect.
+    const sourceAspect = qr.naturalW / qr.naturalH;
+    const renderedAspect = qr.renderedW / qr.renderedH;
+    report.check(`${label}: the ${name} QR is not stretched or distorted`,
+      Math.abs(sourceAspect - renderedAspect) < 0.02,
+      `source ${sourceAspect.toFixed(3)} vs rendered ${renderedAspect.toFixed(3)}`);
+
+    const codeMm = qr.widthMm * QR_CODE_SHARE;
+    report.check(`${label}: the ${name} QR is big enough to scan from print`,
+      codeMm >= MIN_QR_CODE_MM, `${codeMm.toFixed(1)}mm of code`);
+  }
 }
 
 async function openBillFromSuccessScreen(page) {
@@ -178,43 +264,75 @@ await scenario('Single-garment bill carries full detail and no measurements', as
   // Zero financial information, even unprompted
   assertNoMoneyAnywhere(text);
 
-  // The real logo asset — painted pixels, not just a "complete" flag.
+  // The real image assets — painted pixels, not just a "complete" flag.
+  // Selected by filename rather than by position: the header now carries
+  // three images (Instagram QR, logo, Google QR), so "the first img" is no
+  // longer the logo.
   await page.waitForFunction(() => {
-    const img = document.querySelector('#printable-order-bill img');
-    return img && img.naturalWidth > 0;
+    const imgs = [...document.querySelectorAll('#printable-order-bill img')];
+    return imgs.length >= 3 && imgs.every(i => i.naturalWidth > 0);
   }, { timeout: 20000 }).catch(() => {});
 
-  const logo = await page.evaluate(() => {
-    const img = document.querySelector('#printable-order-bill img');
-    if (!img) return null;
-    const box = img.getBoundingClientRect();
-    const info = { w: img.naturalWidth, h: img.naturalHeight, renderedW: Math.round(box.width), renderedH: Math.round(box.height), nonBlankPixels: 0 };
-    const canvas = document.createElement('canvas');
-    canvas.width = 40;
-    canvas.height = 40;
-    const ctx = canvas.getContext('2d');
-    try {
-      ctx.drawImage(img, 0, 0, 40, 40);
-      const data = ctx.getImageData(0, 0, 40, 40).data;
-      for (let i = 0; i < data.length; i += 4) {
-        if (data[i] + data[i + 1] + data[i + 2] > 30) info.nonBlankPixels++;
+  const art = await page.evaluate(() => {
+    const out = {};
+    for (const img of document.querySelectorAll('#printable-order-bill img')) {
+      const file = (img.currentSrc || img.src).split('/').pop().split('?')[0];
+      const box = img.getBoundingClientRect();
+      const info = {
+        file,
+        w: img.naturalWidth, h: img.naturalHeight,
+        renderedW: Math.round(box.width), renderedH: Math.round(box.height),
+        nonBlankPixels: 0
+      };
+      const canvas = document.createElement('canvas');
+      canvas.width = 40; canvas.height = 40;
+      const ctx = canvas.getContext('2d');
+      // A QR is mostly white, the logo mostly navy: count pixels that differ
+      // from a flat fill either way, so one threshold suits both. The 40x40
+      // downsample is coarse enough that a small monogram or fine QR modules
+      // measure only in the tens of pixels even when genuinely present
+      // (measured 73 for the logo, 86 for the Instagram QR at this size) — the
+      // threshold below is set to catch a truly blank/broken image, not to
+      // demand a particular amount of detail.
+      try {
+        ctx.drawImage(img, 0, 0, 40, 40);
+        const data = ctx.getImageData(0, 0, 40, 40).data;
+        let dark = 0, light = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          const v = (data[i] + data[i + 1] + data[i + 2]) / 3;
+          if (v < 100) dark++; else light++;
+        }
+        info.nonBlankPixels = Math.min(dark, light);
+      } catch {
+        info.nonBlankPixels = -1;
       }
-    } catch {
-      info.nonBlankPixels = -1;
+      if (file.includes('logo')) out.logo = info;
+      else if (file.includes('instagram')) out.instagram = info;
+      else if (file.includes('google')) out.google = info;
     }
-    return info;
+    return out;
   });
 
+  const logo = art.logo;
   report.check('the Regency Tailors logo decodes', Boolean(logo && logo.w > 0 && logo.h > 0),
-    logo ? `${logo.w}x${logo.h} source` : 'no <img> found');
-  report.check('the logo actually paints its artwork', Boolean(logo && logo.nonBlankPixels > 800),
-    logo ? `${logo.nonBlankPixels}/1600 non-blank pixels` : '');
+    logo ? `${logo.w}x${logo.h} source` : 'no logo <img> found');
+  report.check('the logo actually paints its artwork', Boolean(logo && logo.nonBlankPixels > 20),
+    logo ? `${logo.nonBlankPixels}/1600 pixels differ from a flat fill` : '');
   report.check('the logo is not distorted', Boolean(logo && Math.abs(logo.renderedW - logo.renderedH) <= 2),
     logo ? `${logo.renderedW}x${logo.renderedH} rendered, source is square` : '');
-  report.check('the logo is rendered prominently large (>=100px), not shrunk to an icon',
-    Boolean(logo && logo.renderedW >= 100), logo ? `${logo.renderedW}px wide` : '');
-  report.check('the logo is not blown up past its header column (<=200px)',
+  // A one-garment bill is never crowded, so it renders at the loosest tier
+  // and the logo should be at its full prominent size.
+  report.check('the logo is rendered prominently large, not shrunk to an icon',
+    Boolean(logo && logo.renderedW >= 90), logo ? `${logo.renderedW}px wide` : '');
+  report.check('the logo is not blown up past its header column',
     Boolean(logo && logo.renderedW <= 200), logo ? `${logo.renderedW}px wide` : '');
+
+  for (const [name, key] of [['Instagram', 'instagram'], ['Google', 'google']]) {
+    const qr = art[key];
+    report.check(`the ${name} QR paints real code, not a blank square`,
+      Boolean(qr && qr.nonBlankPixels > 20),
+      qr ? `${qr.nonBlankPixels}/1600 pixels differ from a flat fill` : 'missing');
+  }
 
   // Signature area and disclaimer
   report.check('signature area is present', /Customer Signature/i.test(text) && /For Regency Tailors/i.test(text));
@@ -384,10 +502,10 @@ await scenario('Every garment row keeps its own detail, none mixed up', async ({
 });
 
 /* ------------------------------------------------------------------ *
- * A4 print output: page count, no overflow, no clipping, PDF matches  *
- * the on-screen preview — for a large order with a long remark.       *
+ * A4 print output: ONE page, no overflow, no clipping, and a PDF that *
+ * matches the on-screen preview — for a full order with a long remark.*
  * ------------------------------------------------------------------ */
-await scenario('Bill prints as properly formatted, multi-page A4 sheets', async ({ page }) => {
+await scenario('Bill prints as exactly one properly formatted A4 sheet', async ({ page }) => {
   const longRemark = 'Peak lapel, surgeon cuffs, working buttonholes, contrast lining in burgundy silk, ticket pocket on the right, side vents at 22cm and a slightly extended shoulder line as discussed at the fitting, plus reinforced inner pockets for a phone and cardholder.';
   await createOrder(page, {
     name: 'Harpreet Singh', phone: '9814455566', city: 'Jalandhar', address: 'Bootan Mandi',
@@ -403,39 +521,34 @@ await scenario('Bill prints as properly formatted, multi-page A4 sheets', async 
   });
   await openBillFromSuccessScreen(page);
 
-  const reported = parseInt((await page.locator('text=/\\d+ PAGES?/').first().innerText()).replace(/\D/g, ''), 10);
-  const rendered = await page.locator('.a4-bill-page').count();
-  report.check('rendered sheets match the reported page count', reported === rendered, `${reported} vs ${rendered}`);
-  report.check('a large order with a long remark spans more than one sheet', rendered > 1, `${rendered} sheets`);
+  const badge = (await page.locator('text=/\\d+ PAGE/').first().innerText()).replace(/\D/g, '');
+  report.check('the modal reports a single page', badge === '1', `badge says ${badge}`);
+
+  const onScreen = await measureSheet(page);
+  assertOneSheet(onScreen, 'preview');
+  assertBothQrCodes(onScreen, 'preview');
 
   await page.emulateMedia({ media: 'print' });
   await page.waitForTimeout(600);
 
-  // Nothing may exceed the printable height of an A4 sheet.
-  const heights = await page.evaluate(() => {
-    const probe = document.createElement('div');
-    probe.style.cssText = 'height:100mm;position:absolute;visibility:hidden';
-    document.body.appendChild(probe);
-    const pxPer100mm = probe.getBoundingClientRect().height;
-    probe.remove();
-    return [...document.querySelectorAll('.a4-bill-page')].map(el =>
-      +((el.getBoundingClientRect().height / pxPer100mm) * 100).toFixed(1)
-    );
-  });
-  report.check('no sheet exceeds the 277mm printable height',
-    heights.every(h => h <= 277.5), heights.join('mm, ') + 'mm');
+  const onPaper = await measureSheet(page);
+  assertOneSheet(onPaper, 'print');
+  assertBothQrCodes(onPaper, 'print');
 
-  const overflow = await page.evaluate(() => {
-    const pages = [...document.querySelectorAll('.a4-bill-page')];
-    return pages.some(p => p.scrollWidth > p.clientWidth + 2);
-  });
-  report.check('no horizontal overflow on any sheet', !overflow);
+  // Requirement: the preview must be a truthful picture of the paper. The
+  // sheet is laid out at true A4 dimensions in both media, so the two
+  // measurements have to agree.
+  report.check('the printed sheet is the same size as the preview',
+    Math.abs(onPaper.heightMm - onScreen.heightMm) < 0.5 &&
+    Math.abs(onPaper.widthMm - onScreen.widthMm) < 0.5,
+    `preview ${onScreen.widthMm}x${onScreen.heightMm}mm vs print ${onPaper.widthMm}x${onPaper.heightMm}mm`);
+  report.check('the preview and the paper use the same density',
+    onPaper.density === onScreen.density, `${onScreen.density} vs ${onPaper.density}`);
 
   const pdf = await page.pdf(A4);
   fs.writeFileSync(path.join(TMP, 'bill.pdf'), pdf);
   const sheets = pdfPageCount(pdf);
-  report.check('printed sheets match the reported page count', sheets === reported,
-    `${sheets} printed vs ${reported} reported`);
+  report.check('the PDF is exactly one page', sheets === 1, `${sheets} pages`);
 
   const shellVisible = await page.evaluate(() =>
     [...document.querySelectorAll('.print-app-shell')].some(el => getComputedStyle(el).display !== 'none'));

@@ -1,8 +1,7 @@
-import React, { useMemo, useState } from 'react';
-import { X, Printer, Download, Check, Loader2, Layers, ReceiptText } from 'lucide-react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { X, Printer, Download, Check, Loader2, FileCheck2, ReceiptText } from 'lucide-react';
 import { Order, ShowroomProfile } from '../../types';
 import { OrderBillPage } from '../bills/OrderBillPage';
-import { paginateOrderBill } from '../../utils/orderBillPagination';
 import { downloadElementAsPdf } from '../../utils/documentExport';
 
 interface PrintOrderBillModalProps {
@@ -17,7 +16,8 @@ interface PrintOrderBillModalProps {
  *
  * Separate document from the workshop Production Slip, and separate from the
  * admin bill that carries figures. This one contains no financial information
- * at all — the showroom writes the amount on the printed sheet by hand.
+ * at all — the showroom writes the amount on the printed sheet by hand, and it
+ * always prints as exactly one A4 sheet.
  */
 export const PrintOrderBillModal: React.FC<PrintOrderBillModalProps> = ({
   isOpen,
@@ -30,7 +30,44 @@ export const PrintOrderBillModal: React.FC<PrintOrderBillModalProps> = ({
   const [exportError, setExportError] = useState<string | null>(null);
 
   const snapshot = order?.measurementsSnapshot || {};
-  const pages = useMemo(() => (order ? paginateOrderBill(order, snapshot) : []), [order]);
+
+  /**
+   * Fit the fixed-size sheet to the modal by scaling it, never by reflowing
+   * it: the sheet is laid out at true A4 dimensions so the preview matches the
+   * paper, and only a uniform scale keeps that true on a narrow screen.
+   */
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const scalerRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+
+  useLayoutEffect(() => {
+    const fit = () => {
+      const viewport = viewportRef.current;
+      const sheet = scalerRef.current?.firstElementChild as HTMLElement | undefined;
+      if (!viewport || !sheet) return;
+      const available = viewport.clientWidth;
+      const natural = sheet.offsetWidth;
+      if (!available || !natural) return;
+      setScale(Math.min(1, available / natural));
+    };
+    fit();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fit) : null;
+    if (ro && viewportRef.current) ro.observe(viewportRef.current);
+    window.addEventListener('resize', fit);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', fit);
+    };
+  }, [isOpen, order]);
+
+  // A scaled element still reserves its unscaled height in the flow, which
+  // would leave a tall empty gap beneath the preview. Reserve the real,
+  // post-scale height instead.
+  const [scaledHeight, setScaledHeight] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    const sheet = scalerRef.current?.firstElementChild as HTMLElement | undefined;
+    if (sheet) setScaledHeight(sheet.offsetHeight * scale);
+  }, [scale, isOpen, order]);
 
   if (!isOpen || !order) return null;
 
@@ -48,7 +85,7 @@ export const PrintOrderBillModal: React.FC<PrintOrderBillModalProps> = ({
         `Regency_Tailors_Order_Bill_${numericOrderNum || 'New'}.pdf`
       );
       if (ok) {
-        setExportSuccess(`PDF saved (${pages.length} ${pages.length === 1 ? 'page' : 'pages'})`);
+        setExportSuccess('PDF saved (1 page)');
         setTimeout(() => setExportSuccess(null), 3500);
       } else {
         setExportError('The PDF could not be generated. The browser print dialog was opened instead — use "Save as PDF" there.');
@@ -73,8 +110,8 @@ export const PrintOrderBillModal: React.FC<PrintOrderBillModalProps> = ({
                   A4 Customer Bill
                 </span>
                 <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-[#071426] text-[#D4AF5A] border border-[#C9A24A]/40 font-mono">
-                  <Layers className="w-2.5 h-2.5" />
-                  {pages.length} {pages.length === 1 ? 'PAGE' : 'PAGES'}
+                  <FileCheck2 className="w-2.5 h-2.5" />
+                  1 PAGE
                 </span>
               </div>
               <h3 className="text-sm sm:text-base font-extrabold text-[#071426] truncate">
@@ -125,7 +162,7 @@ export const PrintOrderBillModal: React.FC<PrintOrderBillModalProps> = ({
         </div>
 
         <div className="no-print shrink-0 px-3 py-2 bg-[#FAF8F5] border border-[#E0D8CB] rounded-xl text-[11px] font-semibold text-[#6E6454]">
-          This bill carries customer, order and garment detail — no measurements. Write the amount on the printed sheet.
+          One A4 sheet, carrying customer, order and garment detail — no measurements. Write the amounts on the printed bill.
         </div>
 
         {exportError && (
@@ -140,30 +177,21 @@ export const PrintOrderBillModal: React.FC<PrintOrderBillModalProps> = ({
           </div>
         )}
 
-        {/* PRINTABLE A4 SHEETS */}
-        <div className="flex-1 overflow-y-auto pr-1 overscroll-contain">
-          <div id="printable-order-bill" className="space-y-6 print:space-y-0">
-            {pages.map(pageData => (
-              <React.Fragment key={pageData.pageIndex}>
-                {pages.length > 1 && (
-                  <div className="no-print flex items-center justify-center gap-3 py-1">
-                    <div className="h-px bg-[#C9A24A]/30 flex-1 max-w-[120px]" />
-                    <span className="text-[10px] font-black text-[#8C7E6A] uppercase tracking-widest bg-[#FAF8F5] px-3 py-1 rounded-full border border-[#E0D8CB] font-mono">
-                      A4 PAGE {pageData.pageIndex + 1} OF {pageData.totalPages}
-                    </span>
-                    <div className="h-px bg-[#C9A24A]/30 flex-1 max-w-[120px]" />
-                  </div>
-                )}
-
-                <OrderBillPage
-                  id={`printable-order-bill-page-${pageData.pageIndex}`}
-                  pageData={pageData}
-                  order={order}
-                  snapshot={snapshot}
-                  profile={profile}
-                />
-              </React.Fragment>
-            ))}
+        {/* THE PRINTABLE A4 SHEET — exactly one, always */}
+        <div ref={viewportRef} className="flex-1 overflow-y-auto pr-1 overscroll-contain">
+          <div id="printable-order-bill" style={{ height: scaledHeight }}>
+            <div
+              ref={scalerRef}
+              className="a4-bill-scaler"
+              style={{ transform: `scale(${scale})`, width: 'fit-content' }}
+            >
+              <OrderBillPage
+                id="printable-order-bill-page-0"
+                order={order}
+                snapshot={snapshot}
+                profile={profile}
+              />
+            </div>
           </div>
         </div>
       </div>

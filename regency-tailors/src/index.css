@@ -105,6 +105,42 @@ button:active:not(:disabled) {
   box-shadow: 0 0 12px rgba(201, 162, 74, 0.15);
 }
 
+/* ========================================================
+   CUSTOMER BILL — ON-SCREEN PREVIEW
+
+   The preview is laid out at the exact printed size (the A4 content box:
+   210mm - 24mm of side margin by 297mm - 20mm of top/bottom margin), not at
+   whatever width the modal happens to be. Text therefore wraps on screen
+   exactly as it will on paper, which is what lets the component measure the
+   sheet in the browser and trust the result for print — and what makes the
+   preview a truthful picture of the printed bill rather than an approximation.
+
+   To fit that fixed box into a narrow modal, the wrapper is scaled as a whole
+   rather than reflowed. Scaling preserves the layout exactly; reflowing would
+   not, and the preview would stop matching the paper.
+   ======================================================== */
+.a4-bill-page {
+  width: 186mm;
+  height: 277mm;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: none;
+}
+
+.a4-bill-flow {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.a4-bill-scaler {
+  transform-origin: top center;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 /* ======================================================== */
 /* DEDICATED A4 PRINT LAYOUT FOR REGENCY TAILORS */
 /* ======================================================== */
@@ -293,16 +329,26 @@ button:active:not(:disabled) {
   }
 
   /* ----------------------------------------------------------------
-     Customer order bill: one A4 sheet per .a4-bill-page, flowing onto as
-     many sheets as the order needs. Same measured budgets as the production
-     slip, so the page count the screen reports is the page count that prints.
+     Customer order bill: exactly ONE A4 sheet, always.
+
+     The sheet is pinned to the true printable content box — A4 (210x297mm)
+     less the @page margins above (12mm each side, 10mm top and bottom) —
+     rather than the 190mm the other documents use, so it maps 1:1 onto the
+     page with nothing to scale or clip. Because the box can never grow, it
+     can never push a second sheet; the component sizes its own content to fit
+     by measuring the rendered result, so nothing is hidden to achieve that.
+
+     Note the height must be restated here: the `.print-document-root *` rule
+     above forces `height: auto` on every descendant to release scroll
+     containers, and this rule wins only by being later in the cascade.
      ---------------------------------------------------------------- */
   .a4-bill-page {
-    width: 100% !important;
-    max-width: 190mm !important;
-    min-height: 265mm !important;
-    height: auto !important;
-    overflow: visible !important;
+    width: 186mm !important;
+    max-width: 186mm !important;
+    min-height: 0 !important;
+    height: 277mm !important;
+    max-height: 277mm !important;
+    overflow: hidden !important;
     margin: 0 auto !important;
     padding: 0 !important;
     box-sizing: border-box !important;
@@ -312,22 +358,54 @@ button:active:not(:disabled) {
     box-shadow: none !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
-    page-break-after: always !important;
-    break-after: page !important;
-    display: flex !important;
-    flex-direction: column !important;
-    justify-content: space-between !important;
-  }
-
-  .a4-bill-page:last-child {
+    /* No forced break: a break after the only sheet emits a blank page. */
     page-break-after: auto !important;
     break-after: auto !important;
+    page-break-before: auto !important;
+    break-before: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  /* The measured region. It must stay clamped on paper too, or a tier that
+     only just fits would spill over the footer instead of being caught. */
+  .a4-bill-flow {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: hidden !important;
+  }
+
+  /* Overflow-safety escape hatch: content that still overflows at the
+     smallest readable type. No real order can reach this (see the component),
+     but if one ever does, clipping it is worse than a slightly tall page, so
+     the fixed height and clip are released here — deliberately overriding the
+     rules above by appearing after them in the cascade, the same technique
+     those rules themselves use against `.print-document-root *`. */
+  .a4-bill-page[data-overflow-safety] {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .a4-bill-page[data-overflow-safety] .a4-bill-flow {
+    overflow: visible !important;
+  }
+
+  /* The preview scales the sheet down to fit narrow viewports. On paper it is
+     already exactly page-sized, so the transform must not follow it there. */
+  .a4-bill-scaler {
+    transform: none !important;
+    width: auto !important;
+    height: auto !important;
+    margin: 0 !important;
   }
 
   /* The garment table uses fixed <colgroup> widths rather than any
      breakpoint-dependent utility class, so — unlike the measurement grids
      elsewhere in the app — it needs no print override to match the screen
-     preview. A row is still kept intact across a page break. */
+     preview. A row is still kept intact rather than split. */
   .order-bill-row {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
