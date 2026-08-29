@@ -532,37 +532,6 @@ export const OrderBillPage: React.FC<OrderBillPageProps> = ({
               </ul>
             </div>
 
-            {/* SIGNATURES */}
-            <div
-              className="bg-white border border-[#DFD7C7] rounded-xl px-3"
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                columnGap: 24,
-                paddingTop: tokens.blockPadY * 0.8,
-                paddingBottom: tokens.blockPadY * 0.8
-              }}
-            >
-              <div>
-                <div className="border-b border-[#071426]" style={{ height: tokens.signatureLineH }} />
-                <span
-                  className="block font-bold text-[#8C7E6A] uppercase tracking-wider"
-                  style={{ fontSize: tokens.metaLabelPx, marginTop: 3 }}
-                >
-                  Customer Signature
-                </span>
-              </div>
-              <div>
-                <div className="border-b border-[#071426]" style={{ height: tokens.signatureLineH }} />
-                <span
-                  className="block font-bold text-[#8C7E6A] uppercase tracking-wider"
-                  style={{ fontSize: tokens.metaLabelPx, marginTop: 3 }}
-                >
-                  For Regency Tailors
-                </span>
-              </div>
-            </div>
-
             {/* REQUIRED FINAL DISCLAIMER — the closing message of the whole document */}
             <div
               className="bg-[#071426] rounded-xl px-4 text-center border-2 border-[#C9A24A]"

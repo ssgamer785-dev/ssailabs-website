@@ -80,7 +80,6 @@ export interface BillDensityTokens {
   paymentLabelPx: number;
   paymentLineH: number;
   termsPx: number;
-  signatureLineH: number;
   disclaimerPx: number;
 }
 
@@ -110,7 +109,7 @@ const TOKENS: Record<BillDensity, BillDensityTokens> = {
     sectionGap: 9, blockPadY: 9, metaValuePx: 10.5, metaLabelPx: 9,
     tableHeadPx: 8.5, rowPadY: 7, rowTextPx: 10, rowLeading: 1.35,
     paymentRowGap: 12, paymentLabelPx: 9.5, paymentLineH: 15,
-    termsPx: 9.5, signatureLineH: 26, disclaimerPx: 11.5
+    termsPx: 9.5, disclaimerPx: 11.5
   },
   normal: {
     key: 'normal', columns: WIDE_COLUMNS,
@@ -118,7 +117,7 @@ const TOKENS: Record<BillDensity, BillDensityTokens> = {
     sectionGap: 7, blockPadY: 7.5, metaValuePx: 10, metaLabelPx: 8.5,
     tableHeadPx: 8, rowPadY: 5.5, rowTextPx: 9.5, rowLeading: 1.3,
     paymentRowGap: 9, paymentLabelPx: 9, paymentLineH: 13,
-    termsPx: 9, signatureLineH: 22, disclaimerPx: 11
+    termsPx: 9, disclaimerPx: 11
   },
   compact: {
     key: 'compact', columns: MID_COLUMNS,
@@ -126,7 +125,7 @@ const TOKENS: Record<BillDensity, BillDensityTokens> = {
     sectionGap: 5, blockPadY: 6, metaValuePx: 9.5, metaLabelPx: 8,
     tableHeadPx: 7.5, rowPadY: 4, rowTextPx: 9, rowLeading: 1.25,
     paymentRowGap: 7, paymentLabelPx: 8.5, paymentLineH: 11,
-    termsPx: 8.5, signatureLineH: 18, disclaimerPx: 10.5
+    termsPx: 8.5, disclaimerPx: 10.5
   },
   dense: {
     key: 'dense', columns: TEXT_COLUMNS,
@@ -134,7 +133,7 @@ const TOKENS: Record<BillDensity, BillDensityTokens> = {
     sectionGap: 4, blockPadY: 4.5, metaValuePx: 8.5, metaLabelPx: 7.5,
     tableHeadPx: 7, rowPadY: 2.5, rowTextPx: 8, rowLeading: 1.2,
     paymentRowGap: 5, paymentLabelPx: 8, paymentLineH: 9,
-    termsPx: 8, signatureLineH: 15, disclaimerPx: 10
+    termsPx: 8, disclaimerPx: 10
   },
   ultra: {
     key: 'ultra', columns: TEXT_COLUMNS,
@@ -142,7 +141,7 @@ const TOKENS: Record<BillDensity, BillDensityTokens> = {
     sectionGap: 3, blockPadY: 3.5, metaValuePx: 8, metaLabelPx: 7,
     tableHeadPx: 6.5, rowPadY: 1.5, rowTextPx: 7, rowLeading: 1.15,
     paymentRowGap: 4, paymentLabelPx: 7.5, paymentLineH: 8,
-    termsPx: 7.5, signatureLineH: 13, disclaimerPx: 9.5
+    termsPx: 7.5, disclaimerPx: 9.5
   }
 };
 

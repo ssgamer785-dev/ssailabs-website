@@ -334,8 +334,9 @@ await scenario('Single-garment bill carries full detail and no measurements', as
       qr ? `${qr.nonBlankPixels}/1600 pixels differ from a flat fill` : 'missing');
   }
 
-  // Signature area and disclaimer
-  report.check('signature area is present', /Customer Signature/i.test(text) && /For Regency Tailors/i.test(text));
+  // No signature area — the bill closes with the disclaimer only.
+  report.check('no signature area is present',
+    !/Customer Signature/i.test(text) && !/For Regency Tailors/i.test(text));
   report.check('the exact required disclaimer is present',
     /WE ARE NOT RESPONSIBLE FOR CLOTHES AFTER 2 MONTHS\./i.test(text));
 });
@@ -559,7 +560,7 @@ await scenario('Bill prints as exactly one properly formatted A4 sheet', async (
     ['FULL COAT PANT', 'COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'].every(g => printedText.toUpperCase().includes(g)));
   report.check('every fabric reaches the paper',
     ['Loro Piana', 'Herringbone', 'Worsted', 'Giza 87', 'Raw Silk'].every(f => printedText.includes(f)));
-  report.check('the closing signature area reaches the paper', /Customer Signature/i.test(printedText));
+  report.check('no signature area reaches the paper', !/Customer Signature/i.test(printedText));
   report.check('the required disclaimer reaches the paper',
     /WE ARE NOT RESPONSIBLE FOR CLOTHES AFTER 2 MONTHS\./i.test(printedText));
   report.check('the long remark is not truncated', printedText.includes(longRemark));
