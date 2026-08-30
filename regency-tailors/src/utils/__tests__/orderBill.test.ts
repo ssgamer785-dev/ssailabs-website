@@ -132,10 +132,10 @@ describe('garment remarks', () => {
 
 describe('bill row text load', () => {
   it('does not vary by garment type when no descriptive text is recorded', () => {
-    // The bill's sizing model reads description/fabric/remark text only —
-    // never measurement tables — so a garment with two measurement tables
-    // (Full Coat Pant) takes no more room than one with none recorded here,
-    // as long as neither has any bill-visible text of its own.
+    // The bill's sizing model reads the remark only — never measurement
+    // tables — so a garment with two measurement tables (Full Coat Pant)
+    // takes no more room than one with none recorded here, as long as
+    // neither has any bill-visible text of its own.
     expect(billRowLines(item('Full Coat Pant'), snapshot))
       .toBe(billRowLines(item('Shirt'), snapshot));
   });
@@ -153,13 +153,21 @@ describe('bill row text load', () => {
     expect(long).toBeGreaterThan(short);
   });
 
-  it('grows when fabric and styling were recorded', () => {
+  it('ignores fabric and styling, which the bill no longer prints', () => {
+    // Those columns are gone from the table, so text in them can no longer
+    // make a row taller. Charging for them would shrink the whole sheet to
+    // reserve space nothing renders into.
     const bare = billRowLines(item('Shirt'), snapshot);
     const detailed = billRowLines(
-      item('Shirt', { fabricName: 'Giza cotton hand-finished', fabricCode: 'FB-1', styleNotes: 'Cutaway collar, french cuffs, no chest pocket' }),
+      item('Shirt', {
+        fabricName: 'Giza cotton hand-finished',
+        fabricCode: 'FB-1',
+        styleNotes: 'Cutaway collar, french cuffs, no chest pocket',
+        specialInstructions: 'Press flat and check the placket before delivery'
+      }),
       snapshot
     );
-    expect(detailed).toBeGreaterThan(bare);
+    expect(detailed).toBe(bare);
   });
 
   it('sums the load across every garment', () => {
@@ -212,18 +220,26 @@ describe('bill density tiers', () => {
     expect(INITIAL_DENSITY).toBe('roomy');
   });
 
-  it('hands the wrapping columns more of the table as it tightens', () => {
-    // Widening description and remarks is what buys room at high density:
-    // the same text wraps to fewer lines without the type getting smaller.
+  it('hands the wrapping column more of the table as it tightens', () => {
+    // Widening remarks is what buys room at high density: the same text wraps
+    // to fewer lines without the type getting smaller.
     const roomy = densityTokens('roomy').columns;
     const floor = densityTokens(DENSITY_ORDER[DENSITY_ORDER.length - 1]).columns;
-    expect(floor.description + floor.remarks).toBeGreaterThan(roomy.description + roomy.remarks);
+    expect(floor.remarks).toBeGreaterThan(roomy.remarks);
+  });
+
+  it('carries no fabric or description column at any tier', () => {
+    for (const key of DENSITY_ORDER) {
+      const c = densityTokens(key).columns as unknown as Record<string, number>;
+      expect(c.description).toBeUndefined();
+      expect(c.fabric).toBeUndefined();
+    }
   });
 
   it('keeps every column set summing to a full table width', () => {
     for (const key of DENSITY_ORDER) {
       const c = densityTokens(key).columns;
-      const total = c.sno + c.garment + c.description + c.fabric + c.qty + c.remarks + c.amount;
+      const total = c.sno + c.garment + c.qty + c.remarks + c.amount;
       expect(total).toBeCloseTo(100, 5);
     }
   });

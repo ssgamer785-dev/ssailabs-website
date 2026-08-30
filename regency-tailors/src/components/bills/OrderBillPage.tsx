@@ -27,8 +27,6 @@ export interface OrderBillPageProps {
 const TABLE_COLUMNS: { label: string; key: keyof BillColumnWidths; align?: 'left' | 'center' }[] = [
   { label: 'S.NO.', key: 'sno', align: 'center' },
   { label: 'PRODUCT / GARMENT', key: 'garment' },
-  { label: 'DESCRIPTION / STITCHING DETAILS', key: 'description' },
-  { label: 'FABRIC', key: 'fabric' },
   { label: 'QTY.', key: 'qty', align: 'center' },
   { label: 'REMARKS', key: 'remarks' },
   { label: 'AMOUNT', key: 'amount', align: 'center' }

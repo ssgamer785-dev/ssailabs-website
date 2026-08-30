@@ -235,18 +235,21 @@ await scenario('Single-garment bill carries full detail and no measurements', as
   report.check('ORDER DETAILS heading present', /ORDER DETAILS/.test(text));
 
   // Product/garment table structure and this garment's row
-  report.check('table has all seven column headers', [
-    'S.NO', 'PRODUCT', 'GARMENT', 'DESCRIPTION', 'STITCHING', 'FABRIC', 'QTY', 'REMARKS', 'AMOUNT'
+  report.check('table has all five column headers', [
+    'S.NO', 'PRODUCT', 'GARMENT', 'QTY', 'REMARKS', 'AMOUNT'
   ].every(h => text.toUpperCase().includes(h)));
+  // Fabric and stitching description are no longer collected, so the bill no
+  // longer has columns for them — a table of em-dashes reads as missing data.
+  report.check('the table has no fabric or description column',
+    !/\bFABRIC\b|\bSTITCHING\b|DESCRIPTION\s*\/?\s*STITCHING/i.test(text));
 
   const rows = page.locator('.order-bill-row');
   report.check('exactly one garment row is rendered', (await rows.count()) === 1, `${await rows.count()} rows`);
   const rowText = await rows.first().innerText();
   report.check('the row shows the garment name', /FULL COAT PANT/i.test(rowText));
-  // The wizard no longer captures fabric, so a freshly placed order has none.
-  // The column must still print a placeholder rather than collapsing the row.
-  report.check('the fabric column degrades to a placeholder when nothing was captured',
-    rowText.includes('—'), rowText.replace(/\n/g, ' | '));
+  report.check('the row carries exactly the five printed cells',
+    (await rows.first().locator('td').count()) === 5,
+    `${await rows.first().locator('td').count()} cells`);
   report.check('the row shows the garment remark', rowText.includes('Peak lapel, surgeon cuffs, contrast burgundy lining'));
   report.check('the row shows quantity 1', /\b1\b/.test(rowText));
   report.check('the row\'s S.No. is 1', (await rows.first().locator('td').first().innerText()).trim() === '1');
@@ -407,7 +410,7 @@ await scenario('Bill contains no financial information even when the order has r
 });
 
 /* ------------------------------------------------------------------ *
- * Several garments, each keeping its own description, fabric, and     *
+ * Several garments, each keeping its own remark, with none bleeding    *
  * remark — none mixed up, correct sequential numbering.                *
  * ------------------------------------------------------------------ */
 await scenario('Every garment row keeps its own detail, none mixed up', async ({ page }) => {
@@ -430,11 +433,12 @@ await scenario('Every garment row keeps its own detail, none mixed up', async ({
     }
   });
 
-  // Fabric, style/cut and garment notes are no longer collected by the wizard,
-  // but they remain in the schema and orders placed before that change still
-  // carry them — so the bill must keep rendering each garment's own values
-  // without bleeding one row's into another. Set directly on the stored order,
-  // the same way order totals are set directly in the scenario above.
+  /*
+   * Orders placed before fabric, style/cut and garment notes were dropped
+   * still carry those columns in storage. The bill no longer prints them, and
+   * that must hold for a legacy order too — a value the shop can no longer
+   * enter must not reappear on a customer's bill through the back door.
+   */
   await page.evaluate(() => {
     const K = 'REGENCY_TAILORS_DB_V3_';
     const orders = JSON.parse(localStorage.getItem(K + 'ORDERS'));
@@ -486,18 +490,14 @@ await scenario('Every garment row keeps its own detail, none mixed up', async ({
     const rowText = await rows.nth(i).innerText();
     report.check(`row ${i + 1} is the ${garment}`, rowText.toUpperCase().includes(garment.toUpperCase()));
     report.check(`row ${i + 1} carries only its own remark`, rowText.includes(remarkTag));
-    report.check(`row ${i + 1} carries only its own fabric`, rowText.includes(fabricTag));
-    report.check(`row ${i + 1} carries only its own description`, rowText.includes(descTag));
+    report.check(`row ${i + 1} does not print the stored fabric`, !rowText.includes(fabricTag));
+    report.check(`row ${i + 1} does not print the stored description`, !rowText.includes(descTag));
     report.check(`row ${i + 1}'s S.No. is ${i + 1}`,
       (await rows.nth(i).locator('td').first().innerText()).trim() === String(i + 1));
 
     const others = expected.filter((_, j) => j !== i);
     report.check(`row ${i + 1} does not carry another garment's remark`,
       others.every(([, r]) => !rowText.includes(r)));
-    report.check(`row ${i + 1} does not carry another garment's fabric`,
-      others.every(([, , f]) => !rowText.includes(f)));
-    report.check(`row ${i + 1} does not carry another garment's description`,
-      others.every(([, , , d]) => !rowText.includes(d)));
   }
 
   const billText = await page.locator('#printable-order-bill').innerText();
@@ -554,13 +554,8 @@ await scenario('Bill prints as exactly one properly formatted A4 sheet', async (
   const printedText = await page.locator('#printable-order-bill').innerText();
   report.check('every garment reaches the paper',
     ['FULL COAT PANT', 'COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'].every(g => printedText.toUpperCase().includes(g)));
-  // Fabric is no longer captured by the wizard, so this order has none. The
-  // column must still print for every row — a value the shop never took must
-  // read as blank, not collapse the table. That the column carries each
-  // garment's own fabric when an older order does have one is covered by the
-  // multi-garment scenario above, which seeds the values directly.
-  report.check('the fabric column still prints for every row',
-    printedText.toUpperCase().includes('FABRIC') &&
+  report.check('the printed sheet has no fabric or description column',
+    !/\bFABRIC\b|\bSTITCHING\b/i.test(printedText) &&
     (await page.locator('.order-bill-row').count()) === 5);
   report.check('no signature area reaches the paper', !/Customer Signature/i.test(printedText));
   report.check('the required disclaimer reaches the paper',
@@ -588,10 +583,12 @@ await scenario('Bill copes with missing optional detail without inventing conten
 
   const row = page.locator('.order-bill-row').first();
   const rowText = await row.innerText();
-  report.check('an empty description cell shows a dash, not blank or "undefined"',
+  report.check('an empty cell shows a dash, not blank or "undefined"',
     !/undefined|null/i.test(rowText));
-  report.check('the row still shows a dash for the unentered description/fabric/remarks',
-    (rowText.match(/—/g) || []).length >= 3, rowText);
+  // Remarks is now the only cell that can come back empty — description and
+  // fabric are no longer columns — so exactly one dash is expected.
+  report.check('the unentered remark shows a dash rather than an empty cell',
+    (rowText.match(/—/g) || []).length === 1, rowText.replace(/\n/g, ' | '));
 
   report.check('the REMARKS column header still prints (it is a fixed table column)', /REMARKS/i.test(text));
   assertNoMoneyAnywhere(text);

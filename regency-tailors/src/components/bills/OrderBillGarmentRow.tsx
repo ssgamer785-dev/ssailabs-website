@@ -18,20 +18,19 @@ interface OrderBillGarmentRowProps {
  * document reads `snapshot` solely to resolve a garment's own text remark
  * (`garmentRemarks`), never a measurement field.
  *
+ * It carries no fabric or stitching description either. The showroom stopped
+ * collecting them, so those columns printed an em-dash on every row of every
+ * new bill — a column of placeholders reads as missing information rather
+ * than as information the shop never took. The values remain in the schema for
+ * orders that predate the change; this document simply no longer has a column
+ * to show them in.
+ *
  * The Amount cell is a blank line for the owner to write on by hand. It is
  * never populated, never computed, and carries no currency symbol.
  */
 export const OrderBillGarmentRow: React.FC<OrderBillGarmentRowProps> = ({ item, index, snapshot, tokens }) => {
-  const fabricName = (item.fabricName || '').trim();
-  const fabricCode = (item.fabricCode || '').trim();
-  const description = (item.styleNotes || item.notes || '').trim();
-  const specialInstructions = (item.specialInstructions || '').trim();
   const remark = garmentRemarkFor(item, snapshot);
   const quantity = item.quantity || 1;
-
-  const descriptionLines = [description, specialInstructions].filter(
-    (v, i, arr) => v && arr.indexOf(v) === i
-  );
 
   // Density-driven sizing is applied inline rather than through utility
   // classes: the tier is chosen at runtime, and Tailwind only emits classes it
@@ -52,19 +51,6 @@ export const OrderBillGarmentRow: React.FC<OrderBillGarmentRowProps> = ({ item, 
       </td>
       <td className="border border-[#DFD7C7] font-black text-[#071426] uppercase" style={cell}>
         {item.garmentType || '—'}
-      </td>
-      <td className="border border-[#DFD7C7] text-[#4A5568] font-medium" style={cell}>
-        {descriptionLines.length > 0 ? descriptionLines.map((l, i) => <div key={i}>{l}</div>) : '—'}
-      </td>
-      <td className="border border-[#DFD7C7] text-[#071426] font-semibold" style={cell}>
-        {fabricName || fabricCode ? (
-          <>
-            {fabricName && <div>{fabricName}</div>}
-            {fabricCode && <div className="text-[#7A7060] font-medium">({fabricCode})</div>}
-          </>
-        ) : (
-          '—'
-        )}
       </td>
       <td className="border border-[#DFD7C7] text-center font-black text-[#071426]" style={cell}>
         {quantity}

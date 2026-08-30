@@ -15,9 +15,10 @@ import { garmentRemarkFor } from './garmentMeasurements';
  * estimate below being perfect. That matters because text wrapping depends on
  * the font that actually loads, which no static estimate can know.
  *
- * This document carries no measurements, so the space a garment needs depends
- * only on its description, fabric and remark text — never on measurement
- * tables, which the bill does not render at all.
+ * This document carries no measurements, and no longer carries fabric or
+ * stitching description either — the showroom stopped collecting them, and a
+ * column of em-dashes is worse than no column. The space a garment needs
+ * therefore depends only on its remark text.
  */
 
 export type BillDensity = 'roomy' | 'normal' | 'compact' | 'dense' | 'ultra';
@@ -33,12 +34,10 @@ export const DENSITY_ORDER: BillDensity[] = ['roomy', 'normal', 'compact', 'dens
  */
 export const INITIAL_DENSITY: BillDensity = DENSITY_ORDER[0];
 
-/** Percentage widths for the seven garment-table columns, left to right. */
+/** Percentage widths for the five garment-table columns, left to right. */
 export interface BillColumnWidths {
   sno: number;
   garment: number;
-  description: number;
-  fabric: number;
   qty: number;
   remarks: number;
   amount: number;
@@ -48,10 +47,10 @@ export interface BillDensityTokens {
   key: BillDensity;
 
   /**
-   * Tighter tiers give the two wrapping columns (description, remarks) a
-   * larger share of the table. Widening the text is worth far more than
-   * shrinking it: the same remark wraps to fewer lines, so the row gets
-   * shorter without the type getting smaller.
+   * Tighter tiers give the one wrapping column (remarks) a larger share of the
+   * table. Widening the text is worth far more than shrinking it: the same
+   * remark wraps to fewer lines, so the row gets shorter without the type
+   * getting smaller.
    */
   columns: BillColumnWidths;
 
@@ -84,15 +83,17 @@ export interface BillDensityTokens {
 }
 
 /* Balanced columns while there is room to spare; progressively more of the
- * table handed to the two wrapping columns as the order grows. */
+ * table handed to the wrapping column as the order grows. Dropping the
+ * description and fabric columns returned 38% of the table, most of which goes
+ * to remarks — the one cell that still wraps, and the one a customer reads. */
 const WIDE_COLUMNS: BillColumnWidths = {
-  sno: 5, garment: 14, description: 23, fabric: 15, qty: 6, remarks: 22, amount: 15
+  sno: 6, garment: 24, qty: 7, remarks: 43, amount: 20
 };
 const MID_COLUMNS: BillColumnWidths = {
-  sno: 4.5, garment: 12.5, description: 25, fabric: 14, qty: 5, remarks: 25, amount: 14
+  sno: 5.5, garment: 22, qty: 6.5, remarks: 47, amount: 19
 };
 const TEXT_COLUMNS: BillColumnWidths = {
-  sno: 4, garment: 11, description: 27.5, fabric: 12.5, qty: 4.5, remarks: 28, amount: 12.5
+  sno: 5, garment: 20, qty: 6, remarks: 51, amount: 18
 };
 
 /**
@@ -155,11 +156,11 @@ export function tighterDensity(key: BillDensity): BillDensity | null {
   return i >= 0 && i < DENSITY_ORDER.length - 1 ? DENSITY_ORDER[i + 1] : null;
 }
 
-/* Column character capacities, in the same proportions as the rendered table.
- * Used only to weigh how much text a row carries, never to lay it out. */
-const DESCRIPTION_CHARS_PER_LINE = 22;
-const REMARK_CHARS_PER_LINE = 21;
-const FABRIC_CHARS_PER_LINE = 14;
+/* Column character capacity, in the same proportion as the rendered table.
+ * Used only to weigh how much text a row carries, never to lay it out. The
+ * remarks column roughly doubled when description and fabric were dropped, so
+ * the same remark now wraps to about half as many lines. */
+const REMARK_CHARS_PER_LINE = 42;
 
 function linesFor(text: string, charsPerLine: number): number {
   const trimmed = (text || '').trim();
@@ -167,24 +168,13 @@ function linesFor(text: string, charsPerLine: number): number {
 }
 
 /**
- * How many wrapped text lines a garment's row needs — the tallest of its
- * description, fabric and remark cells. Reads no measurement field.
+ * How many wrapped text lines a garment's row needs. Only the remarks cell
+ * wraps now — S.No., garment, quantity and the blank amount line are all one
+ * line each — so the remark alone decides the row's height. Reads no
+ * measurement field.
  */
 export function billRowLines(item: OrderItem, snapshot: Partial<MeasurementRecord>): number {
-  const styleText = (item?.styleNotes || item?.notes || '').trim();
-  const specialText = (item?.specialInstructions || '').trim();
-  const descriptionLines =
-    styleText && specialText && styleText !== specialText
-      ? linesFor(styleText, DESCRIPTION_CHARS_PER_LINE) + linesFor(specialText, DESCRIPTION_CHARS_PER_LINE)
-      : linesFor(styleText || specialText, DESCRIPTION_CHARS_PER_LINE);
-
-  const fabricName = (item?.fabricName || '').trim();
-  const fabricCode = (item?.fabricCode || '').trim();
-  const fabricLines = fabricName ? linesFor(fabricName, FABRIC_CHARS_PER_LINE) + (fabricCode ? 1 : 0) : 1;
-
-  const remarkLines = linesFor(garmentRemarkFor(item, snapshot), REMARK_CHARS_PER_LINE);
-
-  return Math.max(descriptionLines, fabricLines, remarkLines, 1);
+  return Math.max(linesFor(garmentRemarkFor(item, snapshot), REMARK_CHARS_PER_LINE), 1);
 }
 
 /**
