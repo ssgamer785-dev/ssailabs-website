@@ -269,6 +269,100 @@ await scenario('Production slip prints as many A4 sheets as it reports', async (
       return flow.scrollHeight - flow.clientHeight;
     }));
   report.check('no production slip sheet overflows', slipOverflow.every(o => o <= 0), slipOverflow.join(','));
+
+  /*
+   * Content order and content limits.
+   *
+   * Each garment reads #N -> MEASUREMENTS -> REMARKS and nothing else. Fabric,
+   * style/cut and garment notes are not collected any more and must not appear
+   * anywhere on the slip; a stale label would send a cutter looking for
+   * information the showroom never took.
+   */
+  const cardOrder = await page.evaluate(() =>
+    [...document.querySelectorAll('.production-slip-product-card')].map(card => {
+      const kids = [...card.children];
+      return {
+        heading: (kids[0].textContent || '').trim().replace(/\s+/g, ' '),
+        categories: kids.slice(1, -1).map(c => (c.children[0].textContent || '').trim().replace(/\s+/g, ' ')),
+        last: (kids[kids.length - 1].textContent || '').trim().replace(/\s+/g, ' ')
+      };
+    }));
+
+  report.check('every garment block leads with its #N and garment name',
+    cardOrder.every((c, i) => c.heading.startsWith(`#${i + 1}`)),
+    cardOrder.map(c => c.heading.slice(0, 24)).join(' / '));
+  report.check('measurements sit between the heading and the remarks',
+    cardOrder.every(c => c.categories.length > 0 && c.categories.every(t => /MEASUREMENTS/i.test(t))),
+    cardOrder.map(c => c.categories.join('+')).join(' / '));
+  report.check('the remarks band closes every garment block',
+    cardOrder.every(c => /^REMARKS/i.test(c.last)),
+    cardOrder.map(c => c.last.slice(0, 20)).join(' / '));
+  report.check('no fabric, style/cut or garment-notes label on the slip',
+    !/\bFabric\b|\bStyle\s*\/?\s*Cut\b|\bGarment Notes\b|\bStitching\b/i.test(printedText));
+
+  // The tier the auto-fit settled on must be a real one, and the sheet it
+  // produced must still be the sheet the printer gets.
+  const tiers = await page.evaluate(() =>
+    [...document.querySelectorAll('.a4-production-page')].map(s => s.getAttribute('data-density')));
+  report.check('every sheet renders at the same resolved density tier',
+    new Set(tiers).size === 1 && ['roomy', 'normal', 'compact', 'dense'].includes(tiers[0]),
+    tiers.join(','));
+});
+
+/* ------------------------------------------------------------------ *
+ * 6b. Fabric, style/cut and garment notes are gone from New Order      *
+ * ------------------------------------------------------------------ */
+await scenario('New Order no longer collects fabric, style/cut or garment notes', async ({ page }) => {
+  await page.getByRole('button', { name: /Dashboard Hub/i }).click().catch(() => {});
+  await page.waitForTimeout(250);
+  await page.getByRole('button', { name: /New Order/i }).first().click();
+  await page.waitForTimeout(400);
+
+  await page.getByPlaceholder('e.g. Vikram Malhotra').fill('Field Removal Check');
+  await page.getByPlaceholder('e.g. 9876543210').fill('9800011122');
+  await page.getByRole('button', { name: /^Continue$/ }).click();
+  await page.waitForTimeout(250);
+  await page.getByRole('button', { name: /^Continue$/ }).click();
+  await page.waitForTimeout(250);
+
+  // Garment selection step, with a garment expanded so its whole
+  // configuration panel is on screen.
+  const card = page.locator('h3:text-is("FULL COAT PANT")')
+    .locator('xpath=ancestor::div[contains(@class,"rounded-3xl")][1]');
+  await card.getByRole('button', { name: /Select/ }).first().click();
+  await page.waitForTimeout(300);
+
+  report.check('the fabric input is gone',
+    (await page.getByPlaceholder('Fabric description...').count()) === 0);
+  const stepText = await page.locator('body').innerText();
+  report.check('no fabric, style/cut or garment-notes label on the garment step',
+    !/Fabric Details|Fabric Code|\bStyle\s*\/?\s*Cut\b|Garment Notes/i.test(stepText),
+    (stepText.match(/Fabric[^\n]{0,30}|Style\s*\/?\s*Cut[^\n]{0,20}|Garment Notes[^\n]{0,20}/i) || [])[0] || '');
+
+  // Quantity still works — removing the three fields must not disturb it.
+  report.check('quantity control still present', (await card.getByText('Quantity').count()) > 0);
+
+  // And the order still places, with remarks and measurements intact.
+  await page.getByRole('button', { name: /^Continue$/ }).click();
+  await page.waitForTimeout(350);
+  await page.getByPlaceholder('Add any production remarks for this garment...').first()
+    .fill('Peak lapel, surgeon cuffs');
+  const chest = page.locator('div.space-y-3').filter({ hasText: 'COAT MEASUREMENTS' }).last()
+    .locator('div.space-y-1').filter({ has: page.locator('label:text-is("Chest")') }).locator('input').first();
+  if (await chest.count()) await chest.fill('41');
+  await page.getByRole('button', { name: /^Continue$/ }).click();
+  await page.waitForTimeout(350);
+  await page.getByRole('button', { name: /PLACE ORDER/ }).click();
+  await page.waitForTimeout(900);
+
+  const db = await readDb(page);
+  const placed = db.orders[0];
+  report.check('the order still saves', Boolean(placed) && placed.items.length === 1);
+  report.check('the garment remark still saves', placed.items[0].remarks === 'Peak lapel, surgeon cuffs');
+  report.check('the measurement still saves', placed.measurementsSnapshot?.coat?.chest === '41');
+  report.check('the dropped columns stay empty rather than being invented',
+    !placed.items[0].fabricName && !placed.items[0].styleNotes,
+    `${placed.items[0].fabricName} / ${placed.items[0].styleNotes}`);
 });
 
 /* ------------------------------------------------------------------ *

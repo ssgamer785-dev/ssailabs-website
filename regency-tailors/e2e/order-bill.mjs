@@ -197,7 +197,6 @@ await scenario('Single-garment bill carries full detail and no measurements', as
     address: 'Model Town Market',
     garments: ['FULL COAT PANT'],
     remarks: { 'FULL COAT PANT': 'Peak lapel, surgeon cuffs, contrast burgundy lining' },
-    fabrics: { 'FULL COAT PANT': 'Loro Piana Super 150s Midnight Navy Wool' },
     measurements: {
       'COAT MEASUREMENTS': {
         Length: 30.5, Chest: 41.75, Stomach: 37.25, 'H.P. / Hip': 42.15, Shoulder: 18.55,
@@ -244,7 +243,10 @@ await scenario('Single-garment bill carries full detail and no measurements', as
   report.check('exactly one garment row is rendered', (await rows.count()) === 1, `${await rows.count()} rows`);
   const rowText = await rows.first().innerText();
   report.check('the row shows the garment name', /FULL COAT PANT/i.test(rowText));
-  report.check('the row shows the fabric that was entered', rowText.includes('Loro Piana Super 150s Midnight Navy Wool'));
+  // The wizard no longer captures fabric, so a freshly placed order has none.
+  // The column must still print a placeholder rather than collapsing the row.
+  report.check('the fabric column degrades to a placeholder when nothing was captured',
+    rowText.includes('—'), rowText.replace(/\n/g, ' | '));
   report.check('the row shows the garment remark', rowText.includes('Peak lapel, surgeon cuffs, contrast burgundy lining'));
   report.check('the row shows quantity 1', /\b1\b/.test(rowText));
   report.check('the row\'s S.No. is 1', (await rows.first().locator('td').first().innerText()).trim() === '1');
@@ -348,8 +350,7 @@ await scenario('Single-garment bill carries full detail and no measurements', as
 await scenario('Bill contains no financial information even when the order has real figures', async ({ page }) => {
   await createOrder(page, {
     name: 'Vikram Malhotra', phone: '9876500001', city: 'Jalandhar', address: 'Civil Lines',
-    garments: ['FULL COAT PANT', 'SHIRT'],
-    fabrics: { 'FULL COAT PANT': 'Giza 87 Egyptian Cotton', SHIRT: 'Sea Island Cotton White' }
+    garments: ['FULL COAT PANT', 'SHIRT']
   });
 
   // Give the order real figures first: the bill must exclude them even when
@@ -420,13 +421,6 @@ await scenario('Every garment row keeps its own detail, none mixed up', async ({
       SHIRT: 'REMARK-SHIRT french cuffs',
       'KURTA PAJAMA': 'REMARK-KURTA mandarin collar'
     },
-    fabrics: {
-      'FULL COAT PANT': 'FABRIC-SUIT navy wool',
-      COAT: 'FABRIC-COAT charcoal tweed',
-      PANT: 'FABRIC-PANT grey worsted',
-      SHIRT: 'FABRIC-SHIRT white poplin',
-      'KURTA PAJAMA': 'FABRIC-KURTA cream silk'
-    },
     measurements: {
       'COAT MEASUREMENTS': { Chest: 41, Length: 30.5 },
       'PANT MEASUREMENTS': { Waist: 34, Length: 40 },
@@ -436,10 +430,11 @@ await scenario('Every garment row keeps its own detail, none mixed up', async ({
     }
   });
 
-  // Fields the wizard has no UI for yet (styleNotes / fabricCode /
-  // specialInstructions) still exist in the schema and the bill must render
-  // them correctly when present — set directly, the same way order totals
-  // are set directly in the scenario above.
+  // Fabric, style/cut and garment notes are no longer collected by the wizard,
+  // but they remain in the schema and orders placed before that change still
+  // carry them — so the bill must keep rendering each garment's own values
+  // without bleeding one row's into another. Set directly on the stored order,
+  // the same way order totals are set directly in the scenario above.
   await page.evaluate(() => {
     const K = 'REGENCY_TAILORS_DB_V3_';
     const orders = JSON.parse(localStorage.getItem(K + 'ORDERS'));
@@ -450,9 +445,17 @@ await scenario('Every garment row keeps its own detail, none mixed up', async ({
       Shirt: 'DESC-SHIRT cutaway collar',
       'Kurta Pajama': 'DESC-KURTA straight cut'
     };
+    const fabricByGarment = {
+      'Full Coat Pant': 'FABRIC-SUIT navy wool',
+      Coat: 'FABRIC-COAT charcoal tweed',
+      Pant: 'FABRIC-PANT grey worsted',
+      Shirt: 'FABRIC-SHIRT white poplin',
+      'Kurta Pajama': 'FABRIC-KURTA cream silk'
+    };
     orders[0].items = orders[0].items.map(i => ({
       ...i,
       styleNotes: styleByGarment[i.garmentType] || '',
+      fabricName: fabricByGarment[i.garmentType] || '',
       fabricCode: `FC-${(i.garmentType || '').replace(/\s+/g, '').slice(0, 4).toUpperCase()}`
     }));
     localStorage.setItem(K + 'ORDERS', JSON.stringify(orders));
@@ -511,14 +514,7 @@ await scenario('Bill prints as exactly one properly formatted A4 sheet', async (
   await createOrder(page, {
     name: 'Harpreet Singh', phone: '9814455566', city: 'Jalandhar', address: 'Bootan Mandi',
     garments: ['FULL COAT PANT', 'COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'],
-    remarks: { 'FULL COAT PANT': longRemark },
-    fabrics: {
-      'FULL COAT PANT': 'Loro Piana Super 150s Midnight Navy Wool',
-      COAT: 'Charcoal Herringbone Tweed',
-      PANT: 'Grey Worsted Wool',
-      SHIRT: 'Giza 87 Egyptian Cotton White',
-      'KURTA PAJAMA': 'Cream Raw Silk'
-    }
+    remarks: { 'FULL COAT PANT': longRemark }
   });
   await openBillFromSuccessScreen(page);
 
@@ -558,8 +554,14 @@ await scenario('Bill prints as exactly one properly formatted A4 sheet', async (
   const printedText = await page.locator('#printable-order-bill').innerText();
   report.check('every garment reaches the paper',
     ['FULL COAT PANT', 'COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'].every(g => printedText.toUpperCase().includes(g)));
-  report.check('every fabric reaches the paper',
-    ['Loro Piana', 'Herringbone', 'Worsted', 'Giza 87', 'Raw Silk'].every(f => printedText.includes(f)));
+  // Fabric is no longer captured by the wizard, so this order has none. The
+  // column must still print for every row — a value the shop never took must
+  // read as blank, not collapse the table. That the column carries each
+  // garment's own fabric when an older order does have one is covered by the
+  // multi-garment scenario above, which seeds the values directly.
+  report.check('the fabric column still prints for every row',
+    printedText.toUpperCase().includes('FABRIC') &&
+    (await page.locator('.order-bill-row').count()) === 5);
   report.check('no signature area reaches the paper', !/Customer Signature/i.test(printedText));
   report.check('the required disclaimer reaches the paper',
     /WE ARE NOT RESPONSIBLE FOR CLOTHES AFTER 2 MONTHS\./i.test(printedText));

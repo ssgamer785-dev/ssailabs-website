@@ -1201,7 +1201,10 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                       {createdOrderSummary.items?.map((item, idx) => (
                         <div key={idx} className="flex justify-between items-center">
                           <span>{item.quantity}x {item.garmentType}</span>
-                          <span className="text-[11px] text-[#7A7060] font-medium">{item.fabricName || 'Bespoke'}</span>
+                          {/* Only orders placed before fabric capture was removed carry one. */}
+                          {item.fabricName && (
+                            <span className="text-[11px] text-[#7A7060] font-medium">{item.fabricName}</span>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1732,23 +1735,19 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                                   </button>
                                 </div>
                               </div>
+                              {/*
+                                Fabric, style/cut and garment notes are no longer
+                                collected here: the workshop works from the
+                                measurements and the garment's remark, and the
+                                production slip prints only those.
 
-                              <div>
-                                <label className="text-[10px] font-bold text-[#8C7E6A] uppercase">Fabric Details / Style</label>
-                                <input
-                                  type="text"
-                                  value={itemData?.fabricName || ''}
-                                  onChange={(e) => {
-                                    const fn = e.target.value;
-                                    setSelectedGarments(prev => ({
-                                      ...prev,
-                                      [cfg.key]: { ...prev[cfg.key]!, fabricName: fn }
-                                    }));
-                                  }}
-                                  placeholder="Fabric description..."
-                                  className="w-full mt-1 bg-[#FAF8F5] border border-[#E0D8CB] rounded-lg px-2.5 py-1.5 text-xs font-medium text-[#071426] outline-none"
-                                />
-                              </div>
+                                The `fabricName` / `styleNotes` /
+                                `specialInstructions` values still travel through
+                                this modal's state (see the garment map above and
+                                the save handler below) so that editing an order
+                                placed before this change preserves whatever it
+                                already had, rather than blanking those columns.
+                              */}
                             </div>
                           )}
                         </div>
@@ -1873,7 +1872,11 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                                 <h3 className="text-base font-black text-[#071426] tracking-wide uppercase">
                                   {g.label} ({unit})
                                 </h3>
-                                <p className="text-xs text-[#7A7060]">{g.fabricName} {g.quantity > 1 ? `• Qty: ${g.quantity}` : ''}</p>
+                                <p className="text-xs text-[#7A7060]">
+                                  {[g.fabricName, g.quantity > 1 ? `Qty: ${g.quantity}` : '']
+                                    .filter(Boolean)
+                                    .join(' • ')}
+                                </p>
                               </div>
                             </div>
                           </div>
@@ -2357,7 +2360,9 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                             <div className="flex items-center gap-2">
                               <span className="font-mono text-xs font-bold text-[#C9A24A]">#{idx + 1}</span>
                               <span className="font-extrabold text-[#071426]">{g.label}</span>
-                              <span className="text-xs text-[#7A7060]">({g.fabricName})</span>
+                              {g.fabricName && (
+                                <span className="text-xs text-[#7A7060]">({g.fabricName})</span>
+                              )}
                             </div>
                             {g.styleNotes && <div className="text-[11px] text-[#8C7E6A] mt-0.5">{g.styleNotes}</div>}
                             {g.remarks && (

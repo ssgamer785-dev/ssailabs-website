@@ -81,6 +81,52 @@ describe('getGarmentCardHeightMm', () => {
     expect(getGarmentCardHeightMm({} as OrderItem)).toBeGreaterThan(0);
     expect(getGarmentCardHeightMm(null as any)).toBeGreaterThan(0);
   });
+
+  it('charges nothing for fabric, style/cut or garment notes', () => {
+    // The slip prints none of the three, so reserving paper for them would
+    // push a one-sheet order onto two. Same garment, same measurements, same
+    // remark — only the dropped fields differ, so the heights must match.
+    const bare = getGarmentCardHeightMm(
+      { ...item('Shirt', 'French cuffs'), fabricName: '', fabricCode: '', styleNotes: '' } as OrderItem
+    );
+    const loaded = getGarmentCardHeightMm({
+      ...item('Shirt', 'French cuffs'),
+      fabricName: 'Giza 87 Egyptian Cotton, white, double-ply, milled in Como',
+      fabricCode: 'FB-SH-087',
+      styleNotes: 'Cutaway collar, tapered body, single-needle topstitch throughout',
+      notes: 'Cutaway collar, tapered body, single-needle topstitch throughout',
+      specialInstructions: 'Wash and press before delivery; check button alignment.'
+    } as OrderItem);
+    expect(loaded).toBe(bare);
+  });
+
+  it('always reserves the remarks band, recorded or blank', () => {
+    // A garment with no remark still prints the ruled line the workshop
+    // writes its adjustment on, so the band is never free.
+    const blank = getGarmentCardHeightMm(item('Shirt'));
+    const measurementsOnly = 5.05 + 2 * 4.05 + 5.9 + 0.8;
+    expect(blank).toBeGreaterThan(measurementsOnly);
+  });
+
+  it('charges hard line breaks in a remark', () => {
+    // The band renders whitespace-pre-wrap, so a typed newline is a real break
+    // on paper. Counting characters alone priced this remark as a single line
+    // and clipped the rest off the sheet.
+    const oneLine = getGarmentCardHeightMm(item('Shirt', 'Line one'));
+    const threeLines = getGarmentCardHeightMm(item('Shirt', 'Line one\nLine two\nLine three'));
+    expect(threeLines).toBeGreaterThan(oneLine);
+    expect(threeLines - oneLine).toBeGreaterThanOrEqual(2 * 3.456);
+  });
+
+  it('charges a remark stored on the measurement snapshot', () => {
+    // garmentRemarkFor falls back to the snapshot's per-garment map; the
+    // height model resolves the remark the same way the card does, so a
+    // snapshot-only remark is measured rather than silently overflowing.
+    const shirt = item('Shirt');
+    const short = getGarmentCardHeightMm(shirt, { garmentRemarks: { Shirt: 'Short' } } as any);
+    const long = getGarmentCardHeightMm(shirt, { garmentRemarks: { Shirt: 'x'.repeat(400) } } as any);
+    expect(long).toBeGreaterThan(short);
+  });
 });
 
 describe('paginateProductionSlip', () => {

@@ -1,8 +1,13 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback, useLayoutEffect } from 'react';
 import { X, Printer, Scissors, Download, Check, Image as ImageIcon, Loader2, Layers } from 'lucide-react';
 import { Order, ProductionStatus } from '../../types';
 import { ProductionSlipPage } from '../production/ProductionSlipPage';
 import { paginateProductionSlip } from '../../utils/productionSlipPagination';
+import {
+  SlipDensity,
+  INITIAL_SLIP_DENSITY,
+  tighterSlipDensity
+} from '../../utils/productionSlipLayout';
 import { downloadElementAsPdf, downloadElementAsImage } from '../../utils/documentExport';
 
 interface PrintProductionSlipModalProps {
@@ -38,6 +43,32 @@ export const PrintProductionSlipModal: React.FC<PrintProductionSlipModalProps> =
     if (!order) return [];
     return paginateProductionSlip(order, snapshot);
   }, [order, snapshot]);
+
+  /*
+   * Document-wide density auto-fit.
+   *
+   * Pagination decides which garments land on which sheet, charging the
+   * tightest tier so its plan is always achievable. The slip then renders at
+   * the loosest tier and steps down one notch each time any sheet reports a
+   * measured overflow, so what survives is the loosest tier every sheet can
+   * hold. Held here rather than per sheet because two sheets of one slip
+   * printed at different type sizes would read as a fault.
+   */
+  const [density, setDensity] = useState<SlipDensity>(INITIAL_SLIP_DENSITY);
+
+  // Restart from the loosest tier whenever the slip's content changes, so a
+  // tier tightened for a fourteen-garment order does not stay tight for the
+  // single-garment order opened next.
+  const orderKey = order ? `${order.id || order.orderNumber || ''}:${pages.length}` : '';
+  useLayoutEffect(() => {
+    setDensity(INITIAL_SLIP_DENSITY);
+  }, [orderKey]);
+
+  // One step per commit: tightening re-renders every sheet, which re-runs
+  // their measurements against the new tier and calls back again if needed.
+  const handleOverflow = useCallback(() => {
+    setDensity(current => tighterSlipDensity(current) ?? current);
+  }, []);
 
   if (!isOpen || !order) return null;
 
@@ -201,6 +232,8 @@ export const PrintProductionSlipModal: React.FC<PrintProductionSlipModalProps> =
                   status={status}
                   orderNum={orderNum}
                   isOverdue={isOverdue}
+                  density={density}
+                  onOverflow={handleOverflow}
                 />
               </React.Fragment>
             ))}

@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef } from 'react';
 import { Order, ProductionStatus, MeasurementRecord } from '../../types';
 import { ProductionSlipProductCard } from './ProductionSlipProductCard';
 import { ProductionSlipPageData } from '../../utils/productionSlipPagination';
+import { SlipDensity, slipDensityTokens } from '../../utils/productionSlipLayout';
 import { SHOWROOM_ADDRESS_LINE1, SHOWROOM_ADDRESS_LINE2 } from '../bills/PrintableRegencyBill';
 
 interface ProductionSlipPageProps {
@@ -12,6 +13,10 @@ interface ProductionSlipPageProps {
   status: ProductionStatus;
   orderNum: string;
   isOverdue: boolean;
+  /** Tier chosen by the document-wide auto-fit; every sheet renders the same. */
+  density: SlipDensity;
+  /** Called when this sheet does not fit the tier it was given. */
+  onOverflow?: (pageIndex: number) => void;
 }
 
 /**
@@ -25,6 +30,10 @@ interface ProductionSlipPageProps {
  * It carries no money and no signature blocks — it is a cutting instruction,
  * not a contract. Everything on it comes from the order the showroom actually
  * entered; nothing is invented to fill the sheet.
+ *
+ * The sheet reports overflow upward rather than resizing itself: the tier is
+ * owned by the document so that two sheets of one slip never print at
+ * different type sizes, which would read as a fault rather than a fit.
  */
 export const ProductionSlipPage: React.FC<ProductionSlipPageProps> = ({
   id,
@@ -32,7 +41,9 @@ export const ProductionSlipPage: React.FC<ProductionSlipPageProps> = ({
   order,
   snapshot,
   orderNum,
-  isOverdue
+  isOverdue,
+  density,
+  onOverflow
 }) => {
   const {
     pageIndex,
@@ -49,6 +60,24 @@ export const ProductionSlipPage: React.FC<ProductionSlipPageProps> = ({
   const fitPreference = (snapshot.fitPreference || '').trim();
   const fittingNotes = (snapshot.fittingNotes || order.fittingNotes || '').trim();
   const showroomAddress = `${SHOWROOM_ADDRESS_LINE1} ${SHOWROOM_ADDRESS_LINE2}`;
+  const tokens = slipDensityTokens(density);
+  const flowRef = useRef<HTMLDivElement>(null);
+  const overflowCallback = useRef(onOverflow);
+  overflowCallback.current = onOverflow;
+
+  /**
+   * Measured overflow test, run before paint so a tightened tier is never seen
+   * as a flicker. scrollHeight against clientHeight asks the browser directly
+   * whether the content fits the fixed sheet box — no millimetre conversion,
+   * and no assumption about the print scale factor.
+   */
+  useLayoutEffect(() => {
+    const flow = flowRef.current;
+    if (!flow) return;
+    if (flow.scrollHeight > flow.clientHeight + 1) {
+      overflowCallback.current?.(pageIndex);
+    }
+  });
 
   /** One label/value pair in the order's meta strip. */
   const meta = (label: string, value: string, emphasise = false) => (
@@ -66,10 +95,14 @@ export const ProductionSlipPage: React.FC<ProductionSlipPageProps> = ({
     <div
       id={id}
       data-page-index={pageIndex}
+      // Exposed so the print tests can assert which tier actually rendered:
+      // the pagination model is calibrated against the floor tier, and that
+      // check is only meaningful on a sheet the auto-fit left there.
+      data-density={density}
       className="a4-production-page bg-white text-black flex flex-col"
       style={{ boxSizing: 'border-box' }}
     >
-      <div className="flex-1 min-h-0">
+      <div ref={flowRef} className="flex-1 min-h-0">
         {/* ============ HEADER ============ */}
         {isFirstPage ? (
           <div className="border-2 border-black">
@@ -123,13 +156,17 @@ export const ProductionSlipPage: React.FC<ProductionSlipPageProps> = ({
         )}
 
         {/* ============ GARMENTS ============ */}
-        <div className="mt-1.5 space-y-1.5">
+        <div
+          className="flex flex-col"
+          style={{ marginTop: tokens.blockGapPx, gap: tokens.blockGapPx }}
+        >
           {items.map(({ item, originalIndex }) => (
             <ProductionSlipProductCard
               key={item.id || originalIndex}
               item={item}
               index={originalIndex}
               snapshot={snapshot}
+              tokens={tokens}
             />
           ))}
         </div>
@@ -138,19 +175,31 @@ export const ProductionSlipPage: React.FC<ProductionSlipPageProps> = ({
             Rendered only when the showroom actually recorded them, so an order
             without notes does not print an empty box pretending to be one. */}
         {isLastPage && (
-          <div className="mt-1.5 space-y-1.5 break-inside-avoid">
+          <div
+            className="flex flex-col break-inside-avoid"
+            style={{ marginTop: tokens.blockGapPx, gap: tokens.blockGapPx }}
+          >
             {showSpecialInstructions && (specialInstructions || fittingNotes) && (
               <div className="border border-black">
-                <div className="bg-black text-white px-2 py-[2px] text-[8.5px] font-black uppercase tracking-wider">
+                <div
+                  className="bg-black text-white px-2 py-[2px] font-black uppercase tracking-wider"
+                  style={{ fontSize: `${tokens.noteHeadPx}px` }}
+                >
                   Special Instructions &amp; Fit Preferences
                 </div>
                 {specialInstructions && (
-                  <p className="px-2 py-[3px] text-[9.5px] font-semibold leading-snug m-0 whitespace-pre-wrap">
+                  <p
+                    className="px-2 font-semibold leading-snug m-0 whitespace-pre-wrap"
+                    style={{ fontSize: `${tokens.notePx}px`, paddingTop: tokens.notePadY, paddingBottom: tokens.notePadY }}
+                  >
                     {specialInstructions}
                   </p>
                 )}
                 {fittingNotes && (
-                  <p className="px-2 py-[3px] text-[9.5px] font-semibold leading-snug m-0 whitespace-pre-wrap border-t border-black/30">
+                  <p
+                    className="px-2 font-semibold leading-snug m-0 whitespace-pre-wrap border-t border-black/30"
+                    style={{ fontSize: `${tokens.notePx}px`, paddingTop: tokens.notePadY, paddingBottom: tokens.notePadY }}
+                  >
                     {fittingNotes}
                   </p>
                 )}
@@ -159,10 +208,16 @@ export const ProductionSlipPage: React.FC<ProductionSlipPageProps> = ({
 
             {showProductionNotes && productionNotes && (
               <div className="border border-black">
-                <div className="bg-black text-white px-2 py-[2px] text-[8.5px] font-black uppercase tracking-wider">
+                <div
+                  className="bg-black text-white px-2 py-[2px] font-black uppercase tracking-wider"
+                  style={{ fontSize: `${tokens.noteHeadPx}px` }}
+                >
                   Production Notes — Internal Workshop Only
                 </div>
-                <p className="px-2 py-[3px] text-[9.5px] font-semibold leading-snug m-0 whitespace-pre-wrap">
+                <p
+                  className="px-2 font-semibold leading-snug m-0 whitespace-pre-wrap"
+                  style={{ fontSize: `${tokens.notePx}px`, paddingTop: tokens.notePadY, paddingBottom: tokens.notePadY }}
+                >
                   {productionNotes}
                 </p>
               </div>

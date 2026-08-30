@@ -25,8 +25,17 @@ export async function readDb(page) {
   });
 }
 
-// Runs the full New Order wizard. garments: array of GARMENT_CONFIGS labels e.g. 'FULL COAT PANT'
-export async function createOrder(page, { name, phone, city, address, garments = ['FULL COAT PANT'], remarks = {}, fabrics = {}, measurements = {} }) {
+/*
+ * Runs the full New Order wizard. garments: array of GARMENT_CONFIGS labels
+ * e.g. 'FULL COAT PANT'.
+ *
+ * There is deliberately no `fabrics` option: fabric, style/cut and garment
+ * notes are no longer collected anywhere in the wizard, so a helper that
+ * pretended to type them would be testing a screen that does not exist. Orders
+ * that predate the change still carry those columns, and the tests that cover
+ * the bill rendering them seed the stored order directly instead.
+ */
+export async function createOrder(page, { name, phone, city, address, garments = ['FULL COAT PANT'], remarks = {}, measurements = {} }) {
   await page.getByRole('button', { name: /Dashboard Hub/i }).click().catch(() => {});
   await page.waitForTimeout(250);
   await page.getByRole('button', { name: /New Order/i }).first().click();
@@ -46,11 +55,6 @@ export async function createOrder(page, { name, phone, city, address, garments =
     const card = page.locator(`h3:text-is("${g}")`).locator('xpath=ancestor::div[contains(@class,"rounded-3xl")][1]');
     await card.getByRole('button', { name: /Select/ }).first().click();
     await page.waitForTimeout(250);
-    // The only per-garment field the wizard actually exposes today is the
-    // "Fabric Details / Style" text box, which writes to `item.fabricName`.
-    if (fabrics[g]) {
-      await card.getByPlaceholder('Fabric description...').fill(fabrics[g]);
-    }
   }
   await page.getByRole('button', { name: /^Continue$/ }).click();
   await page.waitForTimeout(350);
@@ -78,6 +82,7 @@ export async function createOrder(page, { name, phone, city, address, garments =
   await page.waitForTimeout(350);
   await page.getByRole('button', { name: /PLACE ORDER/ }).click();
   await page.waitForTimeout(700);
+
   return wizardNum;
 }
 
