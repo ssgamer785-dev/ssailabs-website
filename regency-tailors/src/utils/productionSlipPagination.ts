@@ -34,6 +34,7 @@ const MASTER_HEADER_MM = 18.2;     // brand bar + 5-column meta strip (measured 
 const CONTINUATION_HEADER_MM = 8;  // single-line header on later sheets (measured 6.4)
 const FOOTER_MM = 4.6;             // per-sheet footer rule (measured 4.23)
 const NOTES_BLOCK_MM = 27;         // special instructions + production notes (measured 24.6)
+const SUMMARY_BLOCK_MM = 6;        // the closing TOTAL ITEMS band, always printed
 const BLOCK_GAP_MM = 1.7;          // vertical gap between garment blocks
 
 /* Per-garment structure, measured the same way: each band was read off the
@@ -54,7 +55,8 @@ export const A4_PAGE_BUDGET_MM = {
   printable: PRINTABLE_HEIGHT_MM,
   firstPage: PRINTABLE_HEIGHT_MM - MASTER_HEADER_MM - FOOTER_MM,
   continuationPage: PRINTABLE_HEIGHT_MM - CONTINUATION_HEADER_MM - FOOTER_MM,
-  notesBlock: NOTES_BLOCK_MM
+  notesBlock: NOTES_BLOCK_MM,
+  summaryBlock: SUMMARY_BLOCK_MM
 };
 
 /**
@@ -160,7 +162,33 @@ export function paginateProductionSlip(
   const capacityFor = (pageIndex: number) =>
     pageIndex === 0 ? A4_PAGE_BUDGET_MM.firstPage : A4_PAGE_BUDGET_MM.continuationPage;
 
-  const heights = itemsWithIndex.map(entry => getGarmentCardHeightMm(entry.item, snapshot));
+  /*
+   * The closing blocks are packed as if they were one more garment.
+   *
+   * They only ever land on the final sheet, but which sheet that is depends on
+   * where they land — so reserving room for them after the split is decided
+   * comes too late. An eight-garment order fits one sheet until the notes and
+   * the tally are added, and reserving afterwards could only shove the last
+   * garment onto a sheet of its own: seven garments and one. Packed as an item,
+   * they are part of what gets levelled, and the eight garments divide evenly.
+   *
+   * The order-level notes print only when the showroom recorded some; the
+   * TOTAL ITEMS tally always prints.
+   */
+  const hasNotes = Boolean(
+    (order?.specialInstructions || order?.notes || '').trim() ||
+      (order?.productionNotes || '').trim() ||
+      (snapshot?.fittingNotes || order?.fittingNotes || '').trim()
+  );
+  const closingMm =
+    (hasNotes ? A4_PAGE_BUDGET_MM.notesBlock + BLOCK_GAP_MM : 0) + A4_PAGE_BUDGET_MM.summaryBlock;
+
+  type Slot = { entry: { item: OrderItem; originalIndex: number } | null; mm: number };
+  const slots: Slot[] = itemsWithIndex.map(entry => ({
+    entry,
+    mm: getGarmentCardHeightMm(entry.item, snapshot)
+  }));
+  slots.push({ entry: null, mm: closingMm });
 
   /**
    * Fills pages in order, never exceeding a page's own capacity nor the soft
@@ -172,24 +200,25 @@ export function paginateProductionSlip(
     let current: { item: OrderItem; originalIndex: number }[] = [];
     let usedMm = 0;
 
-    itemsWithIndex.forEach((entry, i) => {
-      const cardMm = heights[i];
-      const gap = current.length > 0 ? BLOCK_GAP_MM : 0;
+    slots.forEach(slot => {
+      const gap = usedMm > 0 ? BLOCK_GAP_MM : 0;
       // A single garment taller than the ceiling still has to go somewhere, so
       // the page's true capacity always wins over the soft ceiling.
-      const limit = Math.max(Math.min(softCapMm, capacityFor(pages.length)), cardMm);
+      const limit = Math.max(Math.min(softCapMm, capacityFor(pages.length)), slot.mm);
 
-      if (current.length > 0 && usedMm + gap + cardMm > limit) {
+      if (usedMm > 0 && usedMm + gap + slot.mm > limit) {
         pages.push({ items: current, usedMm });
-        current = [entry];
-        usedMm = cardMm;
+        current = slot.entry ? [slot.entry] : [];
+        usedMm = slot.mm;
       } else {
-        current.push(entry);
-        usedMm += gap + cardMm;
+        if (slot.entry) current.push(slot.entry);
+        usedMm += gap + slot.mm;
       }
     });
 
-    if (current.length > 0) pages.push({ items: current, usedMm });
+    // The closing slot carries no garment, so the final page can legitimately
+    // be empty of items — it still has to exist to print them on.
+    pages.push({ items: current, usedMm });
     return pages;
   };
 
@@ -206,8 +235,8 @@ export function paginateProductionSlip(
    */
   let rawPages = greedy;
   if (minPages > 1) {
-    let low = Math.max(...heights);
-    let high = heights.reduce((a, b) => a + b, 0) + BLOCK_GAP_MM * (heights.length - 1);
+    let low = Math.max(...slots.map(s => s.mm));
+    let high = slots.reduce((sum, s) => sum + s.mm, 0) + BLOCK_GAP_MM * (slots.length - 1);
     for (let step = 0; step < 24 && high - low > 0.05; step++) {
       const mid = (low + high) / 2;
       const packed = packWith(mid);
@@ -216,36 +245,6 @@ export function paginateProductionSlip(
         rawPages = packed;
       } else {
         low = mid;
-      }
-    }
-  }
-
-  // The order-level notes live on the final page. If they do not fit, move the
-  // last garment forward rather than letting the block overflow. Only reserve
-  // the room when there is actually something to print there.
-  const hasNotes = Boolean(
-    (order?.specialInstructions || order?.notes || '').trim() ||
-      (order?.productionNotes || '').trim() ||
-      (snapshot?.fittingNotes || order?.fittingNotes || '').trim()
-  );
-
-  if (hasNotes) {
-    const lastIdx = rawPages.length - 1;
-    const lastPage = rawPages[lastIdx];
-    const lastCapacity = capacityFor(lastIdx);
-
-    if (lastPage.usedMm + BLOCK_GAP_MM + A4_PAGE_BUDGET_MM.notesBlock > lastCapacity) {
-      if (lastPage.items.length > 1) {
-        const moved = lastPage.items.pop()!;
-        lastPage.usedMm -= getGarmentCardHeightMm(moved.item, snapshot) + BLOCK_GAP_MM;
-        rawPages.push({
-          items: [moved],
-          usedMm: getGarmentCardHeightMm(moved.item, snapshot)
-        });
-      } else {
-        // A single oversized garment already fills the page — give the notes a
-        // sheet of their own instead of clipping them.
-        rawPages.push({ items: [], usedMm: 0 });
       }
     }
   }

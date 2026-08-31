@@ -46,6 +46,11 @@ begin
     values ('cccccccc-0000-0000-0000-000000000001', v_cust, 'Production Client', '9700000001', current_date + 9, 25000)
     returning id into v_order;
 
+    -- 'Full Coat Pant' is deliberate: the showroom no longer sells a combined
+    -- coat-and-pant garment, but orders placed before the split still carry it.
+    -- garment_type is free text with no enum behind it, so nothing had to be
+    -- migrated -- this row proves such an order still survives a backup and
+    -- restore intact rather than being dropped or rewritten.
     insert into public.order_items (order_id, position, garment_type, price, quantity, remarks)
     values (v_order, 1, 'Full Coat Pant', 20000, 1, 'Peak lapel'),
            (v_order, 2, 'Shirt', 2500, 2, 'French cuff');

@@ -138,7 +138,7 @@ begin
     select id into v_order from public.orders where customer_name = 'Money Client' limit 1;
 
     insert into public.order_items (order_id, position, garment_type, price, quantity)
-    values (v_order, 1, 'Full Coat Pant', 12000, 1),
+    values (v_order, 1, 'Coat', 12000, 1),
            (v_order, 2, 'Shirt', 3000, 2);
 
     select line_total into v_total from public.order_items where order_id = v_order and position = 2;

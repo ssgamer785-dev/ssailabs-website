@@ -27,7 +27,8 @@ export async function readDb(page) {
 
 /*
  * Runs the full New Order wizard. garments: array of GARMENT_CONFIGS labels
- * e.g. 'FULL COAT PANT'.
+ * e.g. 'COAT'. Coat and Pant are separate products; ordering both means
+ * passing both, which produces two line items.
  *
  * There is deliberately no `fabrics` option: fabric, style/cut and garment
  * notes are no longer collected anywhere in the wizard, so a helper that
@@ -35,7 +36,7 @@ export async function readDb(page) {
  * that predate the change still carry those columns, and the tests that cover
  * the bill rendering them seed the stored order directly instead.
  */
-export async function createOrder(page, { name, phone, city, address, garments = ['FULL COAT PANT'], remarks = {}, measurements = {} }) {
+export async function createOrder(page, { name, phone, city, address, garments = ['COAT'], remarks = {}, measurements = {} }) {
   await page.getByRole('button', { name: /Dashboard Hub/i }).click().catch(() => {});
   await page.waitForTimeout(250);
   await page.getByRole('button', { name: /New Order/i }).first().click();

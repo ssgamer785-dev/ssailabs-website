@@ -51,7 +51,18 @@ const orderWith = (items: OrderItem[]): Order =>
   }) as Order;
 
 describe('garment measurement mapping', () => {
-  it('gives a suit both a coat and a pant table', () => {
+  it('gives a Coat only its coat table and a Pant only its pant table', () => {
+    // Two separate products, and neither may borrow the other's measurements.
+    expect(garmentMeasurementBlocks(item('Coat'), snapshot).map(b => b.title))
+      .toEqual(['COAT MEASUREMENTS']);
+    expect(garmentMeasurementBlocks(item('Pant'), snapshot).map(b => b.title))
+      .toEqual(['PANT MEASUREMENTS']);
+  });
+
+  it('still renders a legacy combined garment with both tables', () => {
+    // Nothing creates "Full Coat Pant" any more, but orders placed before the
+    // split still carry it and it genuinely was both — printing it with only
+    // one table would lose measurements off a historical order.
     const titles = garmentMeasurementBlocks(item('Full Coat Pant'), snapshot).map(b => b.title);
     expect(titles).toEqual(['COAT MEASUREMENTS', 'PANT MEASUREMENTS']);
   });
@@ -133,18 +144,18 @@ describe('garment remarks', () => {
 describe('bill row text load', () => {
   it('does not vary by garment type when no descriptive text is recorded', () => {
     // The bill's sizing model reads the remark only — never measurement
-    // tables — so a garment with two measurement tables (Full Coat Pant)
+    // tables — so a garment with two measurement tables (Kurta Pajama)
     // takes no more room than one with none recorded here, as long as
     // neither has any bill-visible text of its own.
-    expect(billRowLines(item('Full Coat Pant'), snapshot))
+    expect(billRowLines(item('Kurta Pajama'), snapshot))
       .toBe(billRowLines(item('Shirt'), snapshot));
   });
 
   it('ignores measurement data entirely — only the remark map affects size', () => {
     const withMeasurements: Partial<MeasurementRecord> = { ...snapshot };
     const withoutMeasurements: Partial<MeasurementRecord> = { unit: 'inches' };
-    expect(billRowLines(item('Full Coat Pant'), withMeasurements))
-      .toBe(billRowLines(item('Full Coat Pant'), withoutMeasurements));
+    expect(billRowLines(item('Kurta Pajama'), withMeasurements))
+      .toBe(billRowLines(item('Kurta Pajama'), withoutMeasurements));
   });
 
   it('grows with a long remark', () => {
@@ -257,7 +268,7 @@ describe('bill density tiers', () => {
 
 describe('single-page bill plan', () => {
   it('puts every garment on the one sheet, in order', () => {
-    const order = orderWith([item('Full Coat Pant'), item('Coat'), item('Pant'), item('Shirt'), item('Kurta Pajama')]);
+    const order = orderWith([item('Coat'), item('Pant'), item('Shirt'), item('Kurta Pajama'), item('Coat')]);
     const plan = planOrderBill(order, snapshot);
     expect(plan.items.map(i => i.originalIndex)).toEqual([0, 1, 2, 3, 4]);
   });
@@ -272,7 +283,7 @@ describe('single-page bill plan', () => {
   });
 
   it('keeps S.No. stable and unique across the sheet', () => {
-    const order = orderWith(Array.from({ length: 9 }, (_, i) => item(i % 2 ? 'Shirt' : 'Full Coat Pant')));
+    const order = orderWith(Array.from({ length: 9 }, (_, i) => item(i % 2 ? 'Shirt' : 'Coat')));
     const indices = planOrderBill(order, snapshot).items.map(i => i.originalIndex);
     expect(indices).toEqual([...indices].sort((a, b) => a - b));
     expect(new Set(indices).size).toBe(9);

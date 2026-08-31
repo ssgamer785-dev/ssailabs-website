@@ -195,8 +195,8 @@ await scenario('Single-garment bill carries full detail and no measurements', as
     phone: '9876543210',
     city: 'Jalandhar',
     address: 'Model Town Market',
-    garments: ['FULL COAT PANT'],
-    remarks: { 'FULL COAT PANT': 'Peak lapel, surgeon cuffs, contrast burgundy lining' },
+    garments: ['COAT'],
+    remarks: { COAT: 'Peak lapel, surgeon cuffs, contrast burgundy lining' },
     measurements: {
       'COAT MEASUREMENTS': {
         Length: 30.5, Chest: 41.75, Stomach: 37.25, 'H.P. / Hip': 42.15, Shoulder: 18.55,
@@ -246,7 +246,7 @@ await scenario('Single-garment bill carries full detail and no measurements', as
   const rows = page.locator('.order-bill-row');
   report.check('exactly one garment row is rendered', (await rows.count()) === 1, `${await rows.count()} rows`);
   const rowText = await rows.first().innerText();
-  report.check('the row shows the garment name', /FULL COAT PANT/i.test(rowText));
+  report.check('the row shows the garment name', /COAT/i.test(rowText));
   report.check('the row carries exactly the five printed cells',
     (await rows.first().locator('td').count()) === 5,
     `${await rows.first().locator('td').count()} cells`);
@@ -353,7 +353,7 @@ await scenario('Single-garment bill carries full detail and no measurements', as
 await scenario('Bill contains no financial information even when the order has real figures', async ({ page }) => {
   await createOrder(page, {
     name: 'Vikram Malhotra', phone: '9876500001', city: 'Jalandhar', address: 'Civil Lines',
-    garments: ['FULL COAT PANT', 'SHIRT']
+    garments: ['COAT', 'SHIRT']
   });
 
   // Give the order real figures first: the bill must exclude them even when
@@ -416,9 +416,8 @@ await scenario('Bill contains no financial information even when the order has r
 await scenario('Every garment row keeps its own detail, none mixed up', async ({ page }) => {
   await createOrder(page, {
     name: 'Rohit Sharma', phone: '9812300045', city: 'Jalandhar', address: 'Guru Nanak Pura',
-    garments: ['FULL COAT PANT', 'COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'],
+    garments: ['COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'],
     remarks: {
-      'FULL COAT PANT': 'REMARK-SUIT peak lapel',
       COAT: 'REMARK-COAT double vent',
       PANT: 'REMARK-PANT side adjusters',
       SHIRT: 'REMARK-SHIRT french cuffs',
@@ -443,14 +442,12 @@ await scenario('Every garment row keeps its own detail, none mixed up', async ({
     const K = 'REGENCY_TAILORS_DB_V3_';
     const orders = JSON.parse(localStorage.getItem(K + 'ORDERS'));
     const styleByGarment = {
-      'Full Coat Pant': 'DESC-SUIT 2-button notch lapel',
       Coat: 'DESC-COAT single vent',
       Pant: 'DESC-PANT flat front',
       Shirt: 'DESC-SHIRT cutaway collar',
       'Kurta Pajama': 'DESC-KURTA straight cut'
     };
     const fabricByGarment = {
-      'Full Coat Pant': 'FABRIC-SUIT navy wool',
       Coat: 'FABRIC-COAT charcoal tweed',
       Pant: 'FABRIC-PANT grey worsted',
       Shirt: 'FABRIC-SHIRT white poplin',
@@ -475,10 +472,9 @@ await scenario('Every garment row keeps its own detail, none mixed up', async ({
 
   const rows = page.locator('.order-bill-row');
   const count = await rows.count();
-  report.check('every garment has its own row', count === 5, `${count} rows`);
+  report.check('every garment has its own row', count === 4, `${count} rows`);
 
   const expected = [
-    ['Full Coat Pant', 'REMARK-SUIT', 'FABRIC-SUIT', 'DESC-SUIT'],
     ['Coat', 'REMARK-COAT', 'FABRIC-COAT', 'DESC-COAT'],
     ['Pant', 'REMARK-PANT', 'FABRIC-PANT', 'DESC-PANT'],
     ['Shirt', 'REMARK-SHIRT', 'FABRIC-SHIRT', 'DESC-SHIRT'],
@@ -513,8 +509,8 @@ await scenario('Bill prints as exactly one properly formatted A4 sheet', async (
   const longRemark = 'Peak lapel, surgeon cuffs, working buttonholes, contrast lining in burgundy silk, ticket pocket on the right, side vents at 22cm and a slightly extended shoulder line as discussed at the fitting, plus reinforced inner pockets for a phone and cardholder.';
   await createOrder(page, {
     name: 'Harpreet Singh', phone: '9814455566', city: 'Jalandhar', address: 'Bootan Mandi',
-    garments: ['FULL COAT PANT', 'COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'],
-    remarks: { 'FULL COAT PANT': longRemark }
+    garments: ['COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'],
+    remarks: { COAT: longRemark }
   });
   await openBillFromSuccessScreen(page);
 
@@ -553,10 +549,10 @@ await scenario('Bill prints as exactly one properly formatted A4 sheet', async (
 
   const printedText = await page.locator('#printable-order-bill').innerText();
   report.check('every garment reaches the paper',
-    ['FULL COAT PANT', 'COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'].every(g => printedText.toUpperCase().includes(g)));
+    ['COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'].every(g => printedText.toUpperCase().includes(g)));
   report.check('the printed sheet has no fabric or description column',
     !/\bFABRIC\b|\bSTITCHING\b/i.test(printedText) &&
-    (await page.locator('.order-bill-row').count()) === 5);
+    (await page.locator('.order-bill-row').count()) === 4);
   report.check('no signature area reaches the paper', !/Customer Signature/i.test(printedText));
   report.check('the required disclaimer reaches the paper',
     /WE ARE NOT RESPONSIBLE FOR CLOTHES AFTER 2 MONTHS\./i.test(printedText));
@@ -602,8 +598,8 @@ await scenario('Bill copes with missing optional detail without inventing conten
 await scenario('Production slip and order editing are unaffected', async ({ page }) => {
   await createOrder(page, {
     name: 'Regression Client', phone: '9777788899', city: 'Jalandhar', address: 'Model Town',
-    garments: ['FULL COAT PANT', 'SHIRT'],
-    remarks: { 'FULL COAT PANT': 'Slip remark intact' },
+    garments: ['COAT', 'SHIRT'],
+    remarks: { COAT: 'Slip remark intact' },
     measurements: { 'COAT MEASUREMENTS': { Chest: 41 }, 'PANT MEASUREMENTS': { Waist: 34 }, 'SHIRT MEASUREMENTS': { Chest: 40 } }
   });
   await page.getByRole('button', { name: /Back to Dashboard|Exit|Close|Done/i }).first().click().catch(() => {});
@@ -617,7 +613,7 @@ await scenario('Production slip and order editing are unaffected', async ({ page
   const slip = page.locator('#printable-production-slip');
   report.check('the production slip still opens', (await slip.count()) === 1);
   const slipText = await slip.innerText();
-  report.check('the slip still shows its garments', /FULL COAT PANT/i.test(slipText) && /SHIRT/i.test(slipText));
+  report.check('the slip still shows its garments', /COAT/i.test(slipText) && /SHIRT/i.test(slipText));
   report.check('the slip still shows measurements — this document is the one that must', /COAT MEASUREMENTS/.test(slipText));
   report.check('the slip still shows per-garment remarks', slipText.includes('Slip remark intact'));
   report.check('the slip carries no signature block', !/Sign-?Off|Signature/i.test(slipText));

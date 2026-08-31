@@ -56,19 +56,35 @@ function assertNoPageOverflows(order: Order) {
       (sum, entry, idx) => sum + getGarmentCardHeightMm(entry.item) + (idx ? BLOCK_GAP_MM : 0),
       0
     );
-    const notesMm =
-      page.isLastPage && hasNotes
-        ? A4_PAGE_BUDGET_MM.notesBlock + (page.items.length ? BLOCK_GAP_MM : 0)
-        : 0;
-    expect(cardsMm + notesMm).toBeLessThanOrEqual(capacity);
+    // The closing blocks: notes when the order has any, and the TOTAL ITEMS
+    // band always — it is never optional, so it is always reserved.
+    const closingMm = page.isLastPage
+      ? (hasNotes ? A4_PAGE_BUDGET_MM.notesBlock + BLOCK_GAP_MM : 0) +
+        A4_PAGE_BUDGET_MM.summaryBlock +
+        BLOCK_GAP_MM
+      : 0;
+    expect(cardsMm + closingMm).toBeLessThanOrEqual(capacity);
   });
   return pages;
 }
 
 describe('getGarmentCardHeightMm', () => {
   it('gives dual-table garments more room than single-table ones', () => {
-    expect(getGarmentCardHeightMm(item('Full Coat Pant'))).toBeGreaterThan(getGarmentCardHeightMm(item('Shirt')));
+    // Kurta Pajama is the only garment the showroom sells that carries two
+    // measurement tables. Coat and Pant are separate products with one each.
+    expect(getGarmentCardHeightMm(item('Kurta Pajama'))).toBeGreaterThan(getGarmentCardHeightMm(item('Shirt')));
     expect(getGarmentCardHeightMm(item('Kurta Pajama'))).toBeGreaterThan(getGarmentCardHeightMm(item('Pant')));
+  });
+
+  it('charges a Coat and a Pant separately, never as one combined garment', () => {
+    const coat = getGarmentCardHeightMm(item('Coat'));
+    const pant = getGarmentCardHeightMm(item('Pant'));
+    const legacyCombined = getGarmentCardHeightMm(item('Full Coat Pant'));
+    // Two products cost two headers and two remark bands; the legacy single
+    // item carried both tables under one of each, so it is the smaller.
+    expect(coat + pant).toBeGreaterThan(legacyCombined);
+    expect(coat).toBeLessThan(legacyCombined);
+    expect(pant).toBeLessThan(legacyCombined);
   });
 
   it('grows with long remarks', () => {
@@ -143,7 +159,7 @@ describe('paginateProductionSlip', () => {
   });
 
   it('never splits a garment card across pages', () => {
-    const order = orderWith([item('Full Coat Pant'), item('Coat'), item('Pant'), item('Shirt'), item('Kurta Pajama')]);
+    const order = orderWith([item('Coat'), item('Pant'), item('Shirt'), item('Kurta Pajama'), item('Coat')]);
     const pages = paginateProductionSlip(order);
     const seen = pages.flatMap(p => p.items.map(i => i.originalIndex));
     expect(seen).toEqual([0, 1, 2, 3, 4]);
@@ -154,14 +170,14 @@ describe('paginateProductionSlip', () => {
     // The whole point of the compact layout: the five garments the order
     // wizard can produce fit one sheet without the type shrinking.
     const pages = assertNoPageOverflows(
-      orderWith([item('Full Coat Pant'), item('Coat'), item('Pant'), item('Shirt'), item('Kurta Pajama')])
+      orderWith([item('Coat'), item('Pant'), item('Shirt'), item('Kurta Pajama'), item('Coat')])
     );
     expect(pages).toHaveLength(1);
     expect(pages.every(p => p.totalPages === pages.length)).toBe(true);
   });
 
   it('spills onto a second sheet only when the content genuinely needs it', () => {
-    const heavy = () => item('Full Coat Pant', 'x'.repeat(300));
+    const heavy = () => item('Kurta Pajama', 'x'.repeat(300));
     const pages = assertNoPageOverflows(orderWith(Array.from({ length: 8 }, heavy)));
     expect(pages.length).toBeGreaterThan(1);
     expect(pages.flatMap(p => p.items)).toHaveLength(8);
@@ -169,7 +185,7 @@ describe('paginateProductionSlip', () => {
 
   it('shows the closing summary only on the final page', () => {
     const pages = paginateProductionSlip(
-      orderWith([item('Full Coat Pant'), item('Coat'), item('Pant'), item('Shirt')])
+      orderWith([item('Coat'), item('Pant'), item('Shirt'), item('Kurta Pajama')])
     );
     const withSummary = pages.filter(p => p.showSpecialInstructions || p.showProductionNotes);
     expect(withSummary).toHaveLength(1);
@@ -178,12 +194,12 @@ describe('paginateProductionSlip', () => {
 
   it('reserves room for the summary rather than letting it overflow', () => {
     // A dual-table garment plus the summary must still fit its page.
-    assertNoPageOverflows(orderWith([item('Full Coat Pant'), item('Kurta Pajama')]));
+    assertNoPageOverflows(orderWith([item('Kurta Pajama'), item('Kurta Pajama')]));
   });
 
   it('keeps garment hashtag numbering continuous across pages', () => {
     const pages = paginateProductionSlip(
-      orderWith([item('Full Coat Pant'), item('Coat'), item('Pant'), item('Shirt'), item('Kurta Pajama')])
+      orderWith([item('Coat'), item('Pant'), item('Shirt'), item('Kurta Pajama'), item('Coat')])
     );
     const indices = pages.flatMap(p => p.items.map(i => i.originalIndex));
     expect(indices).toEqual(indices.slice().sort((a, b) => a - b));

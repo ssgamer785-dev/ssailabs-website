@@ -42,8 +42,12 @@ await scenario('Full order workflow', async ({ page }) => {
   await createOrder(page, {
     name: 'Arjun Mehta',
     phone: '9876543210',
-    garments: ['FULL COAT PANT', 'SHIRT'],
-    remarks: { 'FULL COAT PANT': 'Peak lapel, surgeon cuffs', SHIRT: 'French cuff, no pocket' },
+    garments: ['COAT', 'PANT', 'SHIRT'],
+    remarks: {
+      COAT: 'Peak lapel, surgeon cuffs',
+      PANT: 'Side adjusters, no belt loops',
+      SHIRT: 'French cuff, no pocket'
+    },
     measurements: FULL_MEASUREMENTS
   });
   await finishOrder(page);
@@ -54,9 +58,11 @@ await scenario('Full order workflow', async ({ page }) => {
 
   report.check('order is numbered 1 in an empty showroom', order.id === '1' && order.orderNumber === '1', order.id);
   report.check('order links to the created customer', order.customerId === db.customers[0].id);
-  report.check('both garments are on the order', order.items.length === 2);
+  report.check('every garment is its own line item', order.items.length === 3, `${order.items.length} items`);
   report.check('per-garment remarks are stored on the line items',
-    order.items[0].remarks === 'Peak lapel, surgeon cuffs' && order.items[1].remarks === 'French cuff, no pocket');
+    order.items[0].remarks === 'Peak lapel, surgeon cuffs' &&
+    order.items[1].remarks === 'Side adjusters, no belt loops' &&
+    order.items[2].remarks === 'French cuff, no pocket');
   report.check('coat measurements are isolated to the coat', snap.coat.chest === '41' && snap.coat.collar === '16');
   report.check('pant measurements are isolated to the pant', snap.pant.waist === '34' && snap.pant.inLeg === '31');
   report.check('shirt measurements are isolated to the shirt', snap.shirt.chest === '40' && snap.shirt.collar === '15.5');
@@ -148,8 +154,8 @@ await scenario('Concurrent tabs do not collide', async ({ ctx, page }) => {
  * ------------------------------------------------------------------ */
 await scenario('Editing an order preserves payments and production', async ({ page }) => {
   await createOrder(page, {
-    name: 'Edit Client', phone: '9444444444', garments: ['FULL COAT PANT'],
-    remarks: { 'FULL COAT PANT': 'Peak lapel' },
+    name: 'Edit Client', phone: '9444444444', garments: ['COAT'],
+    remarks: { COAT: 'Peak lapel' },
     measurements: { 'COAT MEASUREMENTS': { Chest: 41 }, 'PANT MEASUREMENTS': { Waist: 34 } }
   });
   await finishOrder(page);
@@ -199,8 +205,8 @@ await scenario('Editing an order preserves payments and production', async ({ pa
 await scenario('Production slip prints as many A4 sheets as it reports', async ({ page }) => {
   await createOrder(page, {
     name: 'Vikram Malhotra', phone: '9876500001',
-    garments: ['FULL COAT PANT', 'COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'],
-    remarks: { 'FULL COAT PANT': 'Peak lapel, surgeon cuffs, working buttonholes, contrast lining in burgundy silk' },
+    garments: ['COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'],
+    remarks: { COAT: 'Peak lapel, surgeon cuffs, working buttonholes, contrast lining in burgundy silk' },
     measurements: FULL_MEASUREMENTS
   });
   await finishOrder(page);
@@ -227,19 +233,34 @@ await scenario('Production slip prints as many A4 sheets as it reports', async (
 
   const printedText = await page.locator('#printable-production-slip').innerText();
   report.check('every garment appears on the printed slip',
-    ['FULL COAT PANT', 'COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'].every(g => printedText.includes(g)));
+    ['COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'].every(g => printedText.includes(g)));
 
   // The slip is a cutting instruction, not a contract: no signature blocks,
   // and no money of any kind.
   report.check('the slip carries no signature block',
     !/Sign-?Off|Signature/i.test(printedText));
+  /*
+   * No money anywhere. The closing TOTAL ITEMS band is a piece count, not a
+   * figure, so it is checked separately rather than being allowed to soften
+   * the money test for the rest of the sheet.
+   */
+  const moneyText = await page.evaluate(() => {
+    const root = document.querySelector('#printable-production-slip').cloneNode(true);
+    root.querySelectorAll('.production-slip-summary').forEach(el => el.remove());
+    return root.innerText || root.textContent || '';
+  });
   report.check('the slip carries no financial information',
-    !/\b(Amount|Total|Advance|Balance|Payment|Price|Subtotal|Discount)\b/i.test(printedText) &&
-    !printedText.includes('\u20B9'));
+    !/\b(Amount|Total|Advance|Balance|Payment|Price|Subtotal|Discount)\b/i.test(moneyText) &&
+    !moneyText.includes('\u20B9'), (moneyText.match(/\b(Amount|Total|Advance|Balance|Payment|Price|Subtotal|Discount)\b/i) || [])[0] || '');
+  const summaryText = await page.locator('.production-slip-summary').innerText();
+  report.check('the closing tally is a piece count, not a figure',
+    /TOTAL ITEMS/i.test(summaryText) &&
+    !/\b(Amount|Advance|Balance|Payment|Price|Subtotal|Discount)\b/i.test(summaryText) &&
+    !summaryText.includes('\u20B9'), summaryText.replace(/\n/g, ' '));
 
   // Every garment keeps its position number from the order.
-  report.check('every garment is numbered #1..#5 in order',
-    ['#1', '#2', '#3', '#4', '#5'].every(n => printedText.includes(n)));
+  report.check('every garment is numbered #1..#4 in order',
+    ['#1', '#2', '#3', '#4'].every(n => printedText.includes(n)));
 
   // Black and white only — a workshop prints this on a mono laser.
   const nonMono = await page.evaluate(() => {
@@ -310,6 +331,187 @@ await scenario('Production slip prints as many A4 sheets as it reports', async (
 });
 
 /* ------------------------------------------------------------------ *
+ * 6c. Coat and Pant are separate products, and the slip totals them    *
+ * ------------------------------------------------------------------ */
+await scenario('Coat and Pant are two products, never a combined garment', async ({ page }) => {
+  await createOrder(page, {
+    name: 'Suit Client', phone: '9800022233',
+    garments: ['COAT', 'PANT'],
+    remarks: { COAT: 'Peak lapel, double vent', PANT: 'Side adjusters, no belt loops' },
+    measurements: FULL_MEASUREMENTS
+  });
+  await finishOrder(page);
+
+  const db = await readDb(page);
+  const order = db.orders[0];
+
+  report.check('a coat and a pant are two order items', order.items.length === 2, `${order.items.length} items`);
+  report.check('they keep their own garment identities',
+    order.items[0].garmentType === 'Coat' && order.items[1].garmentType === 'Pant',
+    order.items.map(i => i.garmentType).join(' / '));
+  report.check('no combined garment is stored behind the scenes',
+    !order.items.some(i => /full\s*coat\s*pant/i.test(i.garmentType || '')),
+    order.items.map(i => i.garmentType).join(' / '));
+  report.check('each keeps its own remark',
+    order.items[0].remarks === 'Peak lapel, double vent' &&
+    order.items[1].remarks === 'Side adjusters, no belt loops');
+  report.check('coat measurements are recorded', order.measurementsSnapshot?.coat?.chest === '41');
+  report.check('pant measurements are recorded', order.measurementsSnapshot?.pant?.waist === '34');
+
+  await page.getByRole('button', { name: /Showroom Orders/i }).click();
+  await page.waitForTimeout(500);
+  await page.locator('button[title="Download PDF or Print Production Slip"]').first().click();
+  await page.waitForTimeout(1300);
+
+  const slipText = await page.locator('#printable-production-slip').innerText();
+  report.check('the slip has no combined garment anywhere', !/full\s*coat\s*pant/i.test(slipText));
+
+  const headings = await page.evaluate(() =>
+    [...document.querySelectorAll('.production-slip-product-card')]
+      .map(c => (c.children[0].textContent || '').trim().replace(/\s+/g, ' ')));
+  report.check('the slip prints #1 COAT then #2 PANT',
+    /^#1\s*Coat/i.test(headings[0]) && /^#2\s*Pant/i.test(headings[1]),
+    headings.join(' / '));
+
+  // Each garment renders only its own measurement tables.
+  const cats = await page.evaluate(() =>
+    [...document.querySelectorAll('.production-slip-product-card')].map(card =>
+      [...card.children].slice(1, -1)
+        .map(c => (c.children[0].textContent || '').trim().replace(/\s+/g, ' '))));
+  report.check('the coat block carries only coat measurements',
+    cats[0].length === 1 && /COAT MEASUREMENTS/i.test(cats[0][0]), cats[0].join('+'));
+  report.check('the pant block carries only pant measurements',
+    cats[1].length === 1 && /PANT MEASUREMENTS/i.test(cats[1][0]), cats[1].join('+'));
+});
+
+/* ------------------------------------------------------------------ *
+ * 6c-bis. A legacy combined garment stays readable, and converts       *
+ *         to two products only when someone actually saves the order   *
+ * ------------------------------------------------------------------ */
+await scenario('A legacy Full Coat Pant order is preserved, printed, and split only on save', async ({ page }) => {
+  // Place a normal order, then rewrite its line item to the combined garment
+  // the showroom used to sell. This is what a pre-split order looks like on
+  // disk; nothing in the app can create one any more.
+  await createOrder(page, {
+    name: 'Legacy Client', phone: '9800044455',
+    garments: ['COAT'],
+    remarks: { COAT: 'Peak lapel, legacy order' },
+    measurements: { 'COAT MEASUREMENTS': { Chest: 41 }, 'PANT MEASUREMENTS': { Waist: 34 } }
+  });
+  await finishOrder(page);
+
+  await page.evaluate(() => {
+    const K = 'REGENCY_TAILORS_DB_V3_';
+    const orders = JSON.parse(localStorage.getItem(K + 'ORDERS'));
+    orders[0].items = [{ ...orders[0].items[0], garmentType: 'Full Coat Pant', quantity: 2 }];
+    orders[0].measurementsSnapshot = {
+      ...orders[0].measurementsSnapshot,
+      pant: { waist: '34', length: '40' }
+    };
+    localStorage.setItem(K + 'ORDERS', JSON.stringify(orders));
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(800);
+
+  // Reading and printing must not touch it.
+  await page.getByRole('button', { name: /Showroom Orders/i }).click();
+  await page.waitForTimeout(500);
+  await page.locator('button[title="Download PDF or Print Production Slip"]').first().click();
+  await page.waitForTimeout(1300);
+
+  const cats = await page.evaluate(() =>
+    [...document.querySelectorAll('.production-slip-product-card')].map(card =>
+      [...card.children].slice(1, -1)
+        .map(c => (c.children[0].textContent || '').replace(/\s+/g, ' ').trim())));
+  report.check('a legacy combined garment still prints both measurement tables',
+    cats.length === 1 && cats[0].length === 2 &&
+    /COAT MEASUREMENTS/i.test(cats[0][0]) && /PANT MEASUREMENTS/i.test(cats[0][1]),
+    JSON.stringify(cats));
+
+  const tally = (await page.locator('.production-slip-summary').innerText()).replace(/\s+/g, ' ');
+  report.check('the tally reports the legacy order as recorded', /TOTAL ITEMS\s*2/i.test(tally), tally);
+
+  const untouched = await readDb(page);
+  report.check('printing did not rewrite the stored order',
+    untouched.orders[0].items.length === 1 &&
+    untouched.orders[0].items[0].garmentType === 'Full Coat Pant',
+    untouched.orders[0].items.map(i => i.garmentType).join(' / '));
+
+  // Editing and saving converts it — deliberately, and only then.
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(700);
+  await page.getByRole('button', { name: /Showroom Orders/i }).click();
+  await page.waitForTimeout(500);
+  await page.locator('button[title="Edit Order"]').first().click();
+  await page.waitForTimeout(800);
+  for (let i = 0; i < 4; i++) {
+    await page.getByRole('button', { name: /^Continue$/ }).click();
+    await page.waitForTimeout(350);
+  }
+  await page.getByRole('button', { name: /PLACE ORDER|UPDATE ORDER|SAVE/i }).first().click();
+  await page.waitForTimeout(1200);
+
+  const after = await readDb(page);
+  const items = after.orders[0].items;
+  report.check('saving splits the legacy garment into a Coat and a Pant',
+    items.length === 2 && items[0].garmentType === 'Coat' && items[1].garmentType === 'Pant',
+    items.map(i => i.garmentType).join(' / '));
+  report.check('the split keeps the recorded quantity on both',
+    items.every(i => i.quantity === 2), items.map(i => i.quantity).join(' / '));
+  report.check('no combined garment survives the save',
+    !items.some(i => /full\s*coat\s*pant/i.test(i.garmentType || '')));
+});
+
+/* ------------------------------------------------------------------ *
+ * 6d. The slip closes with a TOTAL ITEMS tally                         *
+ * ------------------------------------------------------------------ */
+await scenario('Production slip totals the pieces on its final sheet', async ({ page }) => {
+  await createOrder(page, {
+    name: 'Tally Client', phone: '9800033344',
+    garments: ['KURTA PAJAMA', 'COAT', 'PANT'],
+    measurements: FULL_MEASUREMENTS
+  });
+  await finishOrder(page);
+
+  // Five kurta pajamas, one coat, one pant — the worked example: 7 pieces.
+  await page.evaluate(() => {
+    const K = 'REGENCY_TAILORS_DB_V3_';
+    const orders = JSON.parse(localStorage.getItem(K + 'ORDERS'));
+    orders[0].items = orders[0].items.map(i =>
+      i.garmentType === 'Kurta Pajama' ? { ...i, quantity: 5 } : i);
+    localStorage.setItem(K + 'ORDERS', JSON.stringify(orders));
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(800);
+
+  await page.getByRole('button', { name: /Showroom Orders/i }).click();
+  await page.waitForTimeout(500);
+  await page.locator('button[title="Download PDF or Print Production Slip"]').first().click();
+  await page.waitForTimeout(1300);
+
+  const summaries = page.locator('.production-slip-summary');
+  report.check('exactly one summary band is printed', (await summaries.count()) === 1,
+    `${await summaries.count()} bands`);
+
+  const summaryText = (await summaries.first().innerText()).replace(/\s+/g, ' ').trim();
+  report.check('it reports the total piece count', /TOTAL ITEMS\s*7/i.test(summaryText), summaryText);
+  report.check('it counts the kurta pajamas by quantity', /KURTA PAJAMA\s*×\s*5/i.test(summaryText), summaryText);
+  report.check('it lists the coat with its count', /COAT\s*×\s*1/i.test(summaryText), summaryText);
+  report.check('it lists the pant with its count', /PANT\s*×\s*1/i.test(summaryText), summaryText);
+  report.check('it never merges the coat and pant back together',
+    !/full\s*coat\s*pant/i.test(summaryText), summaryText);
+
+  // It belongs to the last sheet only.
+  const onLastSheet = await page.evaluate(() => {
+    const sheets = [...document.querySelectorAll('.a4-production-page')];
+    return sheets.map(s => s.querySelectorAll('.production-slip-summary').length);
+  });
+  report.check('the summary sits on the final sheet and no other',
+    onLastSheet.slice(0, -1).every(n => n === 0) && onLastSheet[onLastSheet.length - 1] === 1,
+    onLastSheet.join(','));
+});
+
+/* ------------------------------------------------------------------ *
  * 6b. Fabric, style/cut and garment notes are gone from New Order      *
  * ------------------------------------------------------------------ */
 await scenario('New Order no longer collects fabric, style/cut or garment notes', async ({ page }) => {
@@ -327,7 +529,7 @@ await scenario('New Order no longer collects fabric, style/cut or garment notes'
 
   // Garment selection step, with a garment expanded so its whole
   // configuration panel is on screen.
-  const card = page.locator('h3:text-is("FULL COAT PANT")')
+  const card = page.locator('h3:text-is("COAT")')
     .locator('xpath=ancestor::div[contains(@class,"rounded-3xl")][1]');
   await card.getByRole('button', { name: /Select/ }).first().click();
   await page.waitForTimeout(300);
@@ -372,7 +574,7 @@ await scenario('Bill prints on one clean A4 sheet', async ({ page }) => {
   await createOrder(page, {
     name: 'Bill Client', phone: '9555500002',
     city: 'Jalandhar', address: 'Model Town Market',
-    garments: ['FULL COAT PANT', 'SHIRT'],
+    garments: ['COAT', 'SHIRT'],
     measurements: FULL_MEASUREMENTS
   });
   await finishOrder(page);
@@ -385,7 +587,7 @@ await scenario('Bill prints on one clean A4 sheet', async ({ page }) => {
   const billText = await page.locator('#printable-customer-bill').innerText();
   report.check('bill shows the correct customer', billText.includes('Bill Client'));
   report.check('bill shows the correct order number', billText.includes('ORDER NO.') && billText.includes('RT-00001'));
-  report.check('bill lists every garment', billText.includes('Full Coat Pant') && billText.includes('Shirt'));
+  report.check('bill lists every garment', billText.includes('Coat') && billText.includes('Shirt'));
   report.check('bill shows the recorded customer address', /Model Town Market/.test(billText),
     billText.match(/ADDRESS[\s\S]{0,60}/)?.[0]?.replace(/\n/g, ' '));
 
@@ -405,8 +607,8 @@ await scenario('Bill prints on one clean A4 sheet', async ({ page }) => {
  * ------------------------------------------------------------------ */
 await scenario('Backup export and import restore everything', async ({ page }) => {
   await createOrder(page, {
-    name: 'Backup Client', phone: '9555500001', garments: ['FULL COAT PANT', 'KURTA PAJAMA'],
-    remarks: { 'FULL COAT PANT': 'Ticket pocket', 'KURTA PAJAMA': 'Ivory silk' },
+    name: 'Backup Client', phone: '9555500001', garments: ['COAT', 'KURTA PAJAMA'],
+    remarks: { COAT: 'Ticket pocket', 'KURTA PAJAMA': 'Ivory silk' },
     measurements: {
       'COAT MEASUREMENTS': { Chest: 42, Length: 31 }, 'PANT MEASUREMENTS': { Waist: 35 },
       'KURTA MEASUREMENTS': { Chest: 43 }, 'PAJAMA MEASUREMENTS': { Waist: 36 }

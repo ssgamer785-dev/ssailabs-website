@@ -79,7 +79,10 @@ const normalisePhone = (phone?: string): string => {
 // 5 CLEAN STEPS: 1 Customer -> 2 Order Details -> 3 Garments -> 4 Measurements -> 5 Review
 type OrderStep = 1 | 2 | 3 | 4 | 5;
 
-type GarmentKey = 'Full Coat Pant' | 'Coat' | 'Pant' | 'Shirt' | 'Kurta Pajama';
+/* The garments the showroom sells. Coat and Pant are separate products: a
+ * customer ordering both gets two line items, each with its own quantity,
+ * measurements and remark. There is deliberately no combined entry. */
+type GarmentKey = 'Coat' | 'Pant' | 'Shirt' | 'Kurta Pajama';
 
 interface GarmentConfig {
   key: GarmentKey;
@@ -89,12 +92,6 @@ interface GarmentConfig {
 }
 
 const GARMENT_CONFIGS: GarmentConfig[] = [
-  {
-    key: 'Full Coat Pant',
-    label: 'FULL COAT PANT',
-    sublabel: 'Complete Bespoke 2-Piece Suit (Coat + Pant)',
-    icon: '🤵'
-  },
   {
     key: 'Coat',
     label: 'COAT',
@@ -189,15 +186,6 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       remarks?: string;
     };
   }>({
-    'Full Coat Pant': {
-      selected: false,
-      quantity: 1,
-      fabricName: '',
-      fabricCode: '',
-      styleNotes: '',
-      specialInstructions: '',
-      remarks: ''
-    },
     Coat: {
       selected: false,
       quantity: 1,
@@ -364,15 +352,6 @@ export const OrderModal: React.FC<OrderModalProps> = ({
 
     // Step 3: Default Garment
     setSelectedGarments({
-      'Full Coat Pant': {
-        selected: false,
-        quantity: 1,
-        fabricName: '',
-        fabricCode: '',
-        styleNotes: '',
-        specialInstructions: '',
-        remarks: ''
-      },
       Coat: {
         selected: false,
         quantity: 1,
@@ -500,24 +479,52 @@ export const OrderModal: React.FC<OrderModalProps> = ({
           Object.keys(newSel).forEach(k => {
             newSel[k as GarmentKey]!.selected = false;
           });
-          initialOrder.items.forEach(item => {
-            const typeStr = (item.garmentType || '').toLowerCase();
-            let matchedKey: GarmentKey = 'Coat';
-            if (typeStr.includes('full coat pant') || (typeStr.includes('coat') && typeStr.includes('pant'))) matchedKey = 'Full Coat Pant';
-            else if (typeStr.includes('kurta') || typeStr.includes('ethnic') || typeStr.includes('pajama')) matchedKey = 'Kurta Pajama';
-            else if (typeStr.includes('pant') || typeStr.includes('trouser')) matchedKey = 'Pant';
-            else if (typeStr.includes('shirt')) matchedKey = 'Shirt';
-            else matchedKey = 'Coat';
+          /*
+           * Which product(s) a stored line item maps back onto.
+           *
+           * Almost always one. The exception is a legacy "Full Coat Pant" — the
+           * combined garment the showroom used to sell — which maps onto both
+           * Coat and Pant, because that is what it always was. Editing such an
+           * order therefore reopens it as two products, and saving writes it
+           * back as two line items. That is a deliberate conversion, not a
+           * silent one: it happens only when someone opens the order and saves
+           * it, and it never runs over stored data on its own. An order nobody
+           * edits keeps exactly the record it was placed with.
+           */
+          const keysForItem = (garmentType: string): GarmentKey[] => {
+            const t = (garmentType || '').toLowerCase();
+            if (t.includes('kurta') || t.includes('ethnic') || t.includes('pajama')) return ['Kurta Pajama'];
+            if (t.includes('shirt')) return ['Shirt'];
+            const coat = t.includes('coat') || t.includes('blazer') || t.includes('jacket') || t.includes('suit');
+            const pant = t.includes('pant') || t.includes('trouser') || t.includes('suit');
+            if (coat && pant) return ['Coat', 'Pant'];
+            if (pant) return ['Pant'];
+            return ['Coat'];
+          };
 
-            newSel[matchedKey] = {
-              selected: true,
-              quantity: item.quantity || 1,
-              fabricName: item.fabricName,
-              fabricCode: item.fabricCode,
-              styleNotes: item.styleNotes || item.notes || '',
-              specialInstructions: item.specialInstructions || '',
-              remarks: item.remarks || (initialOrder.measurementsSnapshot?.garmentRemarks?.[matchedKey]) || ''
-            };
+          // An explicit Coat or Pant line beats one derived from a combined
+          // legacy item, so an order carrying both keeps the explicit values.
+          const claimed = new Set<GarmentKey>();
+          initialOrder.items.forEach(item => {
+            const keys = keysForItem(item.garmentType || '');
+            const derived = keys.length > 1;
+            keys.forEach(key => {
+              if (derived && claimed.has(key)) return;
+              if (!derived) claimed.add(key);
+              newSel[key] = {
+                selected: true,
+                quantity: item.quantity || 1,
+                fabricName: item.fabricName,
+                fabricCode: item.fabricCode,
+                styleNotes: item.styleNotes || item.notes || '',
+                specialInstructions: item.specialInstructions || '',
+                remarks:
+                  item.remarks ||
+                  initialOrder.measurementsSnapshot?.garmentRemarks?.[key] ||
+                  initialOrder.measurementsSnapshot?.garmentRemarks?.[item.garmentType || ''] ||
+                  ''
+              };
+            });
           });
           setSelectedGarments(newSel);
 
@@ -721,20 +728,18 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   // Quick Preset Packages
   const applyPresetPackage = (type: 'suit2' | 'suit3' | 'ethnic') => {
     const updated = { ...selectedGarments };
+    // A two-piece suit is a coat and a pant — two products, not one.
     if (type === 'suit2') {
-      updated['Full Coat Pant']!.selected = true;
-      updated.Coat!.selected = false;
-      updated.Pant!.selected = false;
+      updated.Coat!.selected = true;
+      updated.Pant!.selected = true;
       updated.Shirt!.selected = false;
       updated['Kurta Pajama']!.selected = false;
     } else if (type === 'suit3') {
-      updated['Full Coat Pant']!.selected = true;
-      updated.Coat!.selected = false;
-      updated.Pant!.selected = false;
+      updated.Coat!.selected = true;
+      updated.Pant!.selected = true;
       updated.Shirt!.selected = true;
       updated['Kurta Pajama']!.selected = false;
     } else if (type === 'ethnic') {
-      updated['Full Coat Pant']!.selected = false;
       updated.Coat!.selected = false;
       updated.Pant!.selected = false;
       updated.Shirt!.selected = false;
@@ -874,8 +879,8 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         remarks: g.remarks || ''
       }));
 
-      const hasCoat = selectedGarments['Full Coat Pant']?.selected || selectedGarments.Coat?.selected;
-      const hasPant = selectedGarments['Full Coat Pant']?.selected || selectedGarments.Pant?.selected;
+      const hasCoat = selectedGarments.Coat?.selected;
+      const hasPant = selectedGarments.Pant?.selected;
       const hasShirt = selectedGarments.Shirt?.selected;
       const hasKurtaPajama = selectedGarments['Kurta Pajama']?.selected;
 
@@ -1881,109 +1886,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                             </div>
                           </div>
 
-                          {/* 1. Full Coat Pant (Coat + Pant Measurements) */}
-                          {g.key === 'Full Coat Pant' && (
-                            <div className="space-y-5">
-                              {/* COAT PART */}
-                              <div className="space-y-3">
-                                <div className="flex items-center gap-2 pb-1 text-xs font-black text-[#071426] uppercase tracking-wider">
-                                  <span className="text-base">🧥</span>
-                                  <span>COAT MEASUREMENTS ({unit})</span>
-                                </div>
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-                                  {[
-                                    { key: 'length', label: 'Length' },
-                                    { key: 'chest', label: 'Chest' },
-                                    { key: 'stomach', label: 'Stomach' },
-                                    { key: 'hip', label: 'H.P. / Hip' },
-                                    { key: 'shoulder', label: 'Shoulder' },
-                                    { key: 'sleeve', label: 'Sleeve' },
-                                    { key: 'xBack', label: 'X-Back' },
-                                    { key: 'collar', label: 'Collar' },
-                                    { key: 'jacketLength', label: 'Jacket Length' },
-                                    { key: 'waistcoatLength', label: 'Waistcoat Length' }
-                                  ].map(f => (
-                                    <div key={f.key} className="space-y-1">
-                                      <label className="text-[10px] font-bold text-[#8C7E6A] uppercase">{f.label}</label>
-                                      <div className="relative">
-                                        <input
-                                          type="text"
-                                          value={(coatMeas as any)[f.key] || ''}
-                                          onChange={(e) => setCoatMeas({ ...coatMeas, [f.key]: e.target.value })}
-                                          className="w-full bg-[#FAF8F5] border border-[#E0D8CB] focus:border-[#C9A24A] rounded-xl px-2.5 py-2 text-center text-sm font-extrabold text-[#071426] outline-none"
-                                        />
-                                        <div className="flex justify-between mt-1 gap-1">
-                                          <button
-                                            type="button"
-                                            onClick={() => stepMeasurement(setCoatMeas, f.key, -0.25)}
-                                            className="flex-1 py-0.5 bg-[#FAF8F5] hover:bg-[#E6E1D7] rounded text-[10px] font-bold text-[#6E6454] cursor-pointer"
-                                          >
-                                            -¼
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => stepMeasurement(setCoatMeas, f.key, 0.25)}
-                                            className="flex-1 py-0.5 bg-[#FAF8F5] hover:bg-[#E6E1D7] rounded text-[10px] font-bold text-[#6E6454] cursor-pointer"
-                                          >
-                                            +¼
-                                          </button>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-
-                              {/* PANT PART */}
-                              <div className="space-y-3 pt-4 border-t border-[#F2ECE1]">
-                                <div className="flex items-center gap-2 pb-1 text-xs font-black text-[#071426] uppercase tracking-wider">
-                                  <span className="text-base">👖</span>
-                                  <span>PANT MEASUREMENTS ({unit})</span>
-                                </div>
-                                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3">
-                                  {[
-                                    { key: 'length', label: 'Length' },
-                                    { key: 'waist', label: 'Waist' },
-                                    { key: 'hip', label: 'H.P. / Hip' },
-                                    { key: 'thigh', label: 'Thigh' },
-                                    { key: 'inLeg', label: 'In-Leg' },
-                                    { key: 'bottom', label: 'Bottom' },
-                                    { key: 'body', label: 'Body' }
-                                  ].map(f => (
-                                    <div key={f.key} className="space-y-1">
-                                      <label className="text-[10px] font-bold text-[#8C7E6A] uppercase">{f.label}</label>
-                                      <div className="relative">
-                                        <input
-                                          type="text"
-                                          value={(pantMeas as any)[f.key] || ''}
-                                          onChange={(e) => setPantMeas({ ...pantMeas, [f.key]: e.target.value })}
-                                          className="w-full bg-[#FAF8F5] border border-[#E0D8CB] focus:border-[#C9A24A] rounded-xl px-2.5 py-2 text-center text-sm font-extrabold text-[#071426] outline-none"
-                                        />
-                                        <div className="flex justify-between mt-1 gap-1">
-                                          <button
-                                            type="button"
-                                            onClick={() => stepMeasurement(setPantMeas, f.key, -0.25)}
-                                            className="flex-1 py-0.5 bg-[#FAF8F5] hover:bg-[#E6E1D7] rounded text-[10px] font-bold text-[#6E6454] cursor-pointer"
-                                          >
-                                            -¼
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => stepMeasurement(setPantMeas, f.key, 0.25)}
-                                            className="flex-1 py-0.5 bg-[#FAF8F5] hover:bg-[#E6E1D7] rounded text-[10px] font-bold text-[#6E6454] cursor-pointer"
-                                          >
-                                            +¼
-                                          </button>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* 2. Coat only */}
+                          {/* 1. Coat only */}
                           {g.key === 'Coat' && (
                             <div className="space-y-3">
                               <div className="flex items-center gap-2 pb-1 text-xs font-black text-[#071426] uppercase tracking-wider">
@@ -2035,7 +1938,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                             </div>
                           )}
 
-                          {/* 3. Pant only */}
+                          {/* 2. Pant only */}
                           {g.key === 'Pant' && (
                             <div className="space-y-3">
                               <div className="flex items-center gap-2 pb-1 text-xs font-black text-[#071426] uppercase tracking-wider">
@@ -2084,7 +1987,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                             </div>
                           )}
 
-                          {/* 4. Shirt */}
+                          {/* 3. Shirt */}
                           {g.key === 'Shirt' && (
                             <div className="space-y-3">
                               <div className="flex items-center gap-2 pb-1 text-xs font-black text-[#071426] uppercase tracking-wider">
@@ -2134,7 +2037,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                             </div>
                           )}
 
-                          {/* 5. Kurta Pajama */}
+                          {/* 4. Kurta Pajama */}
                           {g.key === 'Kurta Pajama' && (
                             <div className="space-y-5">
                               {/* KURTA */}
@@ -2389,13 +2292,13 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                       <span>4. Precision Measurements ({unit} • {fitPreference})</span>
                     </h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
-                      {(selectedGarments['Full Coat Pant']?.selected || selectedGarments.Coat?.selected) && (
+                      {selectedGarments.Coat?.selected && (
                         <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[#E0D8CB]">
                           <span className="font-bold text-[#071426] block mb-1">Coat:</span>
                           <span className="text-[#574E3E]">L:{coatMeas.length} C:{coatMeas.chest} St:{coatMeas.stomach} Hip:{coatMeas.hip} Sh:{coatMeas.shoulder} Sl:{coatMeas.sleeve} Col:{coatMeas.collar}</span>
                         </div>
                       )}
-                      {(selectedGarments['Full Coat Pant']?.selected || selectedGarments.Pant?.selected) && (
+                      {selectedGarments.Pant?.selected && (
                         <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[#E0D8CB]">
                           <span className="font-bold text-[#071426] block mb-1">Pant:</span>
                           <span className="text-[#574E3E]">L:{pantMeas.length} W:{pantMeas.waist} Hip:{pantMeas.hip} Th:{pantMeas.thigh} In:{pantMeas.inLeg} Bot:{pantMeas.bottom}</span>

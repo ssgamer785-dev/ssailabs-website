@@ -3,6 +3,7 @@ import { Order, ProductionStatus, MeasurementRecord } from '../../types';
 import { ProductionSlipProductCard } from './ProductionSlipProductCard';
 import { ProductionSlipPageData } from '../../utils/productionSlipPagination';
 import { SlipDensity, slipDensityTokens } from '../../utils/productionSlipLayout';
+import { summariseOrderItems } from '../../utils/productionSlipSummary';
 import { SHOWROOM_ADDRESS_LINE1, SHOWROOM_ADDRESS_LINE2 } from '../bills/PrintableRegencyBill';
 
 interface ProductionSlipPageProps {
@@ -61,6 +62,10 @@ export const ProductionSlipPage: React.FC<ProductionSlipPageProps> = ({
   const fittingNotes = (snapshot.fittingNotes || order.fittingNotes || '').trim();
   const showroomAddress = `${SHOWROOM_ADDRESS_LINE1} ${SHOWROOM_ADDRESS_LINE2}`;
   const tokens = slipDensityTokens(density);
+  // Counted from the whole order, not this sheet's slice, and printed once at
+  // the very end — it is the tally the workshop checks the finished pile
+  // against, so a per-sheet subtotal would be worse than useless.
+  const summary = summariseOrderItems(order.items);
   const flowRef = useRef<HTMLDivElement>(null);
   const overflowCallback = useRef(onOverflow);
   overflowCallback.current = onOverflow;
@@ -220,6 +225,42 @@ export const ProductionSlipPage: React.FC<ProductionSlipPageProps> = ({
                 >
                   {productionNotes}
                 </p>
+              </div>
+            )}
+
+            {/* ============ TOTAL ITEMS ============
+                The last thing on the last sheet: what the workshop counts the
+                finished pile against. One band, garments on one line, so it
+                costs the sheet a few millimetres rather than a block. */}
+            {summary.lines.length > 0 && (
+              <div className="production-slip-summary flex items-stretch border border-black break-inside-avoid">
+                <div
+                  className="bg-black text-white px-2 font-black uppercase tracking-wider shrink-0 flex items-center gap-2"
+                  style={{ fontSize: `${tokens.noteHeadPx}px`, paddingTop: tokens.notePadY, paddingBottom: tokens.notePadY }}
+                >
+                  <span>Total Items</span>
+                  <span
+                    className="font-mono"
+                    style={{ fontSize: `${tokens.notePx + 1}px` }}
+                    data-total-items={summary.totalItems}
+                  >
+                    {summary.totalItems}
+                  </span>
+                </div>
+                <div
+                  className="flex-1 flex flex-wrap items-center gap-x-3 gap-y-[1px] px-2 min-w-0"
+                  style={{ paddingTop: tokens.notePadY, paddingBottom: tokens.notePadY }}
+                >
+                  {summary.lines.map(line => (
+                    <span
+                      key={line.label}
+                      className="font-bold uppercase tracking-wide whitespace-nowrap"
+                      style={{ fontSize: `${tokens.notePx}px` }}
+                    >
+                      {line.label} <span className="font-black">× {line.quantity}</span>
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
           </div>

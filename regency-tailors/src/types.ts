@@ -1,4 +1,14 @@
 export type GarmentType = 
+  /**
+   * Legacy only — never created again.
+   *
+   * The showroom used to sell a combined coat-and-pant garment as one line
+   * item. It is now two: a Coat and a Pant, each with its own quantity,
+   * measurements and remark. The value stays in this union because orders
+   * placed before the split still carry it, and dropping it would make those
+   * stored orders fail to type-check the moment they are read back. Nothing in
+   * the app offers it for selection.
+   */
   | 'Full Coat Pant'
   | 'Coat'
   | 'Pant'
