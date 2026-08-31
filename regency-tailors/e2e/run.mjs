@@ -785,6 +785,11 @@ await scenario('Hostile backup files never damage live data', async ({ page }) =
   report.check('live data is untouched after every rejected import', db.orders.length === 1 && db.customers.length === 1);
   report.check('no script from a backup file executed', !(await page.evaluate(() => Boolean(window.__XSS))));
 
+  // A rejected import must never claim to have worked. The owner deletes the
+  // good file on the strength of that message.
+  report.check('no rejected import claims to have succeeded',
+    (await page.locator('text=/restored successfully/i').count()) === 0);
+
   // Now actually restore the structurally broken file and browse the app.
   await page.setInputFiles('input[type=file]', path.join(TMP, 'structurally-broken.regency.backup'));
   await page.waitForTimeout(900);

@@ -44,6 +44,8 @@ In **SQL Editor**, run the files in `supabase/migrations/` in filename order:
 | `20260827000002_rls.sql` | Row Level Security policies and grants |
 | `20260827000003_backup_restore.sql` | Atomic export/restore functions |
 | `20260827000004_seed_settings.sql` | Showroom address (Bootan Mandi) |
+| `20260829000000_rebrand_showroom_settings.sql` | Updates an already-deployed settings row to REGENCY TAILOR / 144003 |
+| `20260831000000_backup_settings_and_audit.sql` | Backup exports the audit log; restore also restores showroom settings |
 
 Or with the Supabase CLI:
 
@@ -127,6 +129,18 @@ Issued by `order_number_seq` with a `UNIQUE` constraint. Safe across devices
 and concurrent sessions by construction. Numbers are never re-used — deleting
 an order does not return its number to the pool, because a number already
 printed on a bill must never reappear on a different customer's paperwork.
+
+## Data retention
+
+Nothing in this database expires. There is no scheduled job, no TTL and no
+automatic purge: a customer created today is still there in ten years unless an
+Admin deletes them. Deletions are soft (`deleted_at`) and sit in Trash until an
+Admin empties it, and an order's customer cannot be removed at all while the
+order exists (`on delete restrict`). The audit log has no UPDATE or DELETE
+grant for anyone, so it only ever grows.
+
+That is separate from Supabase's own backup retention and project-pausing
+behaviour, which are plan-level settings in their dashboard.
 
 ## Backup and restore
 

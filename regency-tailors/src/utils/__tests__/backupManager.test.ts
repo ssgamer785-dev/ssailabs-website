@@ -75,6 +75,28 @@ describe('buildBackupSnapshot', () => {
     expect(snap.metadata.orderSequence).toBe(42);
   });
 
+  it('carries the database payload through verbatim, audit history included', () => {
+    // On the Supabase path the file wraps the exact export_backup() payload.
+    // Anything dropped here is data the owner believes they have a copy of and
+    // does not — the audit history most of all, since the restore deliberately
+    // never writes it back and the file is the only place it survives.
+    const database = {
+      customers: [{ id: 'c1' }],
+      orders: [{ id: 'o1', order_number: 7 }],
+      audit_log: [{ id: 1, action: 'restore_backup', actor_email: 'owner@example.com' }],
+      showroom_settings: { name: 'REGENCY TAILOR', address_line2: 'JALANDHAR, PUNJAB 144003' },
+      order_sequence: 7
+    };
+    const snap = buildBackupSnapshot({
+      customers: [customer], orders: [order], ...emptyCollections, profile, database
+    });
+    expect(snap.database).toEqual(database);
+    expect((snap.database as typeof database).audit_log).toHaveLength(1);
+    expect((snap.database as typeof database).showroom_settings.address_line2)
+      .toBe('JALANDHAR, PUNJAB 144003');
+    expect(snap.metadata.exportedFrom).toBe('supabase');
+  });
+
   it('never exports credentials or API keys', () => {
     const snap = buildBackupSnapshot({ customers: [customer], orders: [order], ...emptyCollections, profile });
     const serialised = JSON.stringify(snap);

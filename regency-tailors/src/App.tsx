@@ -174,6 +174,28 @@ export default function App() {
     }
   }, [refresh]);
 
+  /**
+   * Same write-then-reload path as `push`, but the failure reaches the caller.
+   *
+   * `push` deliberately absorbs errors so one failed field edit cannot tear
+   * down the screen — the banner reports it and the user carries on. A restore
+   * cannot work that way: the caller has to know, because it is the thing that
+   * decides whether to tell the owner their data came back. Absorbing the
+   * error there meant a restore the database had rejected still displayed
+   * "Backup restored successfully".
+   */
+  const pushOrThrow = useCallback(async (write: () => Promise<unknown>) => {
+    try {
+      await write();
+      setDataError(null);
+    } catch (err: any) {
+      setDataError(err?.message || 'That change could not be saved.');
+      throw err instanceof Error ? err : new Error(String(err?.message || err));
+    } finally {
+      await refresh();
+    }
+  }, [refresh]);
+
   // Keep a second browser tab from overwriting the first tab's work. Each tab
   // holds the whole database in memory and writes it back wholesale, so without
   // this a stale tab silently erases orders saved elsewhere.
@@ -883,7 +905,10 @@ export default function App() {
           orderSequence: incoming.metadata?.orderSequence
         }).payload;
 
-      await push(() => repo.restoreBackupPayload(dbPayload as Record<string, unknown>, 'backup import'));
+      // Throws on failure so the Backup screen reports the failure instead of
+      // announcing a success the database refused. The restore itself is one
+      // transaction, so a rejected import leaves production exactly as it was.
+      await pushOrThrow(() => repo.restoreBackupPayload(dbPayload as Record<string, unknown>, 'backup import'));
       return;
     }
 

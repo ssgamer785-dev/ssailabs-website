@@ -230,4 +230,149 @@ begin
 end;
 $$;
 
+-- ================================================================
+-- Showroom settings: exported, restored, and never blanked by an
+-- older backup that predates settings being carried at all.
+-- ================================================================
+do $$
+declare v_payload jsonb;
+begin
+    update public.showroom_settings
+       set name = 'REGENCY TAILOR', city = 'JALANDHAR',
+           address_line1 = 'BOOTAN MANDI,', address_line2 = 'JALANDHAR, PUNJAB 144003',
+           phone = '99887 71631', gstin = null
+     where id;
+
+    v_payload := public.export_backup();
+    perform pg_temp.ok('the export carries showroom settings',
+        v_payload ? 'showroom_settings' and v_payload -> 'showroom_settings' <> 'null'::jsonb);
+    perform pg_temp.ok('the exported settings hold the real showroom address',
+        v_payload #>> '{showroom_settings,address_line2}' = 'JALANDHAR, PUNJAB 144003',
+        '(' || coalesce(v_payload #>> '{showroom_settings,address_line2}', 'null') || ')');
+end;
+$$;
+
+do $$
+declare v_payload jsonb; v_addr text; v_name text; v_restored boolean;
+begin
+    -- Take a backup of the correct settings, then damage the live row and
+    -- restore: the settings must come back with everything else.
+    v_payload := public.export_backup();
+
+    update public.showroom_settings
+       set name = 'WRONG NAME', address_line2 = 'WRONG ADDRESS', phone = '00000 00000'
+     where id;
+
+    select (public.restore_backup(v_payload, 'settings restore test') ->> 'showroom_settings_restored')::boolean
+      into v_restored;
+
+    select name, address_line2 into v_name, v_addr from public.showroom_settings where id;
+    perform pg_temp.ok('the restore reports that settings were restored', v_restored);
+    perform pg_temp.ok('the showroom name is restored', v_name = 'REGENCY TAILOR', '(' || v_name || ')');
+    perform pg_temp.ok('the showroom address is restored',
+        v_addr = 'JALANDHAR, PUNJAB 144003', '(' || v_addr || ')');
+end;
+$$;
+
+do $$
+declare v_payload jsonb; v_addr text; v_restored boolean;
+begin
+    -- An older file that carries no settings at all must leave the showroom's
+    -- own address alone rather than blanking what prints on every bill.
+    v_payload := public.export_backup() - 'showroom_settings';
+    perform pg_temp.ok('the test payload really has no settings', not (v_payload ? 'showroom_settings'));
+
+    select (public.restore_backup(v_payload, 'legacy payload test') ->> 'showroom_settings_restored')::boolean
+      into v_restored;
+
+    select address_line2 into v_addr from public.showroom_settings where id;
+    perform pg_temp.ok('a backup without settings reports none restored', not v_restored);
+    perform pg_temp.ok('a backup without settings preserves the existing address',
+        v_addr = 'JALANDHAR, PUNJAB 144003', '(' || coalesce(v_addr, 'null') || ')');
+end;
+$$;
+
+do $$
+declare v_rejected boolean := false;
+begin
+    begin
+        perform public.restore_backup(
+            jsonb_build_object('customers', '[]'::jsonb, 'orders', '[]'::jsonb,
+                               'order_items', '[]'::jsonb, 'measurements', '[]'::jsonb,
+                               'showroom_settings', '"not an object"'::jsonb), 't');
+    exception when others then v_rejected := true;
+    end;
+    perform pg_temp.ok('malformed showroom settings are rejected', v_rejected);
+end;
+$$;
+
+-- ================================================================
+-- Audit log: preserved in the export, never written back by a restore.
+-- Append-only means a backup file must not be able to rewrite history.
+-- ================================================================
+do $$
+declare v_payload jsonb; v_count int;
+begin
+    select count(*) into v_count from public.audit_log;
+    perform pg_temp.ok('the showroom has audit history to preserve', v_count > 0, '(rows: ' || v_count || ')');
+
+    v_payload := public.export_backup();
+    perform pg_temp.ok('the export carries the audit log', v_payload ? 'audit_log');
+    perform pg_temp.ok('the exported audit log holds every row',
+        jsonb_array_length(v_payload -> 'audit_log') = v_count,
+        '(' || jsonb_array_length(v_payload -> 'audit_log') || ' of ' || v_count || ')');
+end;
+$$;
+
+do $$
+declare
+    v_payload jsonb;
+    v_before int;
+    v_after int;
+    v_result jsonb;
+    v_forged_present int;
+begin
+    select count(*) into v_before from public.audit_log;
+
+    -- A file claiming a fabricated history. The restore must ignore it
+    -- entirely: nothing from the file may enter the audit trail.
+    v_payload := public.export_backup();
+    v_payload := jsonb_set(v_payload, '{audit_log}', jsonb_build_array(
+        jsonb_build_object(
+            'id', 999999, 'actor_email', 'forged@example.com',
+            'action', 'FORGED_ENTRY', 'entity_type', 'database',
+            'details', '{}'::jsonb, 'created_at', now())));
+
+    v_result := public.restore_backup(v_payload, 'audit log test');
+
+    perform pg_temp.ok('the restore states it did not restore the audit log',
+        (v_result ->> 'audit_log_restored')::boolean = false);
+
+    select count(*) into v_forged_present from public.audit_log where action = 'FORGED_ENTRY';
+    perform pg_temp.ok('a forged audit entry from a backup file is never written',
+        v_forged_present = 0, '(found ' || v_forged_present || ')');
+
+    -- The genuine history survives, and the restore appends its own record.
+    select count(*) into v_after from public.audit_log;
+    perform pg_temp.ok('existing audit history survives the restore untouched',
+        v_after >= v_before, '(' || v_before || ' -> ' || v_after || ')');
+    perform pg_temp.ok('the restore itself is recorded in the audit log',
+        exists (select 1 from public.audit_log where action = 'restore_backup'));
+end;
+$$;
+
+-- ================================================================
+-- The sequence still cannot re-issue a printed order number after the
+-- settings and audit changes.
+-- ================================================================
+do $$
+declare v_max bigint; v_next bigint;
+begin
+    select coalesce(max(order_number), 0) into v_max from public.orders;
+    select nextval('public.order_number_seq') into v_next;
+    perform pg_temp.ok('the next order number is beyond every restored one',
+        v_next > v_max, '(next ' || v_next || ' vs max ' || v_max || ')');
+end;
+$$;
+
 reset role;
