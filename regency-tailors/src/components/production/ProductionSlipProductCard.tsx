@@ -5,7 +5,14 @@ import { SlipDensityTokens, slipDensityTokens } from '../../utils/productionSlip
 
 interface ProductionSlipProductCardProps {
   item: OrderItem;
-  index: number; // 0-indexed, display as #{index + 1}
+  /**
+   * The customer's order number, printed on every garment of the slip.
+   *
+   * Not the garment's position: a workshop bench holds work from several
+   * orders at once, so the number a cutter needs on each piece is the one that
+   * says which order it belongs to. All four garments of order 15 read #15.
+   */
+  orderNumber: string;
   snapshot: Partial<MeasurementRecord>;
   /** Resolved by the sheet's measured auto-fit; defaults to the floor tier. */
   tokens?: SlipDensityTokens;
@@ -24,7 +31,7 @@ const MEASUREMENT_COLUMNS = 5;
  * labels is worse than no column at all.
  *
  * Order on the page is fixed and matters:
- *     #N GARMENT  ->  MEASUREMENTS  ->  REMARKS / INSTRUCTIONS
+ *     #ORDER-NO GARMENT  ->  MEASUREMENTS  ->  REMARKS / INSTRUCTIONS
  *
  * Built for a black-and-white laser printer: black rules, black text, white
  * paper, no tints. Density comes from the layout, not from shrinking the type:
@@ -40,7 +47,7 @@ const MEASUREMENT_COLUMNS = 5;
  */
 export const ProductionSlipProductCard: React.FC<ProductionSlipProductCardProps> = ({
   item,
-  index,
+  orderNumber,
   snapshot,
   tokens = slipDensityTokens('dense')
 }) => {
@@ -50,14 +57,16 @@ export const ProductionSlipProductCard: React.FC<ProductionSlipProductCardProps>
 
   return (
     <div className="production-slip-product-card border border-black break-inside-avoid">
-      {/* 1. GARMENT HEADER — the number is the cutter's index into the order,
-             and matches the order-item position used on the customer bill. */}
+      {/* 1. GARMENT HEADER — the number is the customer's order number, the
+             same one on the sheet's header and on the customer bill. Every
+             garment of an order carries it, so a piece separated from the rest
+             on the bench can still be traced back to the order it belongs to. */}
       <div className="flex items-stretch border-b border-black">
         <div
           className="bg-black text-white font-black px-2 leading-tight flex items-center shrink-0"
           style={{ fontSize: `${tokens.headPx}px`, paddingTop: tokens.headPadY, paddingBottom: tokens.headPadY }}
         >
-          #{index + 1}
+          #{orderNumber || '—'}
         </div>
         <div
           className="flex-1 flex items-center justify-between gap-2 px-2 min-w-0"

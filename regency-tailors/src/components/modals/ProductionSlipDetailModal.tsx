@@ -144,13 +144,14 @@ export const ProductionSlipDetailModal: React.FC<ProductionSlipDetailModalProps>
             </div>
           </div>
 
-          {/* INDIVIDUAL PRODUCTS WITH #1, #2... MEASUREMENTS & BLANK WRITING AREA */}
+          {/* INDIVIDUAL PRODUCTS — each stamped with the customer's order
+              number, measurements, and the blank writing area. */}
           <div className="space-y-4">
             {items.map((item, idx) => (
               <ProductionSlipProductCard
                 key={item.id || idx}
                 item={item}
-                index={idx}
+                orderNumber={orderNum}
                 snapshot={snapshot}
               />
             ))}

@@ -169,7 +169,7 @@ export const ProductionSlipPage: React.FC<ProductionSlipPageProps> = ({
             <ProductionSlipProductCard
               key={item.id || originalIndex}
               item={item}
-              index={originalIndex}
+              orderNumber={orderNum}
               snapshot={snapshot}
               tokens={tokens}
             />

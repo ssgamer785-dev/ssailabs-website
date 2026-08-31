@@ -258,9 +258,21 @@ await scenario('Production slip prints as many A4 sheets as it reports', async (
     !/\b(Amount|Advance|Balance|Payment|Price|Subtotal|Discount)\b/i.test(summaryText) &&
     !summaryText.includes('\u20B9'), summaryText.replace(/\n/g, ' '));
 
-  // Every garment keeps its position number from the order.
-  report.check('every garment is numbered #1..#4 in order',
-    ['#1', '#2', '#3', '#4'].every(n => printedText.includes(n)));
+  /*
+   * Every garment carries the customer's order number, not its own position.
+   * A bench holds work from several orders at once, so the number on a piece
+   * has to say which order it belongs to.
+   */
+  const slipOrderNo = (await readDb(page)).orders[0].orderNumber;
+  const badges = await page.evaluate(() =>
+    [...document.querySelectorAll('.production-slip-product-card')]
+      .map(c => (c.children[0].children[0].textContent || '').trim()));
+  report.check('every garment is stamped with the order number',
+    badges.length === 4 && badges.every(b => b === `#${slipOrderNo}`),
+    badges.join(' '));
+  report.check('no garment carries a serial position instead',
+    !badges.some((b, i) => b === `#${i + 1}` && String(i + 1) !== String(slipOrderNo)),
+    badges.join(' '));
 
   // Black and white only — a workshop prints this on a mono laser.
   const nonMono = await page.evaluate(() => {
@@ -309,8 +321,8 @@ await scenario('Production slip prints as many A4 sheets as it reports', async (
       };
     }));
 
-  report.check('every garment block leads with its #N and garment name',
-    cardOrder.every((c, i) => c.heading.startsWith(`#${i + 1}`)),
+  report.check('every garment block leads with the order number and garment name',
+    cardOrder.every(c => c.heading.startsWith(`#${slipOrderNo}`)),
     cardOrder.map(c => c.heading.slice(0, 24)).join(' / '));
   report.check('measurements sit between the heading and the remarks',
     cardOrder.every(c => c.categories.length > 0 && c.categories.every(t => /MEASUREMENTS/i.test(t))),
@@ -369,9 +381,13 @@ await scenario('Coat and Pant are two products, never a combined garment', async
   const headings = await page.evaluate(() =>
     [...document.querySelectorAll('.production-slip-product-card')]
       .map(c => (c.children[0].textContent || '').trim().replace(/\s+/g, ' ')));
-  report.check('the slip prints #1 COAT then #2 PANT',
-    /^#1\s*Coat/i.test(headings[0]) && /^#2\s*Pant/i.test(headings[1]),
-    headings.join(' / '));
+  // Product order is unchanged — Coat then Pant — but both are stamped with
+  // the one order number rather than 1 and 2.
+  const suitOrderNo = order.orderNumber;
+  report.check('the slip prints the Coat first and the Pant second',
+    /Coat/i.test(headings[0]) && /Pant/i.test(headings[1]), headings.join(' / '));
+  report.check('both garments carry the same order number',
+    headings.every(h => h.startsWith(`#${suitOrderNo}`)), headings.join(' / '));
 
   // Each garment renders only its own measurement tables.
   const cats = await page.evaluate(() =>
@@ -460,6 +476,74 @@ await scenario('A legacy Full Coat Pant order is preserved, printed, and split o
     items.every(i => i.quantity === 2), items.map(i => i.quantity).join(' / '));
   report.check('no combined garment survives the save',
     !items.some(i => /full\s*coat\s*pant/i.test(i.garmentType || '')));
+});
+
+/* ------------------------------------------------------------------ *
+ * 6c-ter. The # on every garment is the customer's order number        *
+ * ------------------------------------------------------------------ */
+await scenario('Every garment on a slip is stamped with the order number', async ({ page }) => {
+  await createOrder(page, {
+    name: 'Numbering Client', phone: '9800055502',
+    garments: ['COAT', 'PANT', 'SHIRT', 'KURTA PAJAMA'],
+    measurements: FULL_MEASUREMENTS
+  });
+  await finishOrder(page);
+
+  /** Sets the order's number, reopens its slip, and returns what it printed. */
+  const slipFor = async (orderNumber) => {
+    await page.evaluate(n => {
+      const K = 'REGENCY_TAILORS_DB_V3_';
+      const orders = JSON.parse(localStorage.getItem(K + 'ORDERS'));
+      orders[0] = { ...orders[0], orderNumber: n };
+      localStorage.setItem(K + 'ORDERS', JSON.stringify(orders));
+    }, orderNumber);
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForTimeout(800);
+    await page.getByRole('button', { name: /Showroom Orders/i }).click();
+    await page.waitForTimeout(600);
+    await page.locator('button[title="Download PDF or Print Production Slip"]').first().click();
+    await page.waitForTimeout(1300);
+    return page.evaluate(() => ({
+      badges: [...document.querySelectorAll('.production-slip-product-card')]
+        .map(c => (c.children[0].children[0].textContent || '').trim()),
+      cards: [...document.querySelectorAll('.production-slip-product-card')].map(card => ({
+        garment: (card.children[0].children[1].textContent || '').replace(/\s+/g, ' ').trim(),
+        titles: [...card.children].slice(1, -1)
+          .map(c => (c.children[0].textContent || '').replace(/\s+/g, ' ').trim())
+      })),
+      text: document.querySelector('#printable-production-slip').innerText,
+      tally: (document.querySelector('.production-slip-summary')?.innerText || '')
+        .replace(/\s+/g, ' ').trim()
+    }));
+  };
+
+  // Order number 2, four garments: every badge reads #2, and none reads a
+  // garment position.
+  const two = await slipFor('2');
+  report.check('all four garments read #2',
+    two.badges.length === 4 && two.badges.every(b => b === '#2'), two.badges.join(' '));
+  report.check('no #1, #3 or #4 appears as a garment number',
+    !two.badges.some(b => ['#1', '#3', '#4'].includes(b)), two.badges.join(' '));
+  report.check('the sheet header agrees with the garment badges', /ORDER\s*#\s*2\b/i.test(two.text));
+
+  // Renumber to 15: the badges follow the order, proving they are not derived
+  // from the garment's position, which did not change.
+  const fifteen = await slipFor('15');
+  report.check('all four garments follow the order number to #15',
+    fifteen.badges.length === 4 && fifteen.badges.every(b => b === '#15'), fifteen.badges.join(' '));
+  report.check('the badge is not derived from the garment position',
+    !fifteen.badges.some(b => ['#1', '#2', '#3', '#4'].includes(b)), fifteen.badges.join(' '));
+
+  // Everything else about the slip is untouched by the numbering change.
+  report.check('product order is unchanged',
+    /Coat/i.test(fifteen.cards[0].garment) && /Pant/i.test(fifteen.cards[1].garment) &&
+    /Shirt/i.test(fifteen.cards[2].garment) && /Kurta/i.test(fifteen.cards[3].garment),
+    fifteen.cards.map(c => c.garment).join(' / '));
+  report.check('each garment still carries only its own measurements',
+    fifteen.cards[0].titles.length === 1 && /COAT MEASUREMENTS/i.test(fifteen.cards[0].titles[0]) &&
+    fifteen.cards[1].titles.length === 1 && /PANT MEASUREMENTS/i.test(fifteen.cards[1].titles[0]),
+    JSON.stringify(fifteen.cards.map(c => c.titles)));
+  report.check('the TOTAL ITEMS tally is unchanged', /TOTAL ITEMS\s*4/i.test(fifteen.tally), fifteen.tally);
 });
 
 /* ------------------------------------------------------------------ *
