@@ -3,7 +3,6 @@ import {
   Users,
   ShoppingBag,
   Calendar,
-  Clock,
   Sparkles,
   ArrowUpRight,
   Plus,
@@ -15,32 +14,28 @@ import {
   CheckCircle2,
   Phone
 } from 'lucide-react';
-import { Customer, Order, Fitting } from '../../types';
+import { Customer, Order } from '../../types';
 import { NavTab } from '../Sidebar';
 
 interface DashboardViewProps {
   customers: Customer[];
   orders: Order[];
-  fittings: Fitting[];
   userName: string;
   setActiveTab: (tab: NavTab) => void;
   onNewOrder: () => void;
   onNewCustomer: () => void;
   onNewMeasurement: () => void;
-  onNewFitting: () => void;
   onSelectOrder: (order: Order) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   customers,
   orders,
-  fittings,
   userName,
   setActiveTab,
   onNewOrder,
   onNewCustomer,
   onNewMeasurement,
-  onNewFitting,
   onSelectOrder
 }) => {
   // Calculations
@@ -52,7 +47,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // Today's Date string
   const todayStr = new Date().toISOString().split('T')[0];
-  const todayAppointments = fittings.filter(f => f.status === 'Scheduled');
   const todayDeliveries = orders.filter(o => o.deliveryDate === todayStr && o.status !== 'Delivered');
 
   return (
@@ -88,8 +82,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* 5 Statistic Cards Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
+      {/* 4 Statistic Cards Row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         {/* 1. TOTAL CUSTOMERS */}
         <div
           onClick={() => setActiveTab('customers')}
@@ -168,26 +162,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* 5. TODAY'S APPOINTMENTS */}
-        <div
-          onClick={() => setActiveTab('fittings')}
-          className="bg-white rounded-2xl p-5 md:p-6 border border-[#E0D8CB] shadow-xs hover:border-[#C9A24A] hover:shadow-lg transition-all cursor-pointer group"
-        >
-          <div className="flex items-center justify-between mb-4">
-            <div className="w-11 h-11 rounded-xl bg-[#F7F3EA] flex items-center justify-center text-[#C9A24A] group-hover:bg-[#071426] group-hover:text-[#D4AF5A] transition-colors shadow-xs">
-              <Clock className="w-5 h-5 stroke-[2.5]" />
-            </div>
-            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-900 border border-blue-300">
-              Today
-            </span>
-          </div>
-          <div className="text-xs font-extrabold text-[#6E6454] tracking-widest uppercase mb-1">
-            TODAY'S APPOINTMENTS
-          </div>
-          <div className="text-3xl md:text-4xl font-black text-[#071426] tracking-tight">
-            {todayAppointments.length}
-          </div>
-        </div>
       </div>
 
       {/* TODAY'S DELIVERIES SECTION */}
@@ -258,54 +232,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         )}
       </div>
 
-      {/* Grid: Upcoming Fitting Appointments & Recent Showroom Orders */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left: Upcoming Fitting Appointments (4 cols) */}
-        <div className="lg:col-span-4 bg-white rounded-3xl border border-[#E0D8CB] p-6 shadow-md space-y-5">
-          <div className="flex items-center justify-between pb-4 border-b border-[#F2ECE1]">
-            <h3 className="text-base font-black text-[#071426] flex items-center gap-2.5">
-              <Clock className="w-5 h-5 text-[#C9A24A] stroke-[2.5]" />
-              <span>Fitting & Trial Schedule</span>
-            </h3>
-            <button
-              onClick={() => setActiveTab('fittings')}
-              className="text-xs font-extrabold text-[#C9A24A] hover:underline cursor-pointer"
-            >
-              View All
-            </button>
-          </div>
-
-          <div className="space-y-4">
-            {todayAppointments.length > 0 ? (
-              todayAppointments.map(f => (
-                <div
-                  key={f.id}
-                  className="p-4 rounded-2xl border border-[#E0D8CB] bg-[#F7F3EA]/60 hover:bg-[#F7F3EA] transition-colors space-y-2 shadow-2xs"
-                >
-                  <div className="flex items-center justify-between text-xs md:text-sm">
-                    <span className="font-black text-[#071426]">{f.customerName}</span>
-                    <span className="px-2.5 py-1 bg-[#071426] text-[#C9A24A] font-extrabold rounded-lg text-xs">
-                      {f.scheduledTime}
-                    </span>
-                  </div>
-                  <div className="text-xs font-bold text-[#574E3E]">
-                    <span>{f.garment} ({f.trialStage})</span>
-                  </div>
-                  <div className="text-xs text-[#6E6454] font-semibold italic">
-                    "{f.adjustmentNotes}"
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p className="text-xs md:text-sm font-bold text-[#6E6454] text-center py-6">
-                No fittings scheduled for today.
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Right: Recent Showroom Orders (8 cols) */}
-        <div className="lg:col-span-8 bg-white rounded-3xl border border-[#E0D8CB] p-6 shadow-md space-y-5">
+      {/* Recent Showroom Orders */}
+      <div>
+        <div className="bg-white rounded-3xl border border-[#E0D8CB] p-6 shadow-md space-y-5">
           <div className="flex items-center justify-between pb-4 border-b border-[#F2ECE1]">
             <h3 className="text-base font-black text-[#071426] flex items-center gap-2.5">
               <ShoppingBag className="w-5 h-5 text-[#C9A24A] stroke-[2.5]" />

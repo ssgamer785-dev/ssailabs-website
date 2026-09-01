@@ -5,7 +5,6 @@ import {
   Ruler,
   ShoppingBag,
   ScrollText,
-  Calendar,
   Database,
   Trash2,
   ExternalLink,
@@ -20,7 +19,6 @@ export type NavTab =
   | 'measurements'
   | 'orders'
   | 'productionslips'
-  | 'fittings'
   | 'workers'
   | 'billings'
   | 'finances'
@@ -52,7 +50,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'measurements', label: 'Measurements Entry', icon: Ruler },
     { id: 'orders', label: 'Showroom Orders', icon: ShoppingBag },
     { id: 'productionslips', label: 'Production Slips', icon: ScrollText },
-    { id: 'fittings', label: 'Fitting & Trials', icon: Calendar },
     { id: 'backup', label: 'Backup & Recovery', icon: Database },
     { id: 'trash', label: 'Trash', icon: Trash2 }
   ];

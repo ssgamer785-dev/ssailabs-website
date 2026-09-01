@@ -30,7 +30,6 @@ import { CustomersView } from './components/views/CustomersView';
 import { MeasurementsView } from './components/views/MeasurementsView';
 import { OrdersView } from './components/views/OrdersView';
 import { ProductionSlipsView } from './components/views/ProductionSlipsView';
-import { FittingsView } from './components/views/FittingsView';
 import { WorkersView } from './components/views/WorkersView';
 import { BillingsView } from './components/views/BillingsView';
 import { FinancesView } from './components/views/FinancesView';
@@ -85,6 +84,14 @@ export default function App() {
     bootstrap<Order>(`${STORAGE_KEY}_ORDERS`, initialOrders)
   );
 
+  /*
+   * Fittings & Trials was removed from the application. Nothing renders these
+   * any more and nothing creates them; the state remains only so that rows a
+   * showroom recorded before the removal still travel through Backup &
+   * Recovery and are not silently dropped from an export. The database table
+   * is likewise left in place — see supabase/migrations — because deleting
+   * historical records is not what removing a screen should do.
+   */
   const [fittings, setFittings] = useState<Fitting[]>(() =>
     bootstrap<Fitting>(`${STORAGE_KEY}_FITTINGS`, initialFittings)
   );
@@ -538,23 +545,6 @@ export default function App() {
       return [refreshedInvoice, ...prev.filter(i => i.orderId !== mergedOrder.id)];
     });
 
-    // Auto schedule fitting only if trial date explicitly provided (e.g. from existing orders)
-    if (order.trialDate) {
-      const newFitting: Fitting = {
-        id: `FIT-${Math.floor(100 + Math.random() * 900)}`,
-        orderId: order.id,
-        customerName: order.customerName,
-        customerPhone: order.customerPhone,
-        garment: (order.items || []).map(i => i.garmentType).join(', '),
-        trialStage: 'First Trial',
-        scheduledDate: order.trialDate,
-        scheduledTime: '03:00 PM',
-        status: 'Scheduled',
-        adjustmentNotes: ''
-      };
-      setFittings(prev => [newFitting, ...prev.filter(f => f.orderId !== order.id)]);
-    }
-
     if (selectedOrderForDetail?.id === order.id) {
       setSelectedOrderForDetail(order);
     }
@@ -764,25 +754,6 @@ export default function App() {
         ...prev
       ]);
     }
-  };
-
-  // Handlers: Fittings
-  const handleUpdateFittingStatus = (fittingId: string, status: Fitting['status'], notes?: string) => {
-    if (usesSupabase) {
-      void push(() => repo.updateFittingStatus(fittingId, status, notes));
-      return;
-    }
-    setFittings(prev =>
-      prev.map(f => (f.id === fittingId ? { ...f, status, adjustmentNotes: notes || f.adjustmentNotes } : f))
-    );
-  };
-
-  const handleDeleteFitting = (fittingId: string) => {
-    if (usesSupabase) {
-      void push(() => repo.deleteFitting(fittingId));
-      return;
-    }
-    setFittings(prev => prev.filter(f => f.id !== fittingId));
   };
 
   // Handlers: Workers
@@ -1009,7 +980,6 @@ export default function App() {
             <DashboardView
               customers={customers}
               orders={orders}
-              fittings={fittings}
               userName={profile.activeUser}
               setActiveTab={setActiveTab}
               onNewOrder={() => {
@@ -1026,7 +996,6 @@ export default function App() {
                 setPreselectedCustomerForMeasurement(null);
                 setIsMeasurementModalOpen(true);
               }}
-              onNewFitting={() => setActiveTab('fittings')}
               onSelectOrder={(o) => {
                 setSelectedOrderForDetail(o);
                 setIsOrderDetailModalOpen(true);
@@ -1114,31 +1083,6 @@ export default function App() {
                 setIsOrderDetailModalOpen(true);
               }}
               onUpdateProductionStatus={handleUpdateProductionStatus}
-            />
-          )}
-
-          {activeTab === 'fittings' && (
-            <FittingsView
-              fittings={fittings}
-              onNewFitting={() => {
-                if (orders.length === 0) return alert('No orders found to schedule fitting.');
-                const ord = orders[0];
-                const newFit: Fitting = {
-                  id: `FIT-${Math.floor(100 + Math.random() * 900)}`,
-                  orderId: ord.id,
-                  customerName: ord.customerName,
-                  customerPhone: ord.customerPhone,
-                  garment: ord.items.map(i => i.garmentType).join(', '),
-                  trialStage: 'Second Trial',
-                  scheduledDate: new Date().toISOString().split('T')[0],
-                  scheduledTime: '02:00 PM',
-                  status: 'Scheduled',
-                  adjustmentNotes: 'Fine tune shoulder padding and sleeve pitch.'
-                };
-                setFittings(prev => [newFit, ...prev]);
-              }}
-              onUpdateFittingStatus={handleUpdateFittingStatus}
-              onDeleteFitting={handleDeleteFitting}
             />
           )}
 
@@ -1293,7 +1237,6 @@ export default function App() {
         order={selectedOrderForDetail}
         customer={customers.find(c => c.id === selectedOrderForDetail?.customerId) || null}
         measurements={measurements}
-        fittings={fittings}
         onUpdateStatus={handleUpdateOrderStatus}
         onEditOrder={(order) => {
           setEditingOrder(order);
@@ -1313,7 +1256,6 @@ export default function App() {
         customer={selectedCustomerProfile}
         orders={orders}
         measurements={measurements}
-        fittings={fittings}
         onNewOrderForCustomer={(c) => {
           setEditingOrder(null);
           setPreselectedCustomerForOrder(c);

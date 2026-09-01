@@ -7,14 +7,13 @@ import {
   MapPin, 
   ShoppingBag, 
   Ruler, 
-  Calendar, 
   Sparkles, 
   Plus, 
   Edit3, 
   ExternalLink,
   ChevronRight
 } from 'lucide-react';
-import { Customer, Order, MeasurementRecord, Fitting } from '../../types';
+import { Customer, Order, MeasurementRecord } from '../../types';
 
 interface CustomerProfileModalProps {
   isOpen: boolean;
@@ -22,7 +21,6 @@ interface CustomerProfileModalProps {
   customer: Customer | null;
   orders?: Order[];
   measurements?: MeasurementRecord[];
-  fittings?: Fitting[];
   onNewOrderForCustomer: (customer: Customer) => void;
   onNewMeasurementForCustomer: (customer: Customer) => void;
   onSelectOrder: (order: Order) => void;
@@ -35,19 +33,17 @@ export const CustomerProfileModal: React.FC<CustomerProfileModalProps> = ({
   customer,
   orders = [],
   measurements = [],
-  fittings = [],
   onNewOrderForCustomer,
   onNewMeasurementForCustomer,
   onSelectOrder,
   onEditCustomer
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'measurements' | 'fittings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'measurements'>('overview');
 
   if (!isOpen || !customer) return null;
 
   const customerOrders = (orders || []).filter(o => o.customerId === customer.id);
   const customerMeasurements = (measurements || []).filter(m => m.customerId === customer.id);
-  const customerFittings = (fittings || []).filter(f => f.customerName === customer.name || (customer.phone && f.customerPhone === customer.phone));
   const activeOrdersCount = customerOrders.filter(o => o.status !== 'Delivered').length;
 
   return (
@@ -132,7 +128,6 @@ export const CustomerProfileModal: React.FC<CustomerProfileModalProps> = ({
               { id: 'overview', label: 'Client Overview', icon: User },
               { id: 'orders', label: `Orders (${customerOrders.length})`, icon: ShoppingBag },
               { id: 'measurements', label: `Measurements (${customerMeasurements.length})`, icon: Ruler },
-              { id: 'fittings', label: `Fittings & Trials (${customerFittings.length})`, icon: Calendar }
             ].map(tab => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -276,29 +271,6 @@ export const CustomerProfileModal: React.FC<CustomerProfileModalProps> = ({
               ) : (
                 <div className="p-8 text-center bg-[#FAF8F5] rounded-2xl border border-[#E0D8CB] text-[#7A7060]">
                   No measurement records found for this client.
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 4: FITTINGS */}
-          {activeTab === 'fittings' && (
-            <div className="space-y-3 animate-fadeIn">
-              {customerFittings.length > 0 ? (
-                customerFittings.map(fit => (
-                  <div key={fit.id} className="p-4 bg-[#FAF8F5] rounded-2xl border border-[#E0D8CB] flex items-center justify-between">
-                    <div>
-                      <div className="font-extrabold text-sm text-[#071426]">{fit.trialStage} • {fit.garment}</div>
-                      <div className="text-[11px] text-[#7A7060]">Scheduled: {fit.scheduledDate} at {fit.scheduledTime}</div>
-                    </div>
-                    <span className="px-2.5 py-1 bg-[#071426] text-[#D4AF5A] rounded-lg font-bold text-[10px]">
-                      {fit.status}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <div className="p-8 text-center bg-[#FAF8F5] rounded-2xl border border-[#E0D8CB] text-[#7A7060]">
-                  No fitting appointments recorded for this client.
                 </div>
               )}
             </div>

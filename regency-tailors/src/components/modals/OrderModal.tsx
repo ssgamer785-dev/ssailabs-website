@@ -35,7 +35,6 @@ import {
   KurtaMeasurement, 
   PajamaMeasurement, 
   Invoice, 
-  Fitting, 
   TrashItem
 } from '../../types';
 

@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { 
   X, 
   ShoppingBag, 
-  Calendar, 
   User, 
   Ruler, 
   CheckCircle2, 
@@ -17,7 +16,7 @@ import {
   MapPin,
   ReceiptText
 } from 'lucide-react';
-import { Order, OrderStatus, MeasurementRecord, Fitting, Customer } from '../../types';
+import { Order, OrderStatus, MeasurementRecord, Customer } from '../../types';
 import { RegencyLogo } from '../RegencyLogo';
 
 interface OrderDetailModalProps {
@@ -26,7 +25,6 @@ interface OrderDetailModalProps {
   order: Order | null;
   customer?: Customer | null;
   measurements?: MeasurementRecord[];
-  fittings?: Fitting[];
   onUpdateStatus: (orderId: string, newStatus: OrderStatus) => void;
   onEditOrder?: (order: Order) => void;
   onPrintProductionSlip?: (order: Order) => void;
@@ -50,19 +48,17 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   order,
   customer,
   measurements = [],
-  fittings = [],
   onUpdateStatus,
   onEditOrder,
   onPrintProductionSlip,
   onPrintOrderBill
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'garments' | 'measurements' | 'fitting'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'garments' | 'measurements'>('overview');
 
   if (!isOpen || !order) return null;
 
-  // Find linked customer, fitting, measurements
+  // Find linked customer and measurements
   const linkedCustomer = customer || null;
-  const linkedFitting = fittings.find(f => f.orderId === order.id || f.orderId === order.orderNumber);
   const snapshot = order.measurementsSnapshot;
 
   const currentStageIndex = PRODUCTION_STAGES.indexOf(order.status);
@@ -142,7 +138,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               { id: 'overview', label: 'Overview & Timeline', icon: Clock },
               { id: 'garments', label: `Garments (${order.items.length})`, icon: ShoppingBag },
               { id: 'measurements', label: 'Measurements Specs', icon: Ruler },
-              { id: 'fitting', label: 'Fitting & Trial', icon: Calendar }
             ].map(tab => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -423,46 +418,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               ) : (
                 <div className="p-8 text-center bg-[#FAF8F5] rounded-2xl border border-[#E0D8CB] text-[#7A7060]">
                   No measurement snapshot was attached to this order. You can record measurements in the Measurements section.
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 4: FITTING & TRIAL */}
-          {activeTab === 'fitting' && (
-            <div className="space-y-4 animate-fadeIn">
-              <div className="flex items-center justify-between">
-                <h3 className="font-extrabold text-sm text-[#071426]">
-                  Fitting &amp; Trial Appointments
-                </h3>
-              </div>
-
-              {linkedFitting ? (
-                <div className="bg-[#FAF8F5] p-5 rounded-2xl border border-[#E0D8CB] space-y-3">
-                  <div className="flex items-center justify-between border-b border-[#EAE4D8] pb-2">
-                    <span className="font-mono font-bold text-[#C9A24A]">{linkedFitting.id}</span>
-                    <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-[#071426] text-[#D4AF5A]">
-                      {linkedFitting.status}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-[#6E6454]">
-                    <div>Stage: <strong className="text-[#071426]">{linkedFitting.trialStage}</strong></div>
-                    <div>Scheduled Date: <strong className="text-[#071426]">{linkedFitting.scheduledDate}</strong></div>
-                    <div>Time Slot: <strong className="text-[#071426]">{linkedFitting.scheduledTime}</strong></div>
-                    <div>Garment: <strong className="text-[#071426]">{linkedFitting.garment}</strong></div>
-                  </div>
-
-                  {linkedFitting.adjustmentNotes && (
-                    <div className="p-3 bg-white rounded-xl border border-[#EAE4D8] text-[11px] text-[#071426]">
-                      <strong>Cutter Adjustment Focus:</strong> {linkedFitting.adjustmentNotes}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="p-8 text-center bg-[#FAF8F5] rounded-2xl border border-[#E0D8CB] text-[#7A7060] space-y-2">
-                  <Calendar className="w-8 h-8 text-[#C9A24A] mx-auto" />
-                  <div>No trial appointment currently linked to this order.</div>
                 </div>
               )}
             </div>
