@@ -19,9 +19,6 @@ export type NavTab =
   | 'measurements'
   | 'orders'
   | 'productionslips'
-  | 'workers'
-  | 'billings'
-  | 'finances'
   | 'backup'
   | 'trash';
 

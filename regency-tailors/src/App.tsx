@@ -30,9 +30,6 @@ import { CustomersView } from './components/views/CustomersView';
 import { MeasurementsView } from './components/views/MeasurementsView';
 import { OrdersView } from './components/views/OrdersView';
 import { ProductionSlipsView } from './components/views/ProductionSlipsView';
-import { WorkersView } from './components/views/WorkersView';
-import { BillingsView } from './components/views/BillingsView';
-import { FinancesView } from './components/views/FinancesView';
 import { BackupView } from './components/views/BackupView';
 import { TrashView } from './components/views/TrashView';
 
@@ -85,7 +82,14 @@ export default function App() {
   );
 
   /*
-   * Fittings & Trials was removed from the application. Nothing renders these
+   * Fittings & Trials, Workers, Billing and Finances were all removed from the
+   * application. Their collections are still loaded and still travel through
+   * Backup & Recovery, so a showroom that recorded any of them before the
+   * removal keeps them in its exports; nothing renders or creates them. The
+   * database tables are likewise left in place — deleting historical records
+   * is not what removing a screen should do.
+   *
+   * Nothing renders these
    * any more and nothing creates them; the state remains only so that rows a
    * showroom recorded before the removal still travel through Backup &
    * Recovery and are not silently dropped from an export. The database table
@@ -550,66 +554,34 @@ export default function App() {
     }
   };
 
-  const handleRecordOrderPayment = (orderId: string, amount: number, method: string, note?: string) => {
-    if (amount <= 0) return;
-
-    if (usesSupabase) {
-      const target = orders.find(o => o.id === orderId);
-      if (target?.dbId) void push(() => repo.recordOrderPayment(target.dbId!, amount, method, note));
-      return;
+  /**
+   * Resolves the database row an order write needs, and says so when it cannot.
+   *
+   * Every Supabase write is keyed on `dbId`, which `toOrder` sets from the row
+   * it loaded. The guard used to be `if (target?.dbId) ...`, so an order that
+   * somehow reached the screen without one had its update quietly dropped: no
+   * save, no error, and a dashboard still showing the change the user made.
+   * A write that cannot happen has to say so.
+   */
+  const orderDbIdOrError = (orderId: string, action: string): string | null => {
+    const target = orders.find(o => o.id === orderId || o.orderNumber === orderId);
+    if (!target) {
+      setDataError(`That order could not be found, so ${action} was not saved.`);
+      return null;
     }
-
-    const today = new Date().toISOString().split('T')[0];
-    const newPaymentRecord = {
-      id: `PAY-${Date.now()}`,
-      date: today,
-      amount,
-      method,
-      note: note || 'Showroom counter payment'
-    };
-
-    setOrders(prev =>
-      prev.map(ord => {
-        if (ord.id === orderId) {
-          const newAdvance = ord.advancePaid + amount;
-          const newBalance = Math.max(0, ord.totalAmount - newAdvance);
-          const updatedOrd: Order = {
-            ...ord,
-            advancePaid: newAdvance,
-            balanceDue: newBalance,
-            paymentHistory: [...(ord.paymentHistory || []), newPaymentRecord]
-          };
-          if (selectedOrderForDetail?.id === orderId) {
-            setSelectedOrderForDetail(updatedOrd);
-          }
-          return updatedOrd;
-        }
-        return ord;
-      })
-    );
-
-    // Also update invoice
-    setInvoices(prev =>
-      prev.map(inv => {
-        if (inv.orderId === orderId) {
-          const newPaid = inv.amountPaid + amount;
-          const newBalance = Math.max(0, inv.grandTotal - newPaid);
-          return {
-            ...inv,
-            amountPaid: newPaid,
-            balanceRemaining: newBalance,
-            status: newBalance === 0 ? 'Paid' : 'Partial'
-          };
-        }
-        return inv;
-      })
-    );
+    if (!target.dbId) {
+      setDataError(`Order #${target.orderNumber || target.id} is not linked to a database record, so ${action} was not saved.`);
+      return null;
+    }
+    return target.dbId;
   };
 
   const handleDeleteOrder = (order: Order) => {
     if (confirm(`Move order "${order.id}" to trash?`)) {
       if (usesSupabase) {
-        if (order.dbId) void push(() => repo.softDeleteOrder(order.dbId!));
+        const dbId = orderDbIdOrError(order.id, 'the delete');
+        if (!dbId) return;
+        void push(() => repo.softDeleteOrder(dbId));
         if (selectedOrderForDetail?.id === order.id) {
           setIsOrderDetailModalOpen(false);
           setSelectedOrderForDetail(null);
@@ -637,8 +609,8 @@ export default function App() {
 
   const handleUpdateOrderStatus = (orderId: string, newStatus: OrderStatus) => {
     if (usesSupabase) {
-      const target = orders.find(o => o.id === orderId);
-      if (target?.dbId) void push(() => repo.updateOrderStatus(target.dbId!, newStatus));
+      const dbId = orderDbIdOrError(orderId, 'the status change');
+      if (dbId) void push(() => repo.updateOrderStatus(dbId, newStatus));
       return;
     }
     setOrders(prev =>
@@ -658,8 +630,8 @@ export default function App() {
   // Handlers: Production Slips
   const handleUpdateProductionStatus = (orderId: string, status: ProductionStatus) => {
     if (usesSupabase) {
-      const target = orders.find(o => o.id === orderId);
-      if (target?.dbId) void push(() => repo.updateProductionStatus(target.dbId!, status));
+      const dbId = orderDbIdOrError(orderId, 'the production status');
+      if (dbId) void push(() => repo.updateProductionStatus(dbId, status));
       return;
     }
     setOrders(prev =>
@@ -681,8 +653,8 @@ export default function App() {
 
   const handleUpdateProductionNotes = (orderId: string, notes: string) => {
     if (usesSupabase) {
-      const target = orders.find(o => o.id === orderId);
-      if (target?.dbId) void push(() => repo.updateProductionNotes(target.dbId!, notes));
+      const dbId = orderDbIdOrError(orderId, 'the production note');
+      if (dbId) void push(() => repo.updateProductionNotes(dbId, notes));
       return;
     }
     setOrders(prev =>
@@ -754,78 +726,6 @@ export default function App() {
         ...prev
       ]);
     }
-  };
-
-  // Handlers: Workers
-  const handleRecordAdvance = (workerId: string, amount: number) => {
-    if (usesSupabase) {
-      void push(() => repo.recordWorkerAdvance(workerId, amount));
-      return;
-    }
-    setWorkers(prev =>
-      prev.map(w => {
-        if (w.id === workerId) {
-          const newAdvance = w.advanceTaken + amount;
-          return {
-            ...w,
-            advanceTaken: newAdvance,
-            balancePayout: Math.max(0, w.totalEarned - newAdvance)
-          };
-        }
-        return w;
-      })
-    );
-  };
-
-  const handleMarkPayoutPaid = (workerId: string) => {
-    if (usesSupabase) {
-      void push(() => repo.markWorkerPayoutPaid(workerId));
-      return;
-    }
-    setWorkers(prev =>
-      prev.map(w => {
-        if (w.id === workerId) {
-          return {
-            ...w,
-            balancePayout: 0,
-            advanceTaken: 0
-          };
-        }
-        return w;
-      })
-    );
-    alert('Worker payout marked as fully paid.');
-  };
-
-  // Handlers: Billing & Expense
-  const handleRecordPayment = (invoiceId: string, amount: number) => {
-    setInvoices(prev =>
-      prev.map(i => {
-        if (i.id === invoiceId) {
-          const newPaid = i.amountPaid + amount;
-          const newBalance = Math.max(0, i.grandTotal - newPaid);
-          return {
-            ...i,
-            amountPaid: newPaid,
-            balanceRemaining: newBalance,
-            status: newBalance === 0 ? 'Paid' : 'Partial'
-          };
-        }
-        return i;
-      })
-    );
-  };
-
-  const handleAddExpense = (exp: Omit<Expense, 'id'>) => {
-    if (usesSupabase) {
-      void push(() => repo.addExpense(exp));
-      return;
-    }
-    const newExp: Expense = {
-      id: `EXP-${Math.floor(100 + Math.random() * 900)}`,
-      ...exp
-    };
-    setExpenses(prev => [newExp, ...prev]);
   };
 
   // Handlers: Trash & Restore
@@ -1086,78 +986,6 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'workers' && (
-            <WorkersView
-              workers={workers}
-              onAddWorker={() => {
-                const name = prompt('Enter Artisan / Staff Name:');
-                if (name) {
-                  const newW: Worker = {
-                    id: `WRK-${Math.floor(100 + Math.random() * 900)}`,
-                    name,
-                    role: 'Coat Specialist',
-                    phone: '+91 98000 11223',
-                    type: 'Piece-Rate',
-                    ratePerGarment: 3000,
-                    monthlySalary: 0,
-                    garmentsCompletedThisMonth: 0,
-                    totalEarned: 0,
-                    advanceTaken: 0,
-                    balancePayout: 0,
-                    status: 'Active'
-                  };
-                  setWorkers(prev => [...prev, newW]);
-                }
-              }}
-              onRecordAdvance={handleRecordAdvance}
-              onMarkPayoutPaid={handleMarkPayoutPaid}
-            />
-          )}
-
-          {activeTab === 'billings' && (
-            <BillingsView
-              invoices={invoices}
-              profile={profile}
-              orders={orders}
-              onPrintBill={handleOpenPrintBill}
-              onNewInvoice={() => {
-                if (orders.length === 0) return;
-                const ord = orders[0];
-                const newInv: Invoice = {
-                  id: `INV-REG-${Math.floor(1000 + Math.random() * 9000)}`,
-                  orderId: ord.id,
-                  customerName: ord.customerName,
-                  customerPhone: ord.customerPhone,
-                  date: new Date().toISOString().split('T')[0],
-                  items: ord.items.map(i => ({
-                    description: `${i.garmentType} Bespoke Crafting`,
-                    qty: 1,
-                    rate: i.price,
-                    amount: i.price
-                  })),
-                  subtotal: ord.totalAmount,
-                  gstAmount: Math.round(ord.totalAmount * 0.05),
-                  discount: 0,
-                  grandTotal: ord.totalAmount,
-                  amountPaid: ord.advancePaid,
-                  balanceRemaining: ord.balanceDue,
-                  paymentMode: 'Cash',
-                  status: ord.balanceDue === 0 ? 'Paid' : 'Partial'
-                };
-                setInvoices(prev => [newInv, ...prev]);
-              }}
-              onRecordPayment={handleRecordPayment}
-            />
-          )}
-
-          {activeTab === 'finances' && (
-            <FinancesView
-              invoices={invoices}
-              expenses={expenses}
-              onAddExpense={handleAddExpense}
-            />
-          )}
-
           {activeTab === 'backup' && (
             <BackupView
               invoices={invoices}
@@ -1208,7 +1036,6 @@ export default function App() {
         onClose={() => setIsOrderModalOpen(false)}
         onSave={handleSaveOrder}
         customers={customers}
-        workers={workers}
         measurements={measurements}
         allMeasurements={measurements}
         existingOrders={orders}

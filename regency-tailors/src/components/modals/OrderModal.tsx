@@ -27,7 +27,6 @@ import {
   Order, 
   GarmentType, 
   Customer, 
-  Worker, 
   MeasurementRecord, 
   CoatMeasurement, 
   PantMeasurement, 
@@ -52,7 +51,6 @@ interface OrderModalProps {
   customers?: Customer[];
   allMeasurements?: MeasurementRecord[];
   measurements?: MeasurementRecord[];
-  workers?: Worker[];
   existingOrders?: Order[];
   orders?: Order[];
   trashItems?: TrashItem[];
