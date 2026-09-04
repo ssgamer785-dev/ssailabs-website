@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Ruler, 
   Plus, 
@@ -21,6 +22,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { MeasurementRecord, Customer } from '../../types';
+import { MeasurementSheetBlocks } from '../measurements/MeasurementSheetBlocks';
 import { downloadElementAsPdf } from '../../utils/documentExport';
 
 interface MeasurementsViewProps {
@@ -30,6 +32,7 @@ interface MeasurementsViewProps {
   onEditMeasurement: (measurement: MeasurementRecord) => void;
   onDeleteMeasurement: (measurement: MeasurementRecord) => void;
 }
+
 
 export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
   measurements,
@@ -589,8 +592,21 @@ export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
       {/* ======================================================== */}
       {/* VIEW / PRINT MEASUREMENT SHEET MODAL */}
       {/* ======================================================== */}
-      {viewingRecord && (
-        <div className="fixed inset-0 z-50 bg-[#071426]/85 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto font-sans">
+      {/* The sheet is rendered into <body>, not here.
+
+          Everything on this screen sits inside the app's main content area,
+          which the print stylesheet hides (`print-app-shell`) so the sidebar
+          and the view behind a document do not print alongside it. A modal
+          left inside that subtree is hidden too — printing the measurement
+          sheet produced a blank page. The production slip modal avoids this by
+          living at the app root; a portal puts this one in the same position
+          without moving it out of the view that owns its state.
+
+          `print-document-root` then releases it from its screen scroll box, so
+          a sheet taller than one screenful prints in full rather than clipped
+          at the fold. */}
+      {viewingRecord && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-50 bg-[#071426]/85 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto font-sans modal-print-backdrop print-document-root">
           <div className="bg-white rounded-2xl border border-[#E6E1D7] max-w-4xl w-full p-6 sm:p-8 shadow-2xl space-y-6 my-6 relative max-h-[92vh] overflow-y-auto print:max-h-none print:shadow-none print:border-none print:p-0">
             
             {/* Modal Header & Close (hidden in print) */}
@@ -697,262 +713,10 @@ export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
                 </div>
               </div>
 
-              {/* TWO-COLUMN GROUPED MEASUREMENT BLOCKS */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                
-                {/* 1. COAT SPECIFICATIONS */}
-                {(viewingRecord.coat || viewingRecord.jacket) && (
-                  <div className="bg-[#FAF8F5] p-4 rounded-xl border border-[#E6E1D7] space-y-2.5 print:bg-white print:border-[#CCC]">
-                    <div className="flex items-center justify-between border-b border-[#E6E1D7] pb-1.5">
-                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#071426] flex items-center gap-1.5">
-                        <span>🧥</span>
-                        <span>COAT MEASUREMENTS</span>
-                      </h3>
-                      <span className="text-[10px] font-bold text-[#C9A24A]">Unit: {viewingRecord.unit || 'in'}</span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">1. Length</div>
-                        <div className="text-sm font-extrabold text-[#071426]">
-                          {viewingRecord.coat?.length || viewingRecord.jacket?.jacketLength || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}
-                        </div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">2. Chest</div>
-                        <div className="text-sm font-extrabold text-[#071426]">
-                          {viewingRecord.coat?.chest || viewingRecord.jacket?.chest || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}
-                        </div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">3. Stomach</div>
-                        <div className="text-sm font-extrabold text-[#071426]">
-                          {viewingRecord.coat?.stomach || viewingRecord.jacket?.waist || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}
-                        </div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">4. H.P. / Hip</div>
-                        <div className="text-sm font-extrabold text-[#071426]">
-                          {viewingRecord.coat?.hip || viewingRecord.jacket?.hip || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}
-                        </div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">5. Shoulder</div>
-                        <div className="text-sm font-extrabold text-[#071426]">
-                          {viewingRecord.coat?.shoulder || viewingRecord.jacket?.shoulderWidth || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}
-                        </div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">6. Sleeve</div>
-                        <div className="text-sm font-extrabold text-[#071426]">
-                          {viewingRecord.coat?.sleeve || viewingRecord.jacket?.sleeveLength || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}
-                        </div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8] col-span-2">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">7. X-Back</div>
-                        <div className="text-sm font-extrabold text-[#071426]">
-                          {viewingRecord.coat?.xBack || viewingRecord.jacket?.crossBack || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* 2. PANT SPECIFICATIONS */}
-                {(viewingRecord.pant || viewingRecord.trouser) && (
-                  <div className="bg-[#FAF8F5] p-4 rounded-xl border border-[#E6E1D7] space-y-2.5 print:bg-white print:border-[#CCC]">
-                    <div className="flex items-center justify-between border-b border-[#E6E1D7] pb-1.5">
-                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#071426] flex items-center gap-1.5">
-                        <span>👖</span>
-                        <span>PANT MEASUREMENTS</span>
-                      </h3>
-                      <span className="text-[10px] font-bold text-[#C9A24A]">Unit: {viewingRecord.unit || 'in'}</span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">1. Length</div>
-                        <div className="text-sm font-extrabold text-[#071426]">
-                          {viewingRecord.pant?.length || viewingRecord.trouser?.outseam || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}
-                        </div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">2. Waist</div>
-                        <div className="text-sm font-extrabold text-[#071426]">
-                          {viewingRecord.pant?.waist || viewingRecord.trouser?.waist || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}
-                        </div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">3. H.P. / Hip</div>
-                        <div className="text-sm font-extrabold text-[#071426]">
-                          {viewingRecord.pant?.hip || viewingRecord.trouser?.hip || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}
-                        </div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">4. Thigh</div>
-                        <div className="text-sm font-extrabold text-[#071426]">
-                          {viewingRecord.pant?.thigh || viewingRecord.trouser?.thigh || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}
-                        </div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">5. In-Leg</div>
-                        <div className="text-sm font-extrabold text-[#071426]">
-                          {viewingRecord.pant?.inLeg || viewingRecord.trouser?.inseam || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}
-                        </div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">6. Bottom</div>
-                        <div className="text-sm font-extrabold text-[#071426]">
-                          {viewingRecord.pant?.bottom || viewingRecord.trouser?.bottomOpening || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}
-                        </div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8] col-span-2">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">7. Body (Rise)</div>
-                        <div className="text-sm font-extrabold text-[#071426]">
-                          {viewingRecord.pant?.body || viewingRecord.trouser?.rise || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* 3. SHIRT SPECIFICATIONS */}
-                {viewingRecord.shirt && (
-                  <div className="bg-[#FAF8F5] p-4 rounded-xl border border-[#E6E1D7] space-y-2.5 print:bg-white print:border-[#CCC]">
-                    <div className="flex items-center justify-between border-b border-[#E6E1D7] pb-1.5">
-                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#071426] flex items-center gap-1.5">
-                        <span>👔</span>
-                        <span>SHIRT MEASUREMENTS</span>
-                      </h3>
-                      <span className="text-[10px] font-bold text-[#C9A24A]">Unit: {viewingRecord.unit || 'in'}</span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">1. Length</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.shirt.length || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">2. Chest</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.shirt.chest || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">3. Stomach</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.shirt.stomach || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">4. H.P. / Hip</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.shirt.hip || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">5. Shoulder</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.shirt.shoulder || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">6. Sleeve</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.shirt.sleeve || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">7. Collar</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.shirt.collar || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">8. Cuff</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.shirt.cuff || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* 4. KURTA SPECIFICATIONS */}
-                {viewingRecord.kurta && (
-                  <div className="bg-[#FAF8F5] p-4 rounded-xl border border-[#E6E1D7] space-y-2.5 print:bg-white print:border-[#CCC]">
-                    <div className="flex items-center justify-between border-b border-[#E6E1D7] pb-1.5">
-                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#071426] flex items-center gap-1.5">
-                        <span>👘</span>
-                        <span>KURTA MEASUREMENTS</span>
-                      </h3>
-                      <span className="text-[10px] font-bold text-[#C9A24A]">Unit: {viewingRecord.unit || 'in'}</span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">1. Length</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.kurta.length || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">2. Chest</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.kurta.chest || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">3. Stomach</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.kurta.stomach || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">4. H.P. / Hip</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.kurta.hip || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">5. Shoulder</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.kurta.shoulder || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">6. Sleeve</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.kurta.sleeve || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8] col-span-2">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">7. Collar</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.kurta.collar || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* 5. PAJAMA SPECIFICATIONS */}
-                {viewingRecord.pajama && (
-                  <div className="bg-[#FAF8F5] p-4 rounded-xl border border-[#E6E1D7] space-y-2.5 print:bg-white print:border-[#CCC]">
-                    <div className="flex items-center justify-between border-b border-[#E6E1D7] pb-1.5">
-                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#071426] flex items-center gap-1.5">
-                        <span>🩳</span>
-                        <span>PAJAMA MEASUREMENTS</span>
-                      </h3>
-                      <span className="text-[10px] font-bold text-[#C9A24A]">Unit: {viewingRecord.unit || 'in'}</span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">1. Length</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.pajama.length || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">2. Waist</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.pajama.waist || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">3. H.P. / Hip</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.pajama.hip || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">4. Thigh</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.pajama.thigh || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">5. In-Leg</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.pajama.inLeg || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8]">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">6. Bottom</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.pajama.bottom || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-[#EAE4D8] col-span-2">
-                        <div className="text-[10px] text-[#8C7E6A] font-bold">7. Body (Rise)</div>
-                        <div className="text-sm font-extrabold text-[#071426]">{viewingRecord.pajama.body || '—'} {viewingRecord.unit === 'cm' ? 'cm' : '"'}</div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-              </div>
+              {/* MEASUREMENT BLOCKS — every field each garment defines, rendered
+                  from the same canonical definitions the workshop production
+                  slip reads. */}
+              <MeasurementSheetBlocks record={viewingRecord} />
 
               {/* Fitting Notes & Alterations */}
               {(viewingRecord.fittingNotes || viewingRecord.postureNotes || viewingRecord.fitPreference) && (
@@ -987,6 +751,8 @@ export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
 
           </div>
         </div>
+        ,
+        document.body
       )}
     </div>
   );
