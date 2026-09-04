@@ -16,7 +16,7 @@ import {
   toCustomer, toOrder, toMeasurementRecord, toInvoice, toFitting, toWorker,
   toExpense, toTrashItem, toShowroomProfile,
   customerToRow, orderToWizardRow, orderItemsToRows, measurementValueRows,
-  isUuid, normalizePhone,
+  isUuid, normalizePhone, assertCustomerUuid,
   CustomerRow, OrderRow, MeasurementRow
 } from './mappers';
 
@@ -205,7 +205,7 @@ async function resolveCustomerUuid(identity: CustomerIdentity, context: string):
     .is('deleted_at', null)
     .maybeSingle();
   fail(`${context}: the customer could not be looked up`, lookupError);
-  if (existing?.id) return String(existing.id);
+  if (existing?.id) return assertCustomerUuid(existing.id, context);
 
   const { data: created, error: insertError } = await db
     .from('customers')
@@ -230,12 +230,12 @@ async function resolveCustomerUuid(identity: CustomerIdentity, context: string):
         .eq('phone_normalized', normalized)
         .is('deleted_at', null)
         .maybeSingle();
-      if (raced?.id) return String(raced.id);
+      if (raced?.id) return assertCustomerUuid(raced.id, context);
     }
     throw new Error(`${context}: the customer could not be created: ${insertError.message}`);
   }
 
-  return String((created as { id: string }).id);
+  return assertCustomerUuid((created as { id?: string } | null)?.id, context);
 }
 
 /* ----------------------------------------------------------------- orders */
@@ -363,7 +363,8 @@ export async function saveMeasurement(record: MeasurementRecord): Promise<void> 
     .maybeSingle();
 
   const header = {
-    customer_id: customerId,
+    // Same gate as the order's: the last stop before the request is sent.
+    customer_id: assertCustomerUuid(customerId, 'Could not save the measurement profile'),
     unit: record.unit === 'cm' ? 'cm' : 'inches',
     fit_preference: record.fitPreference || null,
     posture_notes: record.postureNotes || null,

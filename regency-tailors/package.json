@@ -15,7 +15,8 @@
     "dev:local": "VITE_PERSISTENCE=local vite --port=3000 --host=0.0.0.0",
     "test:db": "./supabase/tests/run-tests.sh",
     "test:auth-gate": "node e2e/auth-gate.mjs",
-    "test:bill": "node e2e/order-bill.mjs"
+    "test:bill": "node e2e/order-bill.mjs",
+    "test:order-uuid": "node e2e/order-uuid.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

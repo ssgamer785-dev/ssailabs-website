@@ -31,7 +31,7 @@ vi.mock('../../lib/supabase', () => ({
 
 // Imported after the mock so the repository picks up the fake client.
 const repo = await import('../supabaseRepository');
-const { orderToWizardRow, isUuid, normalizePhone } = await import('../mappers');
+const { orderToWizardRow, isUuid, normalizePhone, assertCustomerUuid } = await import('../mappers');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -337,5 +337,103 @@ describe('the shared identity helpers', () => {
     expect(normalizePhone('')).toBe('');
     expect(normalizePhone(undefined)).toBe('');
     expect(normalizePhone(null)).toBe('');
+  });
+});
+
+/* --------------------------------------------------------------------- */
+
+/**
+ * The id from the second live report, verbatim. The wizard mints these from
+ * `Date.now().toString(36)`, so the shape matters more than the digits — but
+ * pinning the exact value the showroom saw makes a regression unmistakable.
+ */
+const LIVE_REPORT_ID = 'CUST-MTNC6JR3-5964';
+
+describe('the reported failure: order #6, "gab hru", 9814318809', () => {
+  const gabHru = (overrides: Partial<Order> = {}): Order =>
+    anOrder({
+      id: '6',
+      orderNumber: '6',
+      customerId: LIVE_REPORT_ID,
+      customerName: 'gab hru',
+      customerPhone: '9814318809',
+      customerAddress: '',
+      ...overrides
+    });
+
+  it('places the order and never sends the provisional id', async () => {
+    const saved = await repo.saveOrder(gabHru());
+
+    const stored = db.tables.orders[0];
+    expect(stored.customer_id).toMatch(UUID_RE);
+    expect(stored.customer_id).not.toBe(LIVE_REPORT_ID);
+    expect(saved.orderNumber).toBeTruthy();
+    expect(JSON.stringify(db.writes)).not.toContain('CUST-');
+  });
+
+  it('creates the customer, then links the order to that row', async () => {
+    await repo.saveOrder(gabHru());
+
+    expect(db.tables.customers).toHaveLength(1);
+    const created = db.tables.customers[0];
+    expect(created.name).toBe('gab hru');
+    expect(created.phone_normalized).toBe('9814318809');
+    expect(db.tables.orders[0].customer_id).toBe(created.id);
+  });
+
+  it('links the measurement to the same row', async () => {
+    await repo.saveOrder(gabHru());
+    await repo.saveMeasurement(
+      aMeasurement({ customerId: LIVE_REPORT_ID, customerName: 'gab hru', customerPhone: '9814318809' })
+    );
+
+    expect(db.tables.customers).toHaveLength(1);
+    expect(db.tables.measurements[0].customer_id).toBe(db.tables.customers[0].id);
+    expect(db.tables.measurements[0].customer_id).toBe(db.tables.orders[0].customer_id);
+  });
+
+  it('a second order on the same number reuses the customer', async () => {
+    await repo.saveOrder(gabHru());
+    await repo.saveOrder(gabHru({ id: '7', orderNumber: '7' }));
+
+    expect(db.tables.customers).toHaveLength(1);
+    expect(new Set(db.tables.orders.map(o => o.customer_id)).size).toBe(1);
+  });
+});
+
+describe('the hard invariant at the write boundary', () => {
+  it('the mapper refuses a provisional id outright', () => {
+    expect(() => orderToWizardRow(anOrder(), LIVE_REPORT_ID))
+      .toThrow(/not linked to a database record/i);
+  });
+
+  it('it refuses every other shape that is not a uuid', () => {
+    for (const bad of [LIVE_REPORT_ID, 'CUST-742', 'RESTORED-CUST-1', 'MEAS-1234', '', '   ', 'undefined', 'null']) {
+      expect(() => assertCustomerUuid(bad, 'ctx'), `accepted "${bad}"`).toThrow();
+    }
+    expect(() => assertCustomerUuid(undefined, 'ctx')).toThrow(/nothing/);
+    expect(() => assertCustomerUuid(null, 'ctx')).toThrow(/nothing/);
+    expect(() => assertCustomerUuid('', 'ctx')).toThrow(/an empty value/);
+  });
+
+  it('it lets a real uuid through unchanged', () => {
+    const id = '11111111-2222-4333-8444-555555555555';
+    expect(assertCustomerUuid(id, 'ctx')).toBe(id);
+    expect(orderToWizardRow(anOrder(), id).customer_id).toBe(id);
+  });
+
+  it('the refusal happens in the app, before any request is sent', () => {
+    // The mapper is pure: throwing here means nothing reached the network.
+    expect(() => orderToWizardRow(anOrder(), LIVE_REPORT_ID)).toThrow();
+    expect(db.writes).toHaveLength(0);
+  });
+
+  it('a measurement cannot be written with a provisional id either', async () => {
+    // No phone to resolve by, so there is no legitimate way to a uuid.
+    await expect(
+      repo.saveMeasurement(aMeasurement({ customerId: LIVE_REPORT_ID, customerPhone: '' }))
+    ).rejects.toThrow(/no phone number to match on/i);
+    expect(db.tables.measurements).toHaveLength(0);
+    expect(db.tables.customers).toHaveLength(0);
   });
 });

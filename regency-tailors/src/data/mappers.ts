@@ -165,6 +165,38 @@ export const isUuid = (value: unknown): value is string =>
 export const normalizePhone = (phone: unknown): string =>
   String(phone ?? '').replace(/\D/g, '').slice(-10);
 
+/**
+ * The one gate every value that lands on a `customer_id` column passes through.
+ *
+ * `orders.customer_id` and `measurements.customer_id` are uuid columns with a
+ * foreign key onto `customers`. The showroom's screens, though, mint a
+ * provisional id the moment the counter hand types a new customer's name —
+ * `CUST-MTNC6JR3-5964` — and a build that let one of those through produced
+ *
+ *     Could not create the order: invalid input syntax for type uuid:
+ *     "CUST-MTNC6JR3-5964"
+ *
+ * Resolution happens in the repository, but resolution is a convention, and a
+ * convention is only as good as the next person to add a write path. This is
+ * the structural half: it throws in the application, before any request leaves
+ * the browser, so a forgotten resolution fails loudly here instead of arriving
+ * at Postgres as a type error the counter hand has to read.
+ */
+export function assertCustomerUuid(value: unknown, context: string): string {
+  if (isUuid(value)) return value;
+
+  const shown =
+    value === undefined ? 'nothing' :
+    value === null ? 'nothing' :
+    value === '' ? 'an empty value' :
+    `"${String(value)}"`;
+
+  throw new Error(
+    `${context}: the customer is not linked to a database record yet (${shown}). ` +
+    'The customer must be saved before the order can reference them.'
+  );
+}
+
 /** Date columns render as plain YYYY-MM-DD throughout the UI. */
 export const dateOnly = (v: unknown): string => {
   if (!v) return '';
@@ -409,7 +441,9 @@ export function customerToRow(customer: Customer): Record<string, unknown> {
  */
 export function orderToWizardRow(order: Order, customerId: string): Record<string, unknown> {
   return {
-    customer_id: customerId,
+    // Never `order.customerId`, and never unchecked: this is the last place the
+    // value can be stopped before it becomes an HTTP request.
+    customer_id: assertCustomerUuid(customerId, 'Could not save the order'),
     customer_name: order.customerName,
     customer_phone: order.customerPhone,
     customer_email: order.customerEmail || null,
