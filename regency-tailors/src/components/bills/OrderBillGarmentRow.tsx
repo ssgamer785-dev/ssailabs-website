@@ -1,6 +1,5 @@
 import React from 'react';
 import { OrderItem, MeasurementRecord } from '../../types';
-import { garmentRemarkFor } from '../../utils/garmentMeasurements';
 import { BillDensityTokens } from '../../utils/orderBillLayout';
 
 interface OrderBillGarmentRowProps {
@@ -11,12 +10,16 @@ interface OrderBillGarmentRowProps {
 }
 
 /**
- * One row of the customer bill's garment table.
+ * One row of the customer bill's garment table: S.No., garment, quantity, and a
+ * blank line for the amount.
  *
  * Deliberately carries no measurement of any kind — not chest, not waist, not
- * length, nothing. Measurements belong to the Production Slip only; this
- * document reads `snapshot` solely to resolve a garment's own text remark
- * (`garmentRemarks`), never a measurement field.
+ * length, nothing. Measurements belong to the Production Slip only.
+ *
+ * It carries no remark either. Remarks are workshop instructions — how the
+ * cutter is to make the garment — and they belong on the slip that goes to the
+ * bench, not on the customer's copy. They remain on the order and on the
+ * production slip; this document simply no longer has a column for them.
  *
  * It carries no fabric or stitching description either. The showroom stopped
  * collecting them, so those columns printed an em-dash on every row of every
@@ -29,7 +32,6 @@ interface OrderBillGarmentRowProps {
  * never populated, never computed, and carries no currency symbol.
  */
 export const OrderBillGarmentRow: React.FC<OrderBillGarmentRowProps> = ({ item, index, snapshot, tokens }) => {
-  const remark = garmentRemarkFor(item, snapshot);
   const quantity = item.quantity || 1;
 
   // Density-driven sizing is applied inline rather than through utility
@@ -54,9 +56,6 @@ export const OrderBillGarmentRow: React.FC<OrderBillGarmentRowProps> = ({ item, 
       </td>
       <td className="border border-[#DFD7C7] text-center font-black text-[#071426]" style={cell}>
         {quantity}
-      </td>
-      <td className="border border-[#DFD7C7] text-[#4A5568] font-medium whitespace-pre-wrap" style={cell}>
-        {remark || '—'}
       </td>
       {/* Amount: a blank writing line, never a value. No ₹, no digits, no fallback text.
           Vertically centred independently of the row's other cells, so the line sits in

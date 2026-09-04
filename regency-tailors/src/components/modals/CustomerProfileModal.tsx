@@ -14,6 +14,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { Customer, Order, MeasurementRecord } from '../../types';
+import { MeasurementDetailBlocks } from '../measurements/MeasurementDetailBlocks';
 
 interface CustomerProfileModalProps {
   isOpen: boolean;
@@ -252,20 +253,11 @@ export const CustomerProfileModal: React.FC<CustomerProfileModalProps> = ({
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                      {m.coat && Object.entries(m.coat).map(([k, v]) => (
-                        <div key={k} className="bg-white p-2 rounded-xl border border-[#EAE4D8] flex justify-between">
-                          <span className="text-[#6E6454] capitalize">Coat {k}:</span>
-                          <span className="font-bold text-[#071426]">{v}"</span>
-                        </div>
-                      ))}
-                      {m.pant && Object.entries(m.pant).map(([k, v]) => (
-                        <div key={k} className="bg-white p-2 rounded-xl border border-[#EAE4D8] flex justify-between">
-                          <span className="text-[#6E6454] capitalize">Pant {k}:</span>
-                          <span className="font-bold text-[#071426]">{v}"</span>
-                        </div>
-                      ))}
-                    </div>
+                    {/* Every recorded garment, complete, from the canonical
+                        definitions — not `Object.entries` over the stored
+                        object, which dropped unrecorded fields and printed
+                        raw property names as labels. */}
+                    <MeasurementDetailBlocks record={m} columns={3} />
                   </div>
                 ))
               ) : (

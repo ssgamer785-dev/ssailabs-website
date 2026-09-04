@@ -28,7 +28,6 @@ const TABLE_COLUMNS: { label: string; key: keyof BillColumnWidths; align?: 'left
   { label: 'S.NO.', key: 'sno', align: 'center' },
   { label: 'PRODUCT / GARMENT', key: 'garment' },
   { label: 'QTY.', key: 'qty', align: 'center' },
-  { label: 'REMARKS', key: 'remarks' },
   { label: 'AMOUNT', key: 'amount', align: 'center' }
 ];
 

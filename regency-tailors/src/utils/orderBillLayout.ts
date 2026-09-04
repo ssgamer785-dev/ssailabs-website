@@ -1,5 +1,4 @@
 import { Order, OrderItem, MeasurementRecord } from '../types';
-import { garmentRemarkFor } from './garmentMeasurements';
 
 /**
  * Layout planning for the customer bill.
@@ -34,12 +33,11 @@ export const DENSITY_ORDER: BillDensity[] = ['roomy', 'normal', 'compact', 'dens
  */
 export const INITIAL_DENSITY: BillDensity = DENSITY_ORDER[0];
 
-/** Percentage widths for the five garment-table columns, left to right. */
+/** Percentage widths for the four garment-table columns, left to right. */
 export interface BillColumnWidths {
   sno: number;
   garment: number;
   qty: number;
-  remarks: number;
   amount: number;
 }
 
@@ -47,10 +45,11 @@ export interface BillDensityTokens {
   key: BillDensity;
 
   /**
-   * Tighter tiers give the one wrapping column (remarks) a larger share of the
-   * table. Widening the text is worth far more than shrinking it: the same
-   * remark wraps to fewer lines, so the row gets shorter without the type
-   * getting smaller.
+   * The same widths at every tier. Tighter tiers used to hand a larger share of
+   * the table to the remarks column, because widening wrapping text shortens
+   * the row more cheaply than shrinking the type does. With remarks gone no
+   * cell wraps at all — every row is exactly one line — so there is nothing
+   * left for a re-proportioned table to buy.
    */
   columns: BillColumnWidths;
 
@@ -82,18 +81,17 @@ export interface BillDensityTokens {
   disclaimerPx: number;
 }
 
-/* Balanced columns while there is room to spare; progressively more of the
- * table handed to the wrapping column as the order grows. Dropping the
- * description and fabric columns returned 38% of the table, most of which goes
- * to remarks — the one cell that still wraps, and the one a customer reads. */
-const WIDE_COLUMNS: BillColumnWidths = {
-  sno: 6, garment: 24, qty: 7, remarks: 43, amount: 20
-};
-const MID_COLUMNS: BillColumnWidths = {
-  sno: 5.5, garment: 22, qty: 6.5, remarks: 47, amount: 19
-};
-const TEXT_COLUMNS: BillColumnWidths = {
-  sno: 5, garment: 20, qty: 6, remarks: 51, amount: 18
+/*
+ * One balanced set of widths, summing to 100.
+ *
+ * Removing the remarks column returned 43% of the table. It goes where the
+ * customer's eye goes: the garment name gets the room it needs to sit on one
+ * line at any tier, and the amount column keeps a generous writing line for
+ * the owner's pen. S.No. and Qty. hold single digits and need no more than
+ * they have.
+ */
+const BILL_COLUMNS: BillColumnWidths = {
+  sno: 8, garment: 52, qty: 10, amount: 30
 };
 
 /**
@@ -105,7 +103,7 @@ const TEXT_COLUMNS: BillColumnWidths = {
  */
 const TOKENS: Record<BillDensity, BillDensityTokens> = {
   roomy: {
-    key: 'roomy', columns: WIDE_COLUMNS,
+    key: 'roomy', columns: BILL_COLUMNS,
     logoPx: 108, brandPx: 34, taglinePx: 9.5, qrPx: 104, qrLabelPx: 7, headerPadY: 16,
     sectionGap: 9, blockPadY: 9, metaValuePx: 10.5, metaLabelPx: 9,
     tableHeadPx: 8.5, rowPadY: 7, rowTextPx: 10, rowLeading: 1.35,
@@ -113,7 +111,7 @@ const TOKENS: Record<BillDensity, BillDensityTokens> = {
     termsPx: 9.5, disclaimerPx: 11.5
   },
   normal: {
-    key: 'normal', columns: WIDE_COLUMNS,
+    key: 'normal', columns: BILL_COLUMNS,
     logoPx: 94, brandPx: 30, taglinePx: 9, qrPx: 94, qrLabelPx: 6.5, headerPadY: 13,
     sectionGap: 7, blockPadY: 7.5, metaValuePx: 10, metaLabelPx: 8.5,
     tableHeadPx: 8, rowPadY: 5.5, rowTextPx: 9.5, rowLeading: 1.3,
@@ -121,7 +119,7 @@ const TOKENS: Record<BillDensity, BillDensityTokens> = {
     termsPx: 9, disclaimerPx: 11
   },
   compact: {
-    key: 'compact', columns: MID_COLUMNS,
+    key: 'compact', columns: BILL_COLUMNS,
     logoPx: 80, brandPx: 26, taglinePx: 8, qrPx: 84, qrLabelPx: 6, headerPadY: 10,
     sectionGap: 5, blockPadY: 6, metaValuePx: 9.5, metaLabelPx: 8,
     tableHeadPx: 7.5, rowPadY: 4, rowTextPx: 9, rowLeading: 1.25,
@@ -129,7 +127,7 @@ const TOKENS: Record<BillDensity, BillDensityTokens> = {
     termsPx: 8.5, disclaimerPx: 10.5
   },
   dense: {
-    key: 'dense', columns: TEXT_COLUMNS,
+    key: 'dense', columns: BILL_COLUMNS,
     logoPx: 66, brandPx: 22, taglinePx: 7, qrPx: 74, qrLabelPx: 5.5, headerPadY: 8,
     sectionGap: 4, blockPadY: 4.5, metaValuePx: 8.5, metaLabelPx: 7.5,
     tableHeadPx: 7, rowPadY: 2.5, rowTextPx: 8, rowLeading: 1.2,
@@ -137,7 +135,7 @@ const TOKENS: Record<BillDensity, BillDensityTokens> = {
     termsPx: 8, disclaimerPx: 10
   },
   ultra: {
-    key: 'ultra', columns: TEXT_COLUMNS,
+    key: 'ultra', columns: BILL_COLUMNS,
     logoPx: 54, brandPx: 18, taglinePx: 6.5, qrPx: 66, qrLabelPx: 5, headerPadY: 6,
     sectionGap: 3, blockPadY: 3.5, metaValuePx: 8, metaLabelPx: 7,
     tableHeadPx: 6.5, rowPadY: 1.5, rowTextPx: 7, rowLeading: 1.15,
@@ -156,25 +154,20 @@ export function tighterDensity(key: BillDensity): BillDensity | null {
   return i >= 0 && i < DENSITY_ORDER.length - 1 ? DENSITY_ORDER[i + 1] : null;
 }
 
-/* Column character capacity, in the same proportion as the rendered table.
- * Used only to weigh how much text a row carries, never to lay it out. The
- * remarks column roughly doubled when description and fabric were dropped, so
- * the same remark now wraps to about half as many lines. */
-const REMARK_CHARS_PER_LINE = 42;
-
-function linesFor(text: string, charsPerLine: number): number {
-  const trimmed = (text || '').trim();
-  return trimmed ? Math.max(1, Math.ceil(trimmed.length / charsPerLine)) : 1;
-}
-
 /**
- * How many wrapped text lines a garment's row needs. Only the remarks cell
- * wraps now — S.No., garment, quantity and the blank amount line are all one
- * line each — so the remark alone decides the row's height. Reads no
- * measurement field.
+ * How many wrapped text lines a garment's row needs: exactly one.
+ *
+ * Remarks were the last cell on this document that wrapped. With that column
+ * gone, S.No., garment, quantity and the blank amount line are each a single
+ * line, so a row's height no longer depends on its content at all. The
+ * signature is kept because the sheet planner and its tests speak in lines,
+ * and because a future wrapping column would be measured here.
+ *
+ * Reads no measurement field, and now no remark either.
  */
-export function billRowLines(item: OrderItem, snapshot: Partial<MeasurementRecord>): number {
-  return Math.max(linesFor(garmentRemarkFor(item, snapshot), REMARK_CHARS_PER_LINE), 1);
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function billRowLines(_item: OrderItem, _snapshot: Partial<MeasurementRecord>): number {
+  return 1;
 }
 
 /**

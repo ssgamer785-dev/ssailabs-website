@@ -235,22 +235,26 @@ await scenario('Single-garment bill carries full detail and no measurements', as
   report.check('ORDER DETAILS heading present', /ORDER DETAILS/.test(text));
 
   // Product/garment table structure and this garment's row
-  report.check('table has all five column headers', [
-    'S.NO', 'PRODUCT', 'GARMENT', 'QTY', 'REMARKS', 'AMOUNT'
+  report.check('table has all four column headers', [
+    'S.NO', 'PRODUCT', 'GARMENT', 'QTY', 'AMOUNT'
   ].every(h => text.toUpperCase().includes(h)));
   // Fabric and stitching description are no longer collected, so the bill no
   // longer has columns for them — a table of em-dashes reads as missing data.
   report.check('the table has no fabric or description column',
     !/\bFABRIC\b|\bSTITCHING\b|DESCRIPTION\s*\/?\s*STITCHING/i.test(text));
+  // Remarks are workshop instructions; they belong on the slip that goes to
+  // the bench, not on the customer's copy.
+  report.check('the table has no remarks column', !/\bREMARKS?\b/i.test(text));
 
   const rows = page.locator('.order-bill-row');
   report.check('exactly one garment row is rendered', (await rows.count()) === 1, `${await rows.count()} rows`);
   const rowText = await rows.first().innerText();
   report.check('the row shows the garment name', /COAT/i.test(rowText));
-  report.check('the row carries exactly the five printed cells',
-    (await rows.first().locator('td').count()) === 5,
+  report.check('the row carries exactly the four printed cells',
+    (await rows.first().locator('td').count()) === 4,
     `${await rows.first().locator('td').count()} cells`);
-  report.check('the row shows the garment remark', rowText.includes('Peak lapel, surgeon cuffs, contrast burgundy lining'));
+  report.check('the row does not print the garment remark',
+    !rowText.includes('Peak lapel, surgeon cuffs, contrast burgundy lining'));
   report.check('the row shows quantity 1', /\b1\b/.test(rowText));
   report.check('the row\'s S.No. is 1', (await rows.first().locator('td').first().innerText()).trim() === '1');
 
@@ -485,14 +489,14 @@ await scenario('Every garment row keeps its own detail, none mixed up', async ({
     const [garment, remarkTag, fabricTag, descTag] = expected[i];
     const rowText = await rows.nth(i).innerText();
     report.check(`row ${i + 1} is the ${garment}`, rowText.toUpperCase().includes(garment.toUpperCase()));
-    report.check(`row ${i + 1} carries only its own remark`, rowText.includes(remarkTag));
+    report.check(`row ${i + 1} prints no remark at all`, !rowText.includes(remarkTag));
     report.check(`row ${i + 1} does not print the stored fabric`, !rowText.includes(fabricTag));
     report.check(`row ${i + 1} does not print the stored description`, !rowText.includes(descTag));
     report.check(`row ${i + 1}'s S.No. is ${i + 1}`,
       (await rows.nth(i).locator('td').first().innerText()).trim() === String(i + 1));
 
     const others = expected.filter((_, j) => j !== i);
-    report.check(`row ${i + 1} does not carry another garment's remark`,
+    report.check(`row ${i + 1} does not carry another garment's remark either`,
       others.every(([, r]) => !rowText.includes(r)));
   }
 
@@ -556,7 +560,7 @@ await scenario('Bill prints as exactly one properly formatted A4 sheet', async (
   report.check('no signature area reaches the paper', !/Customer Signature/i.test(printedText));
   report.check('the required disclaimer reaches the paper',
     /WE ARE NOT RESPONSIBLE FOR CLOTHES AFTER 2 MONTHS\./i.test(printedText));
-  report.check('the long remark is not truncated', printedText.includes(longRemark));
+  report.check('the long remark never reaches the customer\'s copy', !printedText.includes(longRemark));
 
   assertNoMoneyAnywhere(printedText, 'printed bill');
   assertNoMeasurements(printedText, 'printed bill');
@@ -581,12 +585,13 @@ await scenario('Bill copes with missing optional detail without inventing conten
   const rowText = await row.innerText();
   report.check('an empty cell shows a dash, not blank or "undefined"',
     !/undefined|null/i.test(rowText));
-  // Remarks is now the only cell that can come back empty — description and
-  // fabric are no longer columns — so exactly one dash is expected.
-  report.check('the unentered remark shows a dash rather than an empty cell',
-    (rowText.match(/—/g) || []).length === 1, rowText.replace(/\n/g, ' | '));
+  // No cell can come back empty any more: S.No., garment and quantity always
+  // have a value, and Amount is a blank writing line by design. A dash on this
+  // row would mean a column nobody meant to keep.
+  report.check('no cell falls back to a dash — every column always has content',
+    (rowText.match(/—/g) || []).length === 0, rowText.replace(/\n/g, ' | '));
 
-  report.check('the REMARKS column header still prints (it is a fixed table column)', /REMARKS/i.test(text));
+  report.check('the REMARKS column is gone entirely', !/\bREMARKS?\b/i.test(text));
   assertNoMoneyAnywhere(text);
   assertNoMeasurements(text);
 });

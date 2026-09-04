@@ -25,6 +25,7 @@ import {
   KurtaMeasurement, 
   PajamaMeasurement 
 } from '../../types';
+import { sectionFields, MeasurementSection } from '../../utils/garmentMeasurements';
 
 interface MeasurementModalProps {
   isOpen: boolean;
@@ -49,61 +50,86 @@ interface FieldConfig {
   defaultInches: string;
 }
 
-const COAT_FIELDS: FieldConfig[] = [
-  { key: 'length', label: '1. Length', sublabel: 'Coat / Blazer Length', placeholder: '30.0', defaultInches: '30' },
-  { key: 'chest', label: '2. Chest', sublabel: 'Full Chest Girth', placeholder: '40.0', defaultInches: '40' },
-  { key: 'stomach', label: '3. Stomach', sublabel: 'Natural Waist / Belly', placeholder: '36.0', defaultInches: '36' },
-  { key: 'hip', label: '4. H.P. / Hip', sublabel: 'Seat & Lower Hip', placeholder: '41.0', defaultInches: '41' },
-  { key: 'shoulder', label: '5. Shoulder', sublabel: 'Shoulder Seam to Seam', placeholder: '18.5', defaultInches: '18.5' },
-  { key: 'sleeve', label: '6. Sleeve', sublabel: 'Crown to Wrist Cuff', placeholder: '25.0', defaultInches: '25' },
-  { key: 'xBack', label: '7. X-Back', sublabel: 'Cross Back Width', placeholder: '17.5', defaultInches: '17.5' },
-  { key: 'collar', label: '8. Collar', sublabel: 'Neck Band / Collar', placeholder: '16.0', defaultInches: '16' },
-  { key: 'jacketLength', label: '9. Jacket Length', sublabel: 'Jacket / Suit Length', placeholder: '30.5', defaultInches: '30.5' },
-  { key: 'waistcoatLength', label: '10. Waistcoat Length', sublabel: 'Vest / Waistcoat Length', placeholder: '23.0', defaultInches: '23' },
-];
+/*
+ * Entry adds a sublabel, a placeholder and a starting value to each field. It
+ * does not decide which fields exist: that comes from the canonical garment
+ * definitions, so an entry form cannot quietly offer nine of a garment's ten
+ * measurements, and the number the counter hand reads beside a field always
+ * matches its position on the production slip and the measurement sheet.
+ */
+const FIELD_HINTS: Record<string, Record<string, { sublabel: string; placeholder: string }>> = {
+  coat: {
+    length: { sublabel: 'Coat / Blazer Length', placeholder: '30.0' },
+    chest: { sublabel: 'Full Chest Girth', placeholder: '40.0' },
+    stomach: { sublabel: 'Natural Waist / Belly', placeholder: '36.0' },
+    hip: { sublabel: 'Seat & Lower Hip', placeholder: '41.0' },
+    shoulder: { sublabel: 'Shoulder Seam to Seam', placeholder: '18.5' },
+    sleeve: { sublabel: 'Crown to Wrist Cuff', placeholder: '25.0' },
+    xBack: { sublabel: 'Cross Back Width', placeholder: '17.5' },
+    collar: { sublabel: 'Neck Band / Collar', placeholder: '16.0' },
+    jacketLength: { sublabel: 'Jacket / Suit Length', placeholder: '30.5' },
+    waistcoatLength: { sublabel: 'Vest / Waistcoat Length', placeholder: '23.0' }
+  },
+  pant: {
+    length: { sublabel: 'Outseam Length', placeholder: '40.0' },
+    waist: { sublabel: 'Trouser Band Waist', placeholder: '34.0' },
+    hip: { sublabel: 'Trouser Hip / Seat', placeholder: '40.5' },
+    thigh: { sublabel: 'Upper Thigh Circumference', placeholder: '24.5' },
+    inLeg: { sublabel: 'Crotch to Ankle Inseam', placeholder: '31.0' },
+    bottom: { sublabel: 'Trouser Cuff Opening', placeholder: '15.0' },
+    body: { sublabel: 'Front Rise Depth', placeholder: '11.0' }
+  },
+  shirt: {
+    length: { sublabel: 'Shirt Front/Back Length', placeholder: '30.0' },
+    chest: { sublabel: 'Full Chest Circumference', placeholder: '40.0' },
+    stomach: { sublabel: 'Waist & Midsection', placeholder: '36.0' },
+    hip: { sublabel: 'Shirt Hem / Lower Seat', placeholder: '41.0' },
+    shoulder: { sublabel: 'Shoulder Yoke Width', placeholder: '18.5' },
+    sleeve: { sublabel: 'Shoulder to Wrist Cuff', placeholder: '24.5' },
+    collar: { sublabel: 'Neck Band Size', placeholder: '16.0' },
+    cuff: { sublabel: 'Wrist Band Opening', placeholder: '9.5' }
+  },
+  kurta: {
+    length: { sublabel: 'Kurta Knee / Calf Length', placeholder: '42.0' },
+    chest: { sublabel: 'Chest Girth with Ease', placeholder: '42.0' },
+    stomach: { sublabel: 'Midsection Relaxed', placeholder: '38.0' },
+    hip: { sublabel: 'Slit / Lower Hip Point', placeholder: '43.0' },
+    shoulder: { sublabel: 'Broad Shoulder Width', placeholder: '19.0' },
+    sleeve: { sublabel: 'Straight Sleeve Length', placeholder: '25.0' },
+    bicep: { sublabel: 'Upper Arm Girth', placeholder: '15.0' },
+    cuff: { sublabel: 'Sleeve Opening / Cuff', placeholder: '11.0' },
+    collar: { sublabel: 'Mandarin / Nehru Collar', placeholder: '16.5' }
+  },
+  pajama: {
+    length: { sublabel: 'Pajama Total Length', placeholder: '40.0' },
+    waist: { sublabel: 'Drawstring / Elastic Waist', placeholder: '35.0' },
+    hip: { sublabel: 'Full Hip Room', placeholder: '42.0' },
+    thigh: { sublabel: 'Thigh Comfort Room', placeholder: '25.0' },
+    inLeg: { sublabel: 'Inseam Length', placeholder: '30.0' },
+    bottom: { sublabel: 'Ankle / Mohri Opening', placeholder: '15.0' },
+    body: { sublabel: 'Miyani / Crotch Depth', placeholder: '11.5' }
+  }
+};
 
-const PANT_FIELDS: FieldConfig[] = [
-  { key: 'length', label: '1. Length', sublabel: 'Outseam Length', placeholder: '40.0', defaultInches: '40' },
-  { key: 'waist', label: '2. Waist', sublabel: 'Trouser Band Waist', placeholder: '34.0', defaultInches: '34' },
-  { key: 'hip', label: '3. H.P. / Hip', sublabel: 'Trouser Hip / Seat', placeholder: '40.5', defaultInches: '40.5' },
-  { key: 'thigh', label: '4. Thigh', sublabel: 'Upper Thigh Circumference', placeholder: '24.5', defaultInches: '24.5' },
-  { key: 'inLeg', label: '5. In-Leg', sublabel: 'Crotch to Ankle Inseam', placeholder: '31.0', defaultInches: '31' },
-  { key: 'bottom', label: '6. Bottom', sublabel: 'Trouser Cuff Opening', placeholder: '15.0', defaultInches: '15' },
-  { key: 'body', label: '7. Body (Rise)', sublabel: 'Front Rise Depth', placeholder: '11.0', defaultInches: '11' },
-];
+/** Numbered entry fields for a garment, in the canonical order. */
+function entryFields(section: MeasurementSection): FieldConfig[] {
+  return sectionFields(section).map((field, index) => {
+    const hint = FIELD_HINTS[section][field.key] || { sublabel: '', placeholder: '' };
+    return {
+      key: field.key,
+      label: `${index + 1}. ${field.label}`,
+      sublabel: hint.sublabel,
+      placeholder: hint.placeholder,
+      defaultInches: hint.placeholder.replace(/\.0$/, '')
+    };
+  });
+}
 
-const SHIRT_FIELDS: FieldConfig[] = [
-  { key: 'length', label: '1. Length', sublabel: 'Shirt Front/Back Length', placeholder: '30.0', defaultInches: '30' },
-  { key: 'chest', label: '2. Chest', sublabel: 'Full Chest Circumference', placeholder: '40.0', defaultInches: '40' },
-  { key: 'stomach', label: '3. Stomach', sublabel: 'Waist & Midsection', placeholder: '36.0', defaultInches: '36' },
-  { key: 'hip', label: '4. H.P. / Hip', sublabel: 'Shirt Hem / Lower Seat', placeholder: '41.0', defaultInches: '41' },
-  { key: 'shoulder', label: '5. Shoulder', sublabel: 'Shoulder Yoke Width', placeholder: '18.5', defaultInches: '18.5' },
-  { key: 'sleeve', label: '6. Sleeve', sublabel: 'Shoulder to Wrist Cuff', placeholder: '24.5', defaultInches: '24.5' },
-  { key: 'collar', label: '7. Collar', sublabel: 'Neck Band Size', placeholder: '16.0', defaultInches: '16' },
-  { key: 'cuff', label: '8. Cuff', sublabel: 'Wrist Band Opening', placeholder: '9.5', defaultInches: '9.5' },
-];
-
-const KURTA_FIELDS: FieldConfig[] = [
-  { key: 'length', label: '1. Length', sublabel: 'Kurta Knee / Calf Length', placeholder: '42.0', defaultInches: '42' },
-  { key: 'chest', label: '2. Chest', sublabel: 'Chest Girth with Ease', placeholder: '42.0', defaultInches: '42' },
-  { key: 'stomach', label: '3. Stomach / Waist', sublabel: 'Midsection Relaxed', placeholder: '38.0', defaultInches: '38' },
-  { key: 'hip', label: '4. H.P. / Hip', sublabel: 'Slit / Lower Hip Point', placeholder: '43.0', defaultInches: '43' },
-  { key: 'shoulder', label: '5. Shoulder', sublabel: 'Broad Shoulder Width', placeholder: '19.0', defaultInches: '19' },
-  { key: 'sleeve', label: '6. Sleeve', sublabel: 'Straight Sleeve Length', placeholder: '25.0', defaultInches: '25' },
-  { key: 'bicep', label: '7. Bicep', sublabel: 'Upper Arm Girth', placeholder: '15.0', defaultInches: '15' },
-  { key: 'cuff', label: '8. Cuff', sublabel: 'Sleeve Opening / Cuff', placeholder: '11.0', defaultInches: '11' },
-  { key: 'collar', label: '9. Collar', sublabel: 'Mandarin / Nehru Collar', placeholder: '16.5', defaultInches: '16.5' },
-];
-
-const PAJAMA_FIELDS: FieldConfig[] = [
-  { key: 'length', label: '1. Length', sublabel: 'Pajama Total Length', placeholder: '40.0', defaultInches: '40' },
-  { key: 'waist', label: '2. Waist', sublabel: 'Drawstring / Elastic Waist', placeholder: '35.0', defaultInches: '35' },
-  { key: 'hip', label: '3. H.P. / Hip', sublabel: 'Full Hip Room', placeholder: '42.0', defaultInches: '42' },
-  { key: 'thigh', label: '4. Thigh', sublabel: 'Thigh Comfort Room', placeholder: '25.0', defaultInches: '25' },
-  { key: 'inLeg', label: '5. In-Leg', sublabel: 'Inseam Length', placeholder: '30.0', defaultInches: '30' },
-  { key: 'bottom', label: '6. Bottom', sublabel: 'Ankle / Mohri Opening', placeholder: '15.0', defaultInches: '15' },
-  { key: 'body', label: '7. Body (Rise)', sublabel: 'Miyani / Crotch Depth', placeholder: '11.5', defaultInches: '11.5' },
-];
+const COAT_FIELDS: FieldConfig[] = entryFields('coat');
+const PANT_FIELDS: FieldConfig[] = entryFields('pant');
+const SHIRT_FIELDS: FieldConfig[] = entryFields('shirt');
+const KURTA_FIELDS: FieldConfig[] = entryFields('kurta');
+const PAJAMA_FIELDS: FieldConfig[] = entryFields('pajama');
 
 export const MeasurementModal: React.FC<MeasurementModalProps> = ({
   isOpen,

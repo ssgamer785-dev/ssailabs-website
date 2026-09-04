@@ -36,6 +36,11 @@ import {
   Invoice, 
   TrashItem
 } from '../../types';
+import {
+  sectionFields,
+  measurementDisplayValue,
+  MeasurementSection
+} from '../../utils/garmentMeasurements';
 
 interface OrderModalProps {
   isOpen: boolean;
@@ -88,6 +93,22 @@ interface GarmentConfig {
   label: string;
   sublabel: string;
   icon: string;
+}
+
+/**
+ * A garment's measurements for the wizard's review step, in one line.
+ *
+ * Every field the garment defines is listed, in the canonical order, with an
+ * em dash where nothing was entered. The coat's line used to be written out by
+ * hand and stopped after Collar, so a counter hand checking their work before
+ * placing the order never saw whether X-Back, Jacket Length or Waistcoat
+ * Length had been taken.
+ */
+function summariseMeasurement(section: MeasurementSection, values: object): string {
+  const read = values as Record<string, string | number | undefined>;
+  return sectionFields(section)
+    .map(f => `${f.label}: ${measurementDisplayValue(read[f.key])}`)
+    .join('  •  ');
 }
 
 const GARMENT_CONFIGS: GarmentConfig[] = [
@@ -1900,18 +1921,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                                 <span>COAT MEASUREMENTS ({unit})</span>
                               </div>
                               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-                                {[
-                                  { key: 'length', label: 'Length' },
-                                  { key: 'chest', label: 'Chest' },
-                                  { key: 'stomach', label: 'Stomach' },
-                                  { key: 'hip', label: 'H.P. / Hip' },
-                                  { key: 'shoulder', label: 'Shoulder' },
-                                  { key: 'sleeve', label: 'Sleeve' },
-                                  { key: 'xBack', label: 'X-Back' },
-                                  { key: 'collar', label: 'Collar' },
-                                  { key: 'jacketLength', label: 'Jacket Length' },
-                                  { key: 'waistcoatLength', label: 'Waistcoat Length' }
-                                ].map(f => (
+                                {sectionFields('coat').map(f => (
                                   <div key={f.key} className="space-y-1">
                                     <label className="text-[10px] font-bold text-[#8C7E6A] uppercase">{f.label}</label>
                                     <div className="relative">
@@ -2301,25 +2311,26 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                       {selectedGarments.Coat?.selected && (
                         <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[#E0D8CB]">
                           <span className="font-bold text-[#071426] block mb-1">Coat:</span>
-                          <span className="text-[#574E3E]">L:{coatMeas.length} C:{coatMeas.chest} St:{coatMeas.stomach} Hip:{coatMeas.hip} Sh:{coatMeas.shoulder} Sl:{coatMeas.sleeve} Col:{coatMeas.collar}</span>
+                          <span className="text-[#574E3E]">{summariseMeasurement('coat', coatMeas)}</span>
                         </div>
                       )}
                       {selectedGarments.Pant?.selected && (
                         <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[#E0D8CB]">
                           <span className="font-bold text-[#071426] block mb-1">Pant:</span>
-                          <span className="text-[#574E3E]">L:{pantMeas.length} W:{pantMeas.waist} Hip:{pantMeas.hip} Th:{pantMeas.thigh} In:{pantMeas.inLeg} Bot:{pantMeas.bottom}</span>
+                          <span className="text-[#574E3E]">{summariseMeasurement('pant', pantMeas)}</span>
                         </div>
                       )}
                       {selectedGarments.Shirt?.selected && (
                         <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[#E0D8CB]">
                           <span className="font-bold text-[#071426] block mb-1">Shirt:</span>
-                          <span className="text-[#574E3E]">L:{shirtMeas.length} C:{shirtMeas.chest} St:{shirtMeas.stomach} Sh:{shirtMeas.shoulder} Sl:{shirtMeas.sleeve} Col:{shirtMeas.collar} Cuff:{shirtMeas.cuff}</span>
+                          <span className="text-[#574E3E]">{summariseMeasurement('shirt', shirtMeas)}</span>
                         </div>
                       )}
                       {selectedGarments['Kurta Pajama']?.selected && (
                         <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[#E0D8CB]">
                           <span className="font-bold text-[#071426] block mb-1">Kurta Pajama:</span>
-                          <span className="text-[#574E3E]">K-L:{kurtaMeas.length} C:{kurtaMeas.chest} Sh:{kurtaMeas.shoulder} Sl:{kurtaMeas.sleeve} / P-L:{pajamaMeas.length} W:{pajamaMeas.waist}</span>
+                          <span className="text-[#574E3E] block">Kurta — {summariseMeasurement('kurta', kurtaMeas)}</span>
+                          <span className="text-[#574E3E] block mt-1">Pajama — {summariseMeasurement('pajama', pajamaMeas)}</span>
                         </div>
                       )}
                     </div>

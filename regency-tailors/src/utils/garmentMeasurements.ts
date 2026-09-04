@@ -301,3 +301,15 @@ export function recordMeasurementBlocks(record: Partial<MeasurementRecord>): Rec
 export function measurementDisplayValue(value?: string | number | null): string {
   return value !== undefined && value !== null && value !== '' ? String(value) : '—';
 }
+
+/**
+ * A garment's canonical field keys and labels, for the measurement entry forms.
+ *
+ * Entry adds its own sublabels, placeholders and default values, but which
+ * fields exist, what they are called and what order they come in is decided
+ * here — so an entry form cannot quietly offer nine of a garment's ten
+ * measurements.
+ */
+export function sectionFields(section: MeasurementSection): { key: string; label: string }[] {
+  return (SECTION_BY_NAME.get(section)?.fields ?? []).map(f => ({ key: f.key, label: f.label }));
+}

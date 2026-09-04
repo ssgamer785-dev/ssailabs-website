@@ -158,10 +158,20 @@ describe('bill row text load', () => {
       .toBe(billRowLines(item('Kurta Pajama'), withoutMeasurements));
   });
 
-  it('grows with a long remark', () => {
+  it('no longer grows with a long remark — the column is gone', () => {
+    // Remarks were the last wrapping cell on this document. Now that the
+    // customer's copy does not print them, a four-hundred-character workshop
+    // instruction costs the bill nothing.
     const short = billRowLines(item('Shirt', { remarks: 'Short' }), snapshot);
     const long = billRowLines(item('Shirt', { remarks: 'x'.repeat(400) }), snapshot);
-    expect(long).toBeGreaterThan(short);
+    expect(long).toBe(short);
+    expect(long).toBe(1);
+  });
+
+  it('gives every row exactly one line, whatever it carries', () => {
+    expect(billRowLines(item('Coat'), snapshot)).toBe(1);
+    expect(billRowLines(item('Kurta Pajama', { remarks: 'x'.repeat(900) }), snapshot)).toBe(1);
+    expect(billRowLines(item(''), {})).toBe(1);
   });
 
   it('ignores fabric and styling, which the bill no longer prints', () => {
@@ -231,26 +241,35 @@ describe('bill density tiers', () => {
     expect(INITIAL_DENSITY).toBe('roomy');
   });
 
-  it('hands the wrapping column more of the table as it tightens', () => {
-    // Widening remarks is what buys room at high density: the same text wraps
-    // to fewer lines without the type getting smaller.
+  it('keeps the same column widths at every tier', () => {
+    // Re-proportioning the table used to buy room by widening the one wrapping
+    // column. Nothing wraps any more, so the widths are fixed and only the
+    // type and padding tighten.
     const roomy = densityTokens('roomy').columns;
     const floor = densityTokens(DENSITY_ORDER[DENSITY_ORDER.length - 1]).columns;
-    expect(floor.remarks).toBeGreaterThan(roomy.remarks);
+    expect(floor).toEqual(roomy);
   });
 
-  it('carries no fabric or description column at any tier', () => {
+  it('carries no fabric, description or remarks column at any tier', () => {
     for (const key of DENSITY_ORDER) {
       const c = densityTokens(key).columns as unknown as Record<string, number>;
       expect(c.description).toBeUndefined();
       expect(c.fabric).toBeUndefined();
+      expect(c.remarks).toBeUndefined();
+    }
+  });
+
+  it('defines exactly the four columns the bill prints', () => {
+    for (const key of DENSITY_ORDER) {
+      expect(Object.keys(densityTokens(key).columns).sort())
+        .toEqual(['amount', 'garment', 'qty', 'sno']);
     }
   });
 
   it('keeps every column set summing to a full table width', () => {
     for (const key of DENSITY_ORDER) {
       const c = densityTokens(key).columns;
-      const total = c.sno + c.garment + c.qty + c.remarks + c.amount;
+      const total = c.sno + c.garment + c.qty + c.amount;
       expect(total).toBeCloseTo(100, 5);
     }
   });

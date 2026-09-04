@@ -17,6 +17,7 @@ import {
   ReceiptText
 } from 'lucide-react';
 import { Order, OrderStatus, MeasurementRecord, Customer } from '../../types';
+import { MeasurementDetailBlocks } from '../measurements/MeasurementDetailBlocks';
 import { RegencyLogo } from '../RegencyLogo';
 
 interface OrderDetailModalProps {
@@ -340,73 +341,9 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
               {snapshot ? (
                 <div className="space-y-4">
-                  {/* Coat */}
-                  {snapshot.coat && (
-                    <div className="bg-[#FAF8F5] p-4 rounded-2xl border border-[#E0D8CB] space-y-2.5">
-                      <h4 className="font-extrabold text-xs text-[#071426] uppercase tracking-wider flex items-center gap-1.5">
-                        <span>🧥</span> Coat / Blazer Measurements
-                      </h4>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                        {Object.entries(snapshot.coat).map(([k, v]) => (
-                          <div key={k} className="bg-white p-2.5 rounded-xl border border-[#EAE4D8] flex justify-between">
-                            <span className="text-[#6E6454] capitalize font-medium">{k}:</span>
-                            <span className="font-bold text-[#071426]">{v}"</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Pant */}
-                  {snapshot.pant && (
-                    <div className="bg-[#FAF8F5] p-4 rounded-2xl border border-[#E0D8CB] space-y-2.5">
-                      <h4 className="font-extrabold text-xs text-[#071426] uppercase tracking-wider flex items-center gap-1.5">
-                        <span>👖</span> Pant / Trouser Measurements
-                      </h4>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                        {Object.entries(snapshot.pant).map(([k, v]) => (
-                          <div key={k} className="bg-white p-2.5 rounded-xl border border-[#EAE4D8] flex justify-between">
-                            <span className="text-[#6E6454] capitalize font-medium">{k}:</span>
-                            <span className="font-bold text-[#071426]">{v}"</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Shirt */}
-                  {snapshot.shirt && (
-                    <div className="bg-[#FAF8F5] p-4 rounded-2xl border border-[#E0D8CB] space-y-2.5">
-                      <h4 className="font-extrabold text-xs text-[#071426] uppercase tracking-wider flex items-center gap-1.5">
-                        <span>👔</span> Shirt Measurements
-                      </h4>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                        {Object.entries(snapshot.shirt).map(([k, v]) => (
-                          <div key={k} className="bg-white p-2.5 rounded-xl border border-[#EAE4D8] flex justify-between">
-                            <span className="text-[#6E6454] capitalize font-medium">{k}:</span>
-                            <span className="font-bold text-[#071426]">{v}"</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Kurta & Pajama */}
-                  {snapshot.kurta && (
-                    <div className="bg-[#FAF8F5] p-4 rounded-2xl border border-[#E0D8CB] space-y-2.5">
-                      <h4 className="font-extrabold text-xs text-[#071426] uppercase tracking-wider flex items-center gap-1.5">
-                        <span>👘</span> Kurta &amp; Pajama Measurements
-                      </h4>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                        {Object.entries(snapshot.kurta).map(([k, v]) => (
-                          <div key={k} className="bg-white p-2.5 rounded-xl border border-[#EAE4D8] flex justify-between">
-                            <span className="text-[#6E6454] capitalize font-medium">{k}:</span>
-                            <span className="font-bold text-[#071426]">{v}"</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  {/* Every garment's complete measurement set, from the same
+                      canonical definitions the production slip reads. */}
+                  <MeasurementDetailBlocks record={snapshot} />
 
                   {/* Fit Notes */}
                   {snapshot.fittingNotes && (
