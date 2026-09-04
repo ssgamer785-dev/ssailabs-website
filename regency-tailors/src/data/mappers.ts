@@ -138,6 +138,33 @@ export const num = (v: unknown, fallback = 0): number => {
 
 const str = (v: unknown, fallback = ''): string => (v === null || v === undefined ? fallback : String(v));
 
+/**
+ * True for a value Postgres will accept in a `uuid` column.
+ *
+ * The showroom's modals mint a provisional client id the moment the counter
+ * hand types a new customer's name — `CUST-MTMUP4YW-2286` — long before any
+ * row exists. Those ids are real to the UI and meaningless to the database, so
+ * every write that lands on a uuid column has to be able to tell them apart.
+ * A prefix test cannot: `RESTORED-CUST-1` from a legacy import is just as
+ * invalid and does not start with `CUST-`. The shape of the value is what
+ * matters, not what it is called.
+ */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const isUuid = (value: unknown): value is string =>
+  typeof value === 'string' && UUID_PATTERN.test(value);
+
+/**
+ * The last ten digits of a phone number — how a returning client is recognised.
+ *
+ * This must stay byte-for-byte equivalent to the `phone_normalized` generated
+ * column, `right(regexp_replace(phone, '[^0-9]', '', 'g'), 10)`. If the two
+ * drift, a lookup here misses a row the unique index then refuses to let us
+ * insert, and the customer cannot be saved at all.
+ */
+export const normalizePhone = (phone: unknown): string =>
+  String(phone ?? '').replace(/\D/g, '').slice(-10);
+
 /** Date columns render as plain YYYY-MM-DD throughout the UI. */
 export const dateOnly = (v: unknown): string => {
   if (!v) return '';
@@ -370,11 +397,19 @@ export function customerToRow(customer: Customer): Record<string, unknown> {
   };
 }
 
-/** Columns the order wizard is allowed to write. Money, workflow status and
- *  production state are deliberately absent: an edit must never reset them. */
-export function orderToWizardRow(order: Order): Record<string, unknown> {
+/**
+ * Columns the order wizard is allowed to write. Money, workflow status and
+ * production state are deliberately absent: an edit must never reset them.
+ *
+ * `customerId` is a required argument rather than being read off the order,
+ * because `order.customerId` is whatever the wizard was holding and may be a
+ * provisional client id. Taking it separately means the caller has to resolve
+ * a real `customers.id` first, and the mapper cannot silently pass a
+ * `CUST-...` string into a uuid column.
+ */
+export function orderToWizardRow(order: Order, customerId: string): Record<string, unknown> {
   return {
-    customer_id: order.customerId,
+    customer_id: customerId,
     customer_name: order.customerName,
     customer_phone: order.customerPhone,
     customer_email: order.customerEmail || null,

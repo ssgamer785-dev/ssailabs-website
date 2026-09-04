@@ -56,7 +56,9 @@ interface OrderModalProps {
   trashItems?: TrashItem[];
   initialOrder?: Order | null;
   preselectedCustomer?: Customer | null;
-  onAddCustomer?: (customer: Customer) => void;
+  /** Persists the customer and, in Supabase mode, returns the stored record —
+   *  whose id is the real database uuid the order must be linked to. */
+  onAddCustomer?: (customer: Customer) => Customer | undefined | Promise<Customer | undefined>;
   onViewOrderDetails?: (order: Order) => void;
   onPrintProductionSlip?: (order: Order) => void;
   onPrintBill?: (order: Order) => void;
@@ -961,12 +963,19 @@ export const OrderModal: React.FC<OrderModalProps> = ({
           measurementRecord
         });
       } else if (onSave) {
-        // Persist the customer first so the order-save handler can find it and
-        // update the correct ledger row.
-        if (onAddCustomer) {
-          onAddCustomer(finalCustomer);
-        }
-        const persisted = await onSave(fullOrder);
+        // Persist the customer first and adopt the id the database issued.
+        //
+        // `orders.customer_id` is a uuid column. For a walk-in typed straight
+        // into this wizard, `finalCustomer.id` is the provisional `CUST-...`
+        // one built above, and sending that to Postgres is what raised
+        // `invalid input syntax for type uuid`. Awaiting the save also orders
+        // the two writes: the customer row exists before the order references
+        // it, instead of the two racing.
+        const savedCustomer = onAddCustomer ? await onAddCustomer(finalCustomer) : undefined;
+        const orderToPersist: Order = savedCustomer?.id
+          ? { ...fullOrder, customerId: savedCustomer.id }
+          : fullOrder;
+        const persisted = await onSave(orderToPersist);
         // The database issues the real order number, so the confirmation
         // screen and every document printed from it use the stored record.
         if (persisted && typeof persisted === 'object') {

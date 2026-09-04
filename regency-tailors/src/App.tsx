@@ -348,16 +348,37 @@ export default function App() {
   }, [profile]);
 
   // Handlers: Customers
-  const handleSaveCustomer = (customer: Customer) => {
+
+  /**
+   * Saves a customer and hands the stored record back to the caller.
+   *
+   * The return value is the point. In Supabase mode the id passed in may be a
+   * provisional `CUST-...` one the modal invented, while the row Postgres
+   * writes carries the real uuid — and the New Order and New Measurement
+   * wizards have to link what they save next to that uuid. Firing this off with
+   * `void push(...)` discarded it and left them holding the client id, which is
+   * how a `CUST-...` string reached a uuid column.
+   */
+  const handleSaveCustomer = async (customer: Customer): Promise<Customer | undefined> => {
     if (usesSupabase) {
-      void push(() => repo.saveCustomer(customer));
-      return;
+      try {
+        const saved = await repo.saveCustomer(customer);
+        setDataError(null);
+        return saved;
+      } catch (err: any) {
+        setDataError(err?.message || 'That change could not be saved.');
+        return undefined;
+      } finally {
+        await refresh();
+      }
     }
+
     setCustomers(prev => {
       const exists = prev.some(c => c.id === customer.id);
       if (exists) return prev.map(c => c.id === customer.id ? customer : c);
       return [customer, ...prev];
     });
+    return customer;
   };
 
   const handleDeleteCustomer = (customer: Customer) => {

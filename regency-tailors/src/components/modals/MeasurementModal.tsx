@@ -32,7 +32,9 @@ interface MeasurementModalProps {
   onSave: (record: MeasurementRecord) => void;
   customers: Customer[];
   allMeasurements?: MeasurementRecord[];
-  onAddCustomer?: (customer: Customer) => void;
+  /** Persists the customer and, in Supabase mode, returns the stored record —
+   *  whose id is the real database uuid the measurement must be linked to. */
+  onAddCustomer?: (customer: Customer) => Customer | undefined | Promise<Customer | undefined>;
   initialMeasurement?: MeasurementRecord | null;
   preselectedCustomer?: Customer | null;
 }
@@ -409,7 +411,7 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
     });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     let targetCust: Customer | undefined = activeCustomer;
@@ -432,10 +434,11 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
         lastVisitDate: new Date().toISOString().split('T')[0],
         createdDate: new Date().toISOString().split('T')[0]
       };
-      if (onAddCustomer) {
-        onAddCustomer(newCust);
-      }
-      targetCust = newCust;
+      // `measurements.customer_id` is a uuid column, so the provisional
+      // `CUST-...` id above cannot be what gets saved. Await the customer write
+      // and adopt the id the database issued.
+      const savedCust = onAddCustomer ? await onAddCustomer(newCust) : undefined;
+      targetCust = savedCust?.id ? { ...newCust, id: savedCust.id } : newCust;
     }
 
     if (!targetCust) {

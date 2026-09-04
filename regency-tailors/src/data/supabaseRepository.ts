@@ -16,6 +16,7 @@ import {
   toCustomer, toOrder, toMeasurementRecord, toInvoice, toFitting, toWorker,
   toExpense, toTrashItem, toShowroomProfile,
   customerToRow, orderToWizardRow, orderItemsToRows, measurementValueRows,
+  isUuid, normalizePhone,
   CustomerRow, OrderRow, MeasurementRow
 } from './mappers';
 
@@ -109,13 +110,17 @@ export async function saveCustomer(customer: Customer): Promise<Customer> {
   const db = requireSupabase();
   const payload = customerToRow(customer);
 
-  if (customer.id && !customer.id.startsWith('CUST-')) {
+  // A uuid means Postgres already has this row. Anything else is a client-side
+  // id the UI invented, and is matched by phone below instead — including the
+  // `RESTORED-CUST-n` ids a legacy import mints, which the old `CUST-` prefix
+  // test let through into `.eq('id', ...)` and a uuid error.
+  if (isUuid(customer.id)) {
     const { data, error } = await db.from('customers').update(payload).eq('id', customer.id).select('*').single();
     fail('Could not save the customer', error);
     return toCustomer(data as CustomerRow);
   }
 
-  const normalized = (customer.phone || '').replace(/\D/g, '').slice(-10);
+  const normalized = normalizePhone(customer.phone);
   const { data: existing } = await db
     .from('customers')
     .select('id')
@@ -143,6 +148,96 @@ export async function softDeleteCustomer(customerId: string): Promise<void> {
   fail('Could not move the customer to trash', error);
 }
 
+/**
+ * Details the app knows about a customer, which may or may not be a saved row.
+ */
+export interface CustomerIdentity {
+  id?: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  city?: string;
+}
+
+/**
+ * The real `customers.id` for a customer the UI may only know by a client id.
+ *
+ * `orders.customer_id` and `measurements.customer_id` are uuid columns with a
+ * foreign key onto `customers`. The New Order wizard, though, builds its
+ * customer the moment the counter hand finishes typing — with a provisional
+ * `CUST-...` id, because no row exists yet — and the New Measurement modal does
+ * the same. Handing either of those straight to Postgres is what produced
+ * `invalid input syntax for type uuid: "CUST-MTMUP4YW-2286"`.
+ *
+ * The mapping is by phone number, which is the showroom's own idea of customer
+ * identity and the key the `customers_phone_unique_live` index already enforces:
+ *
+ *   already a uuid        -> use it, the row exists
+ *   known phone number    -> that customer's uuid, so a walk-in typed into the
+ *                            order form lands on their existing ledger rather
+ *                            than opening a second one
+ *   unknown phone number  -> create the customer, return the issued uuid
+ *
+ * Nothing here weakens Row Level Security: these are ordinary authenticated
+ * reads and writes, and an account that is not on the allowlist gets nothing
+ * back from the lookup and is refused the insert.
+ */
+async function resolveCustomerUuid(identity: CustomerIdentity, context: string): Promise<string> {
+  if (isUuid(identity.id)) return identity.id;
+
+  const db = requireSupabase();
+  const normalized = normalizePhone(identity.phone);
+
+  // Without a phone number there is nothing to match on, and inventing a
+  // customer from a name alone would merge unrelated people. Better to refuse
+  // the write and say why than to guess at who this is.
+  if (normalized.length < 10) {
+    throw new Error(
+      `${context}: this customer is not linked to a database record and has no phone number to match on.`
+    );
+  }
+
+  const { data: existing, error: lookupError } = await db
+    .from('customers')
+    .select('id')
+    .eq('phone_normalized', normalized)
+    .is('deleted_at', null)
+    .maybeSingle();
+  fail(`${context}: the customer could not be looked up`, lookupError);
+  if (existing?.id) return String(existing.id);
+
+  const { data: created, error: insertError } = await db
+    .from('customers')
+    .insert({
+      name: (identity.name || '').trim(),
+      phone: (identity.phone || '').trim(),
+      email: identity.email?.trim() || null,
+      address: identity.address?.trim() || null,
+      city: identity.city?.trim() || null
+    })
+    .select('id')
+    .single();
+
+  if (insertError) {
+    // Another device — or this order's own customer save, racing us — may have
+    // inserted the same number first. The partial unique index rejects the
+    // duplicate, and the row it protected is exactly the one we were after.
+    if ((insertError as { code?: string }).code === '23505') {
+      const { data: raced } = await db
+        .from('customers')
+        .select('id')
+        .eq('phone_normalized', normalized)
+        .is('deleted_at', null)
+        .maybeSingle();
+      if (raced?.id) return String(raced.id);
+    }
+    throw new Error(`${context}: the customer could not be created: ${insertError.message}`);
+  }
+
+  return String((created as { id: string }).id);
+}
+
 /* ----------------------------------------------------------------- orders */
 
 /**
@@ -155,7 +250,21 @@ export async function softDeleteCustomer(customerId: string): Promise<void> {
  */
 export async function saveOrder(order: Order): Promise<Order> {
   const db = requireSupabase();
-  const wizardColumns = orderToWizardRow(order);
+
+  // Resolved before anything is written, so the uuid column only ever receives
+  // a uuid no matter which screen the order came from.
+  const customerId = await resolveCustomerUuid(
+    {
+      id: order.customerId,
+      name: order.customerName,
+      phone: order.customerPhone,
+      email: order.customerEmail,
+      address: order.customerAddress
+    },
+    'Could not save the order'
+  );
+
+  const wizardColumns = orderToWizardRow(order, customerId);
 
   let orderDbId = order.dbId;
 
@@ -240,14 +349,21 @@ export async function recordOrderPayment(
 export async function saveMeasurement(record: MeasurementRecord): Promise<void> {
   const db = requireSupabase();
 
+  // Same uuid column, same provisional-id problem: the New Measurement modal
+  // can create its customer inline exactly as the order wizard does.
+  const customerId = await resolveCustomerUuid(
+    { id: record.customerId, name: record.customerName, phone: record.customerPhone },
+    'Could not save the measurement profile'
+  );
+
   const { data: existing } = await db
     .from('measurements')
     .select('id')
-    .eq('customer_id', record.customerId)
+    .eq('customer_id', customerId)
     .maybeSingle();
 
   const header = {
-    customer_id: record.customerId,
+    customer_id: customerId,
     unit: record.unit === 'cm' ? 'cm' : 'inches',
     fit_preference: record.fitPreference || null,
     posture_notes: record.postureNotes || null,
