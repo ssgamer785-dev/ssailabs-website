@@ -66,7 +66,6 @@ interface OrderModalProps {
   onAddCustomer?: (customer: Customer) => Customer | undefined | Promise<Customer | undefined>;
   onViewOrderDetails?: (order: Order) => void;
   onPrintProductionSlip?: (order: Order) => void;
-  onPrintBill?: (order: Order) => void;
   /** Customer-facing bill with no financial information. */
   onPrintOrderBill?: (order: Order) => void;
 }
@@ -154,7 +153,6 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   onAddCustomer,
   onViewOrderDetails,
   onPrintProductionSlip,
-  onPrintBill,
   onPrintOrderBill
 }) => {
   const measurementsPool = allMeasurements && allMeasurements.length > 0 ? allMeasurements : measurements || [];

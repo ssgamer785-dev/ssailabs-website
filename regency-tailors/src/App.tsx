@@ -40,7 +40,6 @@ import { MeasurementModal } from './components/modals/MeasurementModal';
 import { OrderDetailModal } from './components/modals/OrderDetailModal';
 import { CustomerProfileModal } from './components/modals/CustomerProfileModal';
 import { PrintProductionSlipModal } from './components/modals/PrintProductionSlipModal';
-import { PrintBillModal } from './components/modals/PrintBillModal';
 import { PrintOrderBillModal } from './components/modals/PrintOrderBillModal';
 import { ProductionSlipDetailModal } from './components/modals/ProductionSlipDetailModal';
 import { RegencyBackupPayload, normalizeRestoredPayload } from './utils/backupManager';
@@ -291,8 +290,6 @@ export default function App() {
   const [isPrintProductionSlipOpen, setIsPrintProductionSlipOpen] = useState(false);
   const [selectedOrderForPrintSlip, setSelectedOrderForPrintSlip] = useState<Order | null>(null);
 
-  const [isPrintBillOpen, setIsPrintBillOpen] = useState(false);
-  const [selectedOrderForPrintBill, setSelectedOrderForPrintBill] = useState<Order | null>(null);
 
   // Customer-facing order bill: full order detail, no financial information.
   const [isOrderBillOpen, setIsOrderBillOpen] = useState(false);
@@ -700,11 +697,6 @@ export default function App() {
     setIsPrintProductionSlipOpen(true);
   };
 
-  const handleOpenPrintBill = (order: Order) => {
-    setSelectedOrderForPrintBill(order);
-    setIsPrintBillOpen(true);
-  };
-
   const handleOpenOrderBill = (order: Order) => {
     setSelectedOrderForBill(order);
     setIsOrderBillOpen(true);
@@ -998,7 +990,7 @@ export default function App() {
               orders={orders}
               onSelectProductionSlip={handleOpenProductionSlipDetail}
               onPrintProductionSlip={handleOpenPrintProductionSlip}
-              onPrintBill={handleOpenPrintBill}
+              onPrintBill={handleOpenOrderBill}
               onViewOrderDetails={(o) => {
                 setSelectedOrderForDetail(o);
                 setIsOrderDetailModalOpen(true);
@@ -1071,7 +1063,6 @@ export default function App() {
           setIsOrderDetailModalOpen(true);
         }}
         onPrintProductionSlip={handleOpenPrintProductionSlip}
-        onPrintBill={handleOpenPrintBill}
         onPrintOrderBill={handleOpenOrderBill}
       />
 
@@ -1147,7 +1138,7 @@ export default function App() {
         onUpdateProductionStatus={handleUpdateProductionStatus}
         onUpdateProductionNotes={handleUpdateProductionNotes}
         onPrintProductionSlip={handleOpenPrintProductionSlip}
-        onPrintBill={handleOpenPrintBill}
+        onPrintBill={handleOpenOrderBill}
         onViewOrderDetails={(o) => {
           setSelectedOrderForDetail(o);
           setIsOrderDetailModalOpen(true);
@@ -1176,15 +1167,6 @@ export default function App() {
       />
 
       {/* Print Bill Modal */}
-      <PrintBillModal
-        isOpen={isPrintBillOpen}
-        onClose={() => {
-          setIsPrintBillOpen(false);
-          setSelectedOrderForPrintBill(null);
-        }}
-        order={selectedOrderForPrintBill}
-        profile={profile}
-      />
     </div>
   );
 }

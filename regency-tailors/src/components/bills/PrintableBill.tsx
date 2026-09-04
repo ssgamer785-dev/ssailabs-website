@@ -1,3 +1,9 @@
+/*
+ * NOT USER-REACHABLE — see PrintableRegencyBill.
+ *
+ * Left over from the removed legacy-invoice modal. Nothing renders it. The
+ * approved customer bill is `OrderBillPage`.
+ */
 import React from 'react';
 import { PrintableRegencyBill, PrintableRegencyBillProps } from './PrintableRegencyBill';
 

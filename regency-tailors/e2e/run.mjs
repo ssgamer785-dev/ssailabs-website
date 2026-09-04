@@ -665,13 +665,24 @@ await scenario('Bill prints on one clean A4 sheet', async ({ page }) => {
 
   await page.getByRole('button', { name: /Production Slips/i }).click();
   await page.waitForTimeout(700);
+  // This button used to open the older money-bearing invoice. It now opens the
+  // approved customer bill, which is the only bill the app has.
   await page.locator('button[title="Print Customer Bill"]').first().click();
+  await page.waitForSelector('#printable-order-bill', { timeout: 20000 });
   await page.waitForTimeout(1500);
 
-  const billText = await page.locator('#printable-customer-bill').innerText();
+  report.check('the legacy invoice is not what opened',
+    (await page.locator('#printable-customer-bill').count()) === 0);
+
+  const billText = await page.locator('#printable-order-bill').innerText();
+  report.check('bill carries no rupee figure', !/₹/.test(billText));
+  report.check('bill carries no remarks column', !/\bREMARKS?\b/i.test(billText));
   report.check('bill shows the correct customer', billText.includes('Bill Client'));
   report.check('bill shows the correct order number', billText.includes('ORDER NO.') && billText.includes('RT-00001'));
-  report.check('bill lists every garment', billText.includes('Coat') && billText.includes('Shirt'));
+  // The approved bill uppercases garment names in CSS, so innerText returns
+  // them uppercased; the older invoice printed them in title case.
+  const billUpper = billText.toUpperCase();
+  report.check('bill lists every garment', billUpper.includes('COAT') && billUpper.includes('SHIRT'));
   report.check('bill shows the recorded customer address', /Model Town Market/.test(billText),
     billText.match(/ADDRESS[\s\S]{0,60}/)?.[0]?.replace(/\n/g, ' '));
 

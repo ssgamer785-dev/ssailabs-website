@@ -1,3 +1,20 @@
+/*
+ * NOT USER-REACHABLE.
+ *
+ * This is the showroom's older money-bearing invoice (DESCRIPTION / RATE /
+ * AMOUNT in rupees). The approved customer bill is `OrderBillPage` — one A4
+ * sheet, QR codes, and an Amount left blank for the owner to write by hand —
+ * and it is the only bill any button in the app opens. The modal that used to
+ * open this one (`PrintBillModal`) has been removed, along with the Print Bill
+ * actions on the Production Slips screen and the slip dossier, which now open
+ * the approved bill.
+ *
+ * The file is kept, not deleted: `OrderBillPage` and `ProductionSlipPage` both
+ * import the showroom address and phone constants from here, and the component
+ * itself is worth keeping for reference to bills printed before the change.
+ *
+ * Do not wire it back into the UI without asking the showroom first.
+ */
 import React, { useState } from 'react';
 import { MapPin, Phone, User, FileText } from 'lucide-react';
 import { Order } from '../../types';
