@@ -18,7 +18,7 @@
 import React, { useState } from 'react';
 import { MapPin, Phone, User, FileText } from 'lucide-react';
 import { Order } from '../../types';
-import regencyLogoImg from '../../assets/images/regency-tailors-logo.jpg';
+import regencyLogoImg from '../../assets/images/regency-tailors-logo-512.webp';
 
 // Static Showroom Contact Details (Official Regency Tailor)
 export const SHOWROOM_ADDRESS_LINE1 = 'BOOTAN MANDI,';

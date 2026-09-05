@@ -10,7 +10,7 @@ import {
   tighterDensity
 } from '../../utils/orderBillLayout';
 import { OrderBillGarmentRow } from './OrderBillGarmentRow';
-import regencyLogoImg from '../../assets/images/regency-tailors-logo.jpg';
+import regencyLogoImg from '../../assets/images/regency-tailors-logo-512.webp';
 import instagramQrImg from '../../assets/images/regency-instagram-qr.webp';
 import googleQrImg from '../../assets/images/regency-google-qr.webp';
 import { SHOWROOM_ADDRESS_LINE1, SHOWROOM_ADDRESS_LINE2, SHOWROOM_PHONE } from './PrintableRegencyBill';

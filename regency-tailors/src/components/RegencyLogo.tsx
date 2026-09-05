@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import regencyLogoImg from '../assets/images/regency-tailors-logo.jpg';
+import regencyLogoImg from '../assets/images/regency-tailors-logo-512.webp';
 
 export const OFFICIAL_REGENCY_LOGO = regencyLogoImg;
 
