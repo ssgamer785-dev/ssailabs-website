@@ -1418,10 +1418,10 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                           />
                         </div>
 
-                        {/* Showroom Address / Area */}
+                        {/* Customer Address */}
                         <div className="space-y-1.5">
                           <label htmlFor="order-cust-address" className="text-xs font-bold text-[#071426] uppercase tracking-wider">
-                            Showroom Address / Area
+                            Customer Address
                           </label>
                           <input
                             id="order-cust-address"
@@ -1434,20 +1434,10 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                         </div>
                       </div>
 
-                      {/* Client Notes */}
-                      <div className="space-y-1.5">
-                        <label htmlFor="order-cust-notes" className="text-xs font-bold text-[#071426] uppercase tracking-wider">
-                          Client Notes & Preferences
-                        </label>
-                        <input
-                          id="order-cust-notes"
-                          type="text"
-                          value={customerNotes}
-                          onChange={(e) => setCustomerNotes(e.target.value)}
-                          placeholder="e.g. VIP client, prefers slim Italian cut lapels"
-                          className="w-full bg-[#FAF8F5] border-2 border-[#E0D8CB] focus:border-[#C9A24A] rounded-xl px-4 py-2.5 text-sm font-semibold text-[#071426] outline-none"
-                        />
-                      </div>
+                      {/* The counter takes a name, a number, a city and an
+                          address. Client notes are no longer collected here;
+                          notes already stored against a customer are left
+                          alone and still travel with the record. */}
                     </div>
                   ) : (
                     /* EXISTING CUSTOMER SEARCH FLOW */
@@ -2200,66 +2190,47 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* CUSTOMER & TIMELINE SUMMARY */}
-                    <div className="bg-white p-6 rounded-3xl border border-[#E6E1D7] shadow-sm space-y-4">
-                      <h3 className="text-xs font-black text-[#C9A24A] uppercase tracking-wider flex items-center gap-2">
-                        <User className="w-4 h-4" />
-                        <span>1. Client & Timeline</span>
-                      </h3>
-                      <div className="space-y-2.5 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-[#7A7060]">Customer Name:</span>
-                          <span className="font-extrabold text-[#071426]">{customerName || 'New Client'}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-[#7A7060]">Mobile:</span>
-                          <span className="font-bold text-[#071426]">{customerPhone || 'N/A'}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-[#7A7060]">City / Area:</span>
-                          <span className="font-semibold text-[#071426]">{customerCity || '\u2014'} {customerAddress ? `• ${customerAddress}` : ''}</span>
-                        </div>
-                        {customerNotes && (
-                          <div className="flex justify-between">
-                            <span className="text-[#7A7060]">Notes:</span>
-                            <span className="text-xs text-[#071426] font-medium text-right max-w-[200px]">{customerNotes}</span>
-                          </div>
-                        )}
-                        <div className="pt-2 border-t border-[#F2ECE1] flex justify-between items-center">
-                          <span className="text-[#7A7060]">Order Number:</span>
-                          <span className="font-black font-mono text-[#C9A24A] text-base">#{displayOrderNumber}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-[#7A7060]">Order Date:</span>
-                          <span className="font-semibold text-[#071426]">{orderDate}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-[#7A7060]">Delivery Date:</span>
-                          <span className="font-extrabold text-[#071426]">{deliveryDate}</span>
-                        </div>
-                      </div>
-                    </div>
+                  {/* CLIENT & TIMELINE — full width.
 
-                    {/* SPECIAL INSTRUCTIONS / TIMELINE */}
-                    <div className="bg-white p-6 rounded-3xl border border-[#E6E1D7] shadow-sm space-y-4">
-                      <h3 className="text-xs font-black text-[#C9A24A] uppercase tracking-wider flex items-center gap-2">
-                        <FileText className="w-4 h-4" />
-                        <span>2. Crafting Notes & Directives</span>
-                      </h3>
-                      <div className="space-y-3 text-sm">
-                        <div className="p-3.5 bg-[#FAF8F5] rounded-2xl border border-[#E0D8CB] space-y-1">
-                          <div className="text-[10px] font-bold text-[#8C7E6A] uppercase">Special Instructions</div>
-                          <p className="text-xs font-semibold text-[#071426]">
-                            {specialInstructions || 'Standard showroom bespoke crafting instructions apply.'}
-                          </p>
-                        </div>
-                        <div className="p-3.5 bg-[#FAF8F5] rounded-2xl border border-[#E0D8CB] space-y-1">
-                          <div className="text-[10px] font-bold text-[#8C7E6A] uppercase">Fit Silhouette</div>
-                          <p className="text-xs font-bold text-[#C9A24A]">
-                            {fitPreference} • Measured in {unit}
-                          </p>
-                        </div>
+                      The crafting-notes column that used to sit beside this
+                      one is gone: special instructions and the fit silhouette
+                      are shown where they are entered and printed, not
+                      restated here. Rather than leave half the row empty, the
+                      details run in two columns inside the card, so the block
+                      reads across the page instead of as one thin list. */}
+                  <div className="bg-white p-6 rounded-3xl border border-[#E6E1D7] shadow-sm space-y-4">
+                    <h3 className="text-xs font-black text-[#C9A24A] uppercase tracking-wider flex items-center gap-2">
+                      <User className="w-4 h-4" />
+                      <span>1. Client &amp; Timeline</span>
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2.5 text-sm">
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[#7A7060]">Customer Name:</span>
+                        <span className="font-extrabold text-[#071426] text-right">{customerName || 'New Client'}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[#7A7060]">Order Number:</span>
+                        <span className="font-black font-mono text-[#C9A24A] text-base">#{displayOrderNumber}</span>
+                      </div>
+
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[#7A7060]">Mobile:</span>
+                        <span className="font-bold text-[#071426] text-right">{customerPhone || 'N/A'}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[#7A7060]">Order Date:</span>
+                        <span className="font-semibold text-[#071426]">{orderDate}</span>
+                      </div>
+
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[#7A7060]">City / Address:</span>
+                        <span className="font-semibold text-[#071426] text-right">
+                          {customerCity || '\u2014'} {customerAddress ? `\u2022 ${customerAddress}` : ''}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[#7A7060]">Delivery Date:</span>
+                        <span className="font-extrabold text-[#071426]">{deliveryDate}</span>
                       </div>
                     </div>
                   </div>
@@ -2268,7 +2239,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                   <div className="bg-white p-6 rounded-3xl border border-[#E6E1D7] shadow-sm space-y-3">
                     <h3 className="text-xs font-black text-[#C9A24A] uppercase tracking-wider flex items-center gap-2">
                       <ShoppingBag className="w-4 h-4" />
-                      <span>3. Booked Garments ({activeGarmentsList.length})</span>
+                      <span>2. Booked Garments ({activeGarmentsList.length})</span>
                     </h3>
                     <div className="divide-y divide-[#F2ECE1]">
                       {activeGarmentsList.map((g, idx) => (
@@ -2303,7 +2274,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                   <div className="bg-white p-6 rounded-3xl border border-[#E6E1D7] shadow-sm space-y-3">
                     <h3 className="text-xs font-black text-[#C9A24A] uppercase tracking-wider flex items-center gap-2">
                       <Scissors className="w-4 h-4" />
-                      <span>4. Precision Measurements ({unit} • {fitPreference})</span>
+                      <span>3. Precision Measurements ({unit}{fitPreference ? ` • ${fitPreference}` : ''})</span>
                     </h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
                       {selectedGarments.Coat?.selected && (

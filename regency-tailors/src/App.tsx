@@ -356,7 +356,10 @@ export default function App() {
    * `void push(...)` discarded it and left them holding the client id, which is
    * how a `CUST-...` string reached a uuid column.
    */
-  const handleSaveCustomer = async (customer: Customer): Promise<Customer | undefined> => {
+  const handleSaveCustomer = async (
+    customer: Customer,
+    options?: { skipRefresh?: boolean }
+  ): Promise<Customer | undefined> => {
     if (usesSupabase) {
       try {
         const saved = await repo.saveCustomer(customer);
@@ -366,7 +369,12 @@ export default function App() {
         setDataError(err?.message || 'That change could not be saved.');
         return undefined;
       } finally {
-        await refresh();
+        // The order wizard saves the customer and the order back to back, and
+        // the order save re-reads the whole dataset on both its success and its
+        // failure path. Reloading here as well ran the nine queries of the
+        // slowest interaction in the app twice, for a screen that is replaced a
+        // moment later either way.
+        if (!options?.skipRefresh) await refresh();
       }
     }
 
@@ -1054,7 +1062,7 @@ export default function App() {
         existingOrders={orders}
         orders={orders}
         trashItems={trash}
-        onAddCustomer={handleSaveCustomer}
+        onAddCustomer={customer => handleSaveCustomer(customer, { skipRefresh: true })}
         initialOrder={editingOrder}
         preselectedCustomer={preselectedCustomerForOrder}
         onViewOrderDetails={(o) => {

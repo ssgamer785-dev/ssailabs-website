@@ -1,5 +1,27 @@
-import { toPng } from 'html-to-image';
-import { jsPDF } from 'jspdf';
+/*
+ * The rendering engines are loaded on demand, not at startup.
+ *
+ * `html-to-image` (with its DOMPurify dependency) and `jsPDF` are ~390 kB of
+ * JavaScript — about 112 kB over the wire, and rather more in parse time on a
+ * low-end Windows PC. Imported at the top of this file they were pulled into
+ * the entry graph and downloaded on first paint of every session, because the
+ * three screens that can export are always in the component tree. Almost no
+ * visit presses Download PDF.
+ *
+ * Each is fetched once, on the first export, and cached for the rest of the
+ * session. The two are loaded in parallel where a function needs both.
+ */
+type ToPng = typeof import('html-to-image')['toPng'];
+type JsPdfCtor = typeof import('jspdf')['jsPDF'];
+
+let toPngPromise: Promise<ToPng> | null = null;
+let jsPdfPromise: Promise<JsPdfCtor> | null = null;
+
+const loadToPng = (): Promise<ToPng> =>
+  (toPngPromise ??= import('html-to-image').then(m => m.toPng));
+
+const loadJsPdf = (): Promise<JsPdfCtor> =>
+  (jsPdfPromise ??= import('jspdf').then(m => m.jsPDF));
 
 export interface ExportResult {
   canvas: HTMLCanvasElement;
@@ -134,7 +156,7 @@ export async function captureMasterBillCanvas(elementId: string = 'bill-export-c
 
   try {
     // Primary High-Fidelity Engine: html-to-image toPng
-    const dataUrl = await toPng(targetElement, {
+    const dataUrl = await (await loadToPng())(targetElement, {
       pixelRatio: 2.5,
       backgroundColor: '#FAF8F5',
       cacheBust: true,
@@ -242,7 +264,7 @@ export async function downloadElementAsPdf(
 
     const { dataUrl, width: canvasWidth, height: canvasHeight } = await captureMasterBillCanvas(elementId);
 
-    const pdf = new jsPDF({
+    const pdf = new (await loadJsPdf())({
       orientation: 'portrait',
       unit: 'mm',
       format: 'a4'
@@ -289,7 +311,7 @@ export async function captureSinglePageElement(element: HTMLElement): Promise<{ 
   await waitForImages(element);
 
   try {
-    const dataUrl = await toPng(element, {
+    const dataUrl = await (await loadToPng())(element, {
       pixelRatio: 2.5,
       backgroundColor: '#FAF8F5',
       cacheBust: true,
@@ -350,7 +372,7 @@ export async function downloadProductionSlipPdf(
       }
     }
 
-    const pdf = new jsPDF({
+    const pdf = new (await loadJsPdf())({
       orientation: 'portrait',
       unit: 'mm',
       format: 'a4'
