@@ -25,6 +25,13 @@
   };
   const norm = p => String(p ?? '').replace(/\D/g, '').slice(-10);
 
+  // A reload normally wipes this in-page database, which is fine for tests that
+  // never reload. A test that has to prove data survives a hard refresh needs
+  // the rows to outlive the page, so it sets `__PGREST_PERSIST` before this
+  // script runs and the tables are mirrored into sessionStorage.
+  const PERSIST = Boolean(window.__PGREST_PERSIST);
+  const SAVE_KEY = '__PGREST_STATE__';
+
   const db = {
     customers: [], orders: [], order_items: [], order_payments: [],
     measurements: [], measurement_values: [], fittings: [], workers: [],
@@ -36,8 +43,23 @@
   };
   let orderSeq = 0;
 
+  if (PERSIST) {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(SAVE_KEY) || 'null');
+      if (saved) {
+        Object.assign(db, saved.db);
+        seed = saved.seed || 0;
+        orderSeq = saved.orderSeq || 0;
+      }
+    } catch { /* start empty */ }
+  }
+  const persist = () => {
+    if (!PERSIST) return;
+    try { sessionStorage.setItem(SAVE_KEY, JSON.stringify({ db, seed, orderSeq })); } catch { /* ignore */ }
+  };
+
   // Everything the fake was asked to write, for the test to inspect.
-  window.__PGREST = { db, writes: [], errors: [] };
+  window.__PGREST = { db, writes: [], errors: [], persist };
 
   const err = (code, message, status = 400) =>
     new Response(JSON.stringify({ message, code, details: null, hint: null }),
@@ -87,7 +109,31 @@
     return o;
   });
 
-  const rowsOf = t => (t === 'customers_with_stats' ? db.customers : (db[t] || []));
+  /** `trash_items` is a view over every soft-deleted row, exactly as the
+   *  migration defines it, so the Trash screen and Restore work against the
+   *  same shape they see in production. */
+  const trashRows = () => [
+    ...db.customers.filter(r => r.deleted_at).map(r => ({
+      id: 'TRASH-CUSTOMER-' + r.id, item_type: 'Customer',
+      title: `Client Profile: ${r.name} (${r.phone})`,
+      entity_id: r.id, deleted_at: r.deleted_at, deleted_by: r.deleted_by || null })),
+    ...db.orders.filter(r => r.deleted_at).map(r => ({
+      id: 'TRASH-ORDER-' + r.id, item_type: 'Order',
+      title: `Bespoke Order ${r.order_number} (${r.customer_name})`,
+      entity_id: r.id, deleted_at: r.deleted_at, deleted_by: r.deleted_by || null })),
+    ...db.measurements.filter(r => r.deleted_at).map(r => ({
+      id: 'TRASH-MEASUREMENT-' + r.id, item_type: 'Measurement',
+      title: `Measurement Spec: ${(db.customers.find(c => c.id === r.customer_id) || {}).name || 'Unknown Client'}`,
+      entity_id: r.id, deleted_at: r.deleted_at, deleted_by: r.deleted_by || null })),
+    ...db.workers.filter(r => r.deleted_at).map(r => ({
+      id: 'TRASH-WORKER-' + r.id, item_type: 'Worker', title: `Artisan: ${r.name}`,
+      entity_id: r.id, deleted_at: r.deleted_at, deleted_by: r.deleted_by || null }))
+  ];
+
+  const rowsOf = t =>
+    t === 'customers_with_stats' ? db.customers :
+    t === 'trash_items' ? trashRows() :
+    (db[t] || []);
 
   const defaults = (table, row) => {
     const r = { id: uuid(), deleted_at: null, ...row };
@@ -142,6 +188,17 @@
             db.customers.some(c => !c.deleted_at && c.phone_normalized === row.phone_normalized)) {
           return err('23505', 'duplicate key value violates unique constraint "customers_phone_unique_live"', 409);
         }
+        // measurements.customer_id is `unique` in the schema, and order_items
+        // is `unique (order_id, position)`. Both matter to this fake because a
+        // double submission is exactly what they are there to stop.
+        if (table === 'measurements' &&
+            db.measurements.some(m => m.customer_id === row.customer_id)) {
+          return err('23505', 'duplicate key value violates unique constraint "measurements_customer_id_key"', 409);
+        }
+        if (table === 'order_items' &&
+            db.order_items.some(i => i.order_id === row.order_id && i.position === row.position)) {
+          return err('23505', 'duplicate key value violates unique constraint "order_items_order_id_position_key"', 409);
+        }
         const fk = { orders: ['customer_id', 'customers'], measurements: ['customer_id', 'customers'],
                      order_items: ['order_id', 'orders'] }[table];
         if (fk && row[fk[0]] && !db[fk[1]].some(p => p.id === row[fk[0]])) {
@@ -151,6 +208,7 @@
         made.push(row);
       }
       window.__PGREST.writes.push({ table, method, body: list });
+      persist();
       const rows = project(table, made, select);
       return ok(single ? rows[0] : rows, 201);
     }
@@ -165,6 +223,7 @@
         Object.assign(r, next);
       }
       window.__PGREST.writes.push({ table, method, body });
+      persist();
       const rows = project(table, targets, select);
       return ok(single ? (rows[0] ?? null) : rows);
     }
@@ -173,6 +232,7 @@
       const doomed = new Set(match());
       db[table] = db[table].filter(r => !doomed.has(r));
       window.__PGREST.writes.push({ table, method, count: doomed.size });
+      persist();
       return ok([]);
     }
 

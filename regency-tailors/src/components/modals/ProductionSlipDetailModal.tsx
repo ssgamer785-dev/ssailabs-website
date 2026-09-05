@@ -5,7 +5,8 @@ import {
   FileText, 
   Eye, 
   Save, 
-  CheckCircle2
+  CheckCircle2,
+  AlertTriangle
 } from 'lucide-react';
 import { Order, ProductionStatus } from '../../types';
 import { ProductionSlipProductCard } from '../production/ProductionSlipProductCard';
@@ -15,14 +16,26 @@ interface ProductionSlipDetailModalProps {
   onClose: () => void;
   order: Order | null;
   onUpdateProductionStatus: (orderId: string, status: ProductionStatus) => void;
-  onUpdateProductionNotes: (orderId: string, notes: string) => void;
+  /** Resolves to null once the note is stored, or to the reason it was not. */
+  onUpdateProductionNotes: (orderId: string, notes: string) => void | Promise<string | null>;
   onPrintProductionSlip: (order: Order) => void;
   onPrintBill: (order: Order) => void;
   onViewOrderDetails: (order: Order) => void;
 }
 
-export const ProductionSlipDetailModal: React.FC<ProductionSlipDetailModalProps> = ({
-  isOpen,
+/**
+ * The dossier itself, mounted only while there is a slip to show.
+ *
+ * Splitting it from the wrapper below is what keeps the hooks unconditional:
+ * they used to sit after an `if (!isOpen || !order) return null`, so the same
+ * component instance rendered no hooks when closed and two when open. React
+ * happens to tolerate that shape today — a render that produced no hook state
+ * is treated as a fresh mount — but it is the pattern the rules of hooks exist
+ * to forbid, and one added effect would turn it into a crash. The behaviour is
+ * unchanged: this body still mounts fresh each time the dossier appears, so
+ * the notes box still starts from the order it was opened on.
+ */
+const SlipDossier: React.FC<Omit<ProductionSlipDetailModalProps, 'isOpen'> & { order: Order }> = ({
   onClose,
   order,
   onUpdateProductionNotes,
@@ -30,10 +43,9 @@ export const ProductionSlipDetailModal: React.FC<ProductionSlipDetailModalProps>
   onPrintBill,
   onViewOrderDetails
 }) => {
-  if (!isOpen || !order) return null;
-
   const [notes, setNotes] = useState(order.productionNotes || '');
-  const [isSavedToast, setIsSavedToast] = useState(false);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const orderNum = order.orderNumber || order.id;
   const snapshot = order.measurementsSnapshot || {};
@@ -43,10 +55,27 @@ export const ProductionSlipDetailModal: React.FC<ProductionSlipDetailModalProps>
   const todayStr = new Date().toISOString().split('T')[0];
   const isOverdue = order.deliveryDate < todayStr && status !== 'Completed';
 
-  const handleSaveNotes = () => {
-    onUpdateProductionNotes(order.id, notes);
-    setIsSavedToast(true);
-    setTimeout(() => setIsSavedToast(false), 2500);
+  /**
+   * "Notes Saved" now means the database said so.
+   *
+   * This used to flip the green badge on the instant the button was pressed,
+   * next to a write that was neither awaited nor checked. A note the database
+   * refused was reported as recorded, and the failure banner it did raise sits
+   * in the page behind this dossier's backdrop, so nobody saw it. The workshop
+   * would then cut to an instruction that was never stored.
+   */
+  const handleSaveNotes = async () => {
+    if (saveState === 'saving') return;
+    setSaveState('saving');
+    setSaveError(null);
+    const failure = await onUpdateProductionNotes(order.id, notes);
+    if (failure) {
+      setSaveError(failure);
+      setSaveState('idle');
+      return;
+    }
+    setSaveState('saved');
+    setTimeout(() => setSaveState('idle'), 2500);
   };
 
   return (
@@ -179,7 +208,12 @@ export const ProductionSlipDetailModal: React.FC<ProductionSlipDetailModalProps>
                 </p>
               </div>
 
-              {isSavedToast && (
+              {saveState === 'saving' && (
+                <span className="px-2.5 py-1 bg-[#071426] text-[#D4AF5A] font-bold text-xs rounded-lg flex items-center gap-1">
+                  <span>Saving…</span>
+                </span>
+              )}
+              {saveState === 'saved' && (
                 <span className="px-2.5 py-1 bg-emerald-600 text-white font-bold text-xs rounded-lg animate-fadeIn flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   <span>Notes Saved</span>
@@ -195,14 +229,27 @@ export const ProductionSlipDetailModal: React.FC<ProductionSlipDetailModalProps>
               className="w-full p-3 bg-white border border-amber-300 rounded-xl text-xs text-[#071426] placeholder-amber-700/50 outline-none focus:border-[#C9A24A]"
             />
 
+            {saveError && (
+              <div
+                role="alert"
+                className="px-3 py-2 bg-red-50 border border-red-300 rounded-xl text-[11px] font-bold text-red-800 flex items-start gap-1.5"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
+                <span>
+                  <span className="uppercase tracking-wide">Not saved.</span> {saveError}
+                </span>
+              </div>
+            )}
+
             <div className="flex justify-end">
               <button
                 type="button"
+                disabled={saveState === 'saving'}
                 onClick={handleSaveNotes}
                 className="px-4 py-2 bg-[#071426] hover:bg-[#0E2038] text-[#D4AF5A] text-xs font-extrabold rounded-xl border border-[#C9A24A]/40 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
                 <Save className="w-3.5 h-3.5 text-[#C9A24A]" />
-                <span>Save Production Notes</span>
+                <span>{saveState === 'saving' ? 'Saving Notes…' : 'Save Production Notes'}</span>
               </button>
             </div>
           </div>
@@ -237,4 +284,17 @@ export const ProductionSlipDetailModal: React.FC<ProductionSlipDetailModalProps>
       </div>
     </div>
   );
+};
+
+/**
+ * Public entry point: renders nothing when the drawer is closed or no slip is
+ * selected, and otherwise hands the dossier a non-null order.
+ */
+export const ProductionSlipDetailModal: React.FC<ProductionSlipDetailModalProps> = ({
+  isOpen,
+  order,
+  ...rest
+}) => {
+  if (!isOpen || !order) return null;
+  return <SlipDossier order={order} {...rest} />;
 };

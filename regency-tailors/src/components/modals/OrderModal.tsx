@@ -165,6 +165,21 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  /**
+   * The real double-submit guard.
+   *
+   * `isSubmitting` drives the button's label and disabled state, but it cannot
+   * be the gate: React does not apply a state update until it re-renders, so
+   * clicks dispatched in the same task all run the handler with the same
+   * `isSubmitting === false` closure and all of them get through. Five clicks
+   * placed five orders, each with its own database number, its own production
+   * slip and its own bill — and a counter hand double-clicking PLACE ORDER on
+   * a slow machine is exactly how that happens. A ref is written the instant
+   * the first click is handled, so every later click sees the door already
+   * shut.
+   */
+  const submittingRef = useRef(false);
+
   // Field-level validation errors
   const [formErrors, setFormErrors] = useState<{
     customerName?: string;
@@ -790,7 +805,8 @@ export const OrderModal: React.FC<OrderModalProps> = ({
 
   // FINAL ORDER SUBMISSION
   const handleFinalPlaceOrder = async () => {
-    if (isSubmitting) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
 
     try {
       setIsSubmitting(true);
@@ -1013,6 +1029,10 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       console.error('Order creation error:', err);
       setSaveError(err.message || 'Unable to place order. Please verify details and try again.');
       setIsSubmitting(false);
+    } finally {
+      // Reopened for the retry the error panel offers; on the success screen
+      // the button is gone, so releasing it here costs nothing.
+      submittingRef.current = false;
     }
   };
 

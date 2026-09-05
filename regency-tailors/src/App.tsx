@@ -185,6 +185,32 @@ export default function App() {
   }, [refresh]);
 
   /**
+   * Same write-then-reload path as `push`, and the caller learns whether the
+   * database accepted the change.
+   *
+   * `push` swallows the outcome, which is fine for a control whose own value
+   * resyncs from the server a moment later. It is not fine for a button that
+   * reports back in words: the production-notes button showed a green "Notes
+   * Saved" the instant it was pressed, so a note the database refused — an RLS
+   * denial, a dropped connection — was announced as recorded, and the banner
+   * that said otherwise was behind the open dossier where nobody could see it.
+   * A control that claims something was saved has to be told that it was.
+   */
+  const pushResult = useCallback(async (write: () => Promise<unknown>): Promise<string | null> => {
+    let failure: string | null = null;
+    try {
+      await write();
+      setDataError(null);
+    } catch (err: any) {
+      failure = err?.message || 'That change could not be saved.';
+      setDataError(failure);
+    } finally {
+      await refresh();
+    }
+    return failure;
+  }, [refresh]);
+
+  /**
    * Same write-then-reload path as `push`, but the failure reaches the caller.
    *
    * `push` deliberately absorbs errors so one failed field edit cannot tear
@@ -677,11 +703,12 @@ export default function App() {
     );
   };
 
-  const handleUpdateProductionNotes = (orderId: string, notes: string) => {
+  /** Resolves to null when the note is stored, or to the reason it was not. */
+  const handleUpdateProductionNotes = async (orderId: string, notes: string): Promise<string | null> => {
     if (usesSupabase) {
       const dbId = orderDbIdOrError(orderId, 'the production note');
-      if (dbId) void push(() => repo.updateProductionNotes(dbId, notes));
-      return;
+      if (!dbId) return `Order ${orderId} is not linked to a database record, so the note was not saved.`;
+      return pushResult(() => repo.updateProductionNotes(dbId, notes));
     }
     setOrders(prev =>
       prev.map(o => {
@@ -698,7 +725,28 @@ export default function App() {
         return o;
       })
     );
+    return null;
   };
+
+  /**
+   * The current version of a record an open modal was launched with.
+   *
+   * Every modal below is handed an object that was captured when it opened.
+   * On the Supabase path a write is followed by a reload of the whole dataset,
+   * which replaces `orders` and `customers` with fresh objects — but the
+   * captured snapshot is not one of them, so an open dossier kept showing the
+   * values it opened with. Changing an order's status inside the dossier wrote
+   * the new status to the database and then redrew the dropdown with the old
+   * one, which reads as the change having been rejected. Looking the record up
+   * by id at render time means what is on screen is what was just loaded; the
+   * snapshot survives only as the fallback for a record that has since left
+   * the list, so a modal never blanks mid-view.
+   */
+  const liveOrder = (snapshot: Order | null): Order | null =>
+    snapshot ? orders.find(o => o.id === snapshot.id) || snapshot : null;
+
+  const liveCustomer = (snapshot: Customer | null): Customer | null =>
+    snapshot ? customers.find(c => c.id === snapshot.id) || snapshot : null;
 
   const handleOpenPrintProductionSlip = (order: Order) => {
     setSelectedOrderForPrintSlip(order);
@@ -1081,8 +1129,8 @@ export default function App() {
           setIsOrderDetailModalOpen(false);
           setSelectedOrderForDetail(null);
         }}
-        order={selectedOrderForDetail}
-        customer={customers.find(c => c.id === selectedOrderForDetail?.customerId) || null}
+        order={liveOrder(selectedOrderForDetail)}
+        customer={customers.find(c => c.id === liveOrder(selectedOrderForDetail)?.customerId) || null}
         measurements={measurements}
         onUpdateStatus={handleUpdateOrderStatus}
         onEditOrder={(order) => {
@@ -1100,7 +1148,7 @@ export default function App() {
           setIsCustomerProfileModalOpen(false);
           setSelectedCustomerProfile(null);
         }}
-        customer={selectedCustomerProfile}
+        customer={liveCustomer(selectedCustomerProfile)}
         orders={orders}
         measurements={measurements}
         onNewOrderForCustomer={(c) => {
@@ -1142,7 +1190,7 @@ export default function App() {
           setIsProductionSlipDetailOpen(false);
           setSelectedOrderForSlipDetail(null);
         }}
-        order={selectedOrderForSlipDetail}
+        order={liveOrder(selectedOrderForSlipDetail)}
         onUpdateProductionStatus={handleUpdateProductionStatus}
         onUpdateProductionNotes={handleUpdateProductionNotes}
         onPrintProductionSlip={handleOpenPrintProductionSlip}
@@ -1160,7 +1208,7 @@ export default function App() {
           setIsPrintProductionSlipOpen(false);
           setSelectedOrderForPrintSlip(null);
         }}
-        order={selectedOrderForPrintSlip}
+        order={liveOrder(selectedOrderForPrintSlip)}
       />
 
       {/* Customer Order Bill (no financial information) */}
@@ -1170,7 +1218,7 @@ export default function App() {
           setIsOrderBillOpen(false);
           setSelectedOrderForBill(null);
         }}
-        order={selectedOrderForBill}
+        order={liveOrder(selectedOrderForBill)}
         profile={profile}
       />
 

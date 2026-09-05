@@ -29,6 +29,21 @@ VITE_SUPABASE_ANON_KEY=not-a-real-key npx vite --port=3001
 E2E_BASE_URL=http://localhost:3001 node e2e/auth-gate.mjs
 ```
 
+The two consistency suites need a dev server in **Supabase mode**, pointed at
+a host only the in-page PostgREST shim answers, and they can be pointed at a
+production build instead of the dev server:
+
+```bash
+VITE_SUPABASE_URL=https://fake-project.supabase.co \
+VITE_SUPABASE_ANON_KEY=sb_publishable_TESTKEY_0000000000000000 npx vite --port=3100
+npm run test:consistency
+npm run test:integrity
+
+# or against the built bundle
+npx vite build --outDir dist-e2e && npx vite preview --outDir dist-e2e --port 4180
+E2E_BASE_URL=http://localhost:4180/ npm run test:consistency
+```
+
 Set `CHROME_PATH` if Playwright's bundled Chromium is not where the harness
 expects it:
 
@@ -52,3 +67,17 @@ CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e
 | Storage failure | Corrupt localStorage and a full quota degrade to a warning, never a blank screen |
 | Customer bill (`order-bill.mjs`) | The blank-amount bill opens from the order flow, carries every garment with its own fabric, remarks and measurements, prints as the number of A4 sheets it reports, renders the real logo, and contains no financial term, value or currency symbol anywhere |
 | Auth gate (`auth-gate.mjs`) | An unauthenticated visitor sees the sign-in screen only: no dashboard, no records, no data written to browser storage, deep links do not bypass it |
+| Order uuid (`order-uuid.mjs`) | The real wizard places an order against a PostgREST that enforces uuid columns: a provisional `CUST-…` id never reaches `orders.customer_id` |
+| Data consistency (`consistency.mjs`) | One journey — new customer, four garments, all 41 measurements, PLACE ORDER — then every screen is compared against the rows the database actually holds: ledger, profile, orders, dossier, measurements, production slip, customer bill, and again after a hard refresh |
+| Data integrity (`integrity.mjs`) | The edges: a customer edit reaching every screen, an open dossier showing the status the database now holds, a refused write never reported as saved, a returning phone number not opening a second ledger row, a refused order never announced as placed, delete → trash → restore returning the same logical row, rapid and double clicks not duplicating an order, the client portal's blanks and zeroes, the backup file's contents, and sign out → sign in |
+
+## The PostgREST shim
+
+`fake-postgrest.js` is installed before the app boots and answers the Supabase
+host in-page. It is not a stub: it enforces the uuid columns, the foreign keys,
+`customers_phone_unique_live`, `measurements.customer_id`'s unique constraint
+and `order_items (order_id, position)`, and it serves `customers_with_stats`
+and the `trash_items` view the way the migrations define them — so the app's
+real repository code meets the same errors it would meet in production. Set
+`window.__PGREST_PERSIST` before it loads and the tables survive a reload,
+which is what makes the refresh and sign-out tests mean anything.

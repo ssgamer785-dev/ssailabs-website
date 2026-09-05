@@ -16,7 +16,9 @@
     "test:db": "./supabase/tests/run-tests.sh",
     "test:auth-gate": "node e2e/auth-gate.mjs",
     "test:bill": "node e2e/order-bill.mjs",
-    "test:order-uuid": "node e2e/order-uuid.mjs"
+    "test:order-uuid": "node e2e/order-uuid.mjs",
+    "test:consistency": "node e2e/consistency.mjs",
+    "test:integrity": "node e2e/integrity.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
