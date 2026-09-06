@@ -125,6 +125,28 @@ app.whenReady().then(async () => {
     const foreign = [...new Set(allBadges.filter(b => b !== '#' + order))];
     const expected = EXPECTED.find(e => e.order === order);
 
+    // Does the ink actually fit inside the sheet? Agreeing on a page count is
+    // not the same as fitting on it: a sheet whose flow box overflows prints
+    // the last garment's measurements underneath the footer, or off the paper
+    // entirely, and the cutter works from a number that is not there. This
+    // measures exactly what ProductionSlipPage measures, and reports the
+    // density tier the auto-fit settled on so a failure says why.
+    const sheetBoxes = await wc.executeJavaScript(`(() => {
+      const o = [...document.querySelectorAll('div.fixed.inset-0.z-50')].pop();
+      if (!o) return [];
+      return [...o.querySelectorAll('.a4-production-page')].map(s => {
+        const flow = s.firstElementChild;
+        return { tier: s.getAttribute('data-density'),
+                 over: Math.round(flow.scrollHeight - flow.clientHeight) };
+      });
+    })()`);
+    const clipped = sheetBoxes.filter(s => s.over > 1);
+    check(`slip #${order}: nothing is clipped off the sheet`,
+      clipped.length === 0,
+      clipped.length
+        ? clipped.map((s, k) => `sheet ${k + 1} over by ${s.over}px at '${s.tier}'`).join('; ')
+        : `${sheetBoxes.length} sheet(s) fit at '${sheetBoxes[0] && sheetBoxes[0].tier}'`);
+
     const pdf = await wc.printToPDF({ pageSize: 'A4', printBackground: true, margins: { marginType: 'none' } });
     const sheets = (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
     fs.writeFileSync(path.join(__dirname, '..', 'release', `verify-slip-${order}.pdf`), pdf);
