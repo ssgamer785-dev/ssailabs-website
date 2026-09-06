@@ -25,7 +25,8 @@ Windows hands the reply back to the app through a registered address:
 regencytailor://auth-callback
 ```
 
-**That address must be added to the Supabase project once:**
+**This address has been added to the Supabase project.** It is recorded here
+so that anyone re-provisioning the project knows to add it again:
 
 > Supabase Dashboard → your project → **Authentication** → **URL Configuration**
 > → **Redirect URLs** → *Add URL* → `regencytailor://auth-callback` → Save
@@ -85,8 +86,24 @@ release/win-unpacked/Regency Tailor.exe
 ### On Linux or macOS
 
 `npm run electron:pack` produces `release/win-unpacked/`, the complete Windows
-application. Wrapping it in the NSIS installer requires a 32-bit Windows loader
-(wine), so use one of the two routes above for the installer itself.
+application.
+
+Wrapping it in the NSIS installer additionally needs a 32-bit Windows loader,
+because electron-builder runs the NSIS stub through wine to sign the
+uninstaller. On Debian/Ubuntu:
+
+```
+dpkg --add-architecture i386 && apt-get update
+apt-get install -y --no-install-recommends libgd3:i386 wine32:i386
+apt-get install -y --reinstall wine        # restores /usr/bin/wine
+WINEPREFIX=/tmp/wineprefix WINEDEBUG=-all \
+  npx electron-builder --win nsis --x64 --publish never
+```
+
+This produces a genuine installer, but a Linux box cannot *run* it: a 32-bit
+wine prefix refuses an x64 payload, and Ubuntu's 32- and 64-bit wine packages
+overwrite each other's PE files, so a wow64 prefix cannot be built alongside
+the 32-bit loader NSIS needs. **Install-and-run testing requires real Windows.**
 
 ---
 
@@ -141,7 +158,8 @@ is required. It is deliberately not enabled now.
 | `electron/preload.cjs` | The only bridge to the page: six functions, no Node |
 | `electron/verify.cjs` | Boots the shell headlessly and prints its security posture — `npm run electron:verify` |
 | `electron-builder.yml` | Windows packaging |
-| `build/icon.png` | The existing brand mark, rendered square for Windows |
+| `build/icon.png` | The existing brand mark, rendered square |
+| `build/icon.ico` | The same mark as a multi-resolution Windows icon (256/128/64/48/32/24/16). NSIS reads this file directly and rejects a PNG |
 | `src/lib/desktop.ts` | The page's view of the shell; inert in a browser |
 
 The page is served from `app://regency-tailor` rather than `file://`. A

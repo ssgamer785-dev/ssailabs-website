@@ -5,6 +5,7 @@ build/
 # asset that has to travel with the repository.
 !build/
 !build/icon.png
+!build/icon.ico
 dist/
 # throwaway build the browser suites are pointed at, never deployed
 dist-e2e/

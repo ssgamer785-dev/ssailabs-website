@@ -144,7 +144,7 @@ describe('the shell is configured the way it claims to be', () => {
     expect(cfg).toContain('perMachine: false');
     expect(cfg).toContain('createDesktopShortcut: true');
     expect(cfg).toContain('createStartMenuShortcut: true');
-    expect(cfg).toContain('icon: build/icon.png');
+    expect(cfg).toContain('icon: build/icon.ico');
     expect(cfg).toContain('publish: null');
   });
 });

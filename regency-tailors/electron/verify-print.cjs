@@ -86,43 +86,91 @@ app.whenReady().then(async () => {
 
   check('the app loaded past the sign-in gate', !/Showroom sign in/i.test(await text()));
 
-  /* ------------------------------------------------- production slip ---- */
+  /* --------------------------------- production slip, every garment count */
+  // The showroom prints slips of every size; each one has to come out as the
+  // number of A4 sheets the app says it will, with its measurements on it.
   check('opened Production Slips', await clickText('/Production Slips/i'));
-  await new Promise(r => setTimeout(r, 1200));
-  check('opened the printable slip', await click('button[title="Print Production Slip"]'));
-  await new Promise(r => setTimeout(r, 2500));
-  const slipText = await text();
-  check('the slip shows its measurements', /COAT MEASUREMENTS/i.test(slipText));
+  await new Promise(r => setTimeout(r, 1400));
 
-  const slipPdf = await wc.printToPDF({ pageSize: 'A4', printBackground: true, margins: { marginType: 'none' } });
-  fs.writeFileSync(path.join(__dirname, '..', 'release', 'verify-slip.pdf'), slipPdf);
-  const slipPages = (slipPdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
-  check('the slip prints as A4 PDF', slipPdf.length > 20000, `${Math.round(slipPdf.length / 1024)} kB`);
-  check('and prints the page count it reports', slipPages >= 1, `${slipPages} page(s)`);
-  check('no showroom navigation is on the printed sheet',
-    !/Dashboard Hub|Customers Ledger|Backup & Recovery/.test(slipPdf.toString('latin1')));
+  const slipRows = await wc.executeJavaScript(
+    `document.querySelectorAll('button[title="Print Production Slip"]').length`);
+  check('a slip is listed for every seeded order', slipRows === 6, `${slipRows} rows`);
 
-  await wc.executeJavaScript(`(() => { const o=[...document.querySelectorAll('div.fixed.inset-0.z-50')].pop();
-    const b=o&&[...o.querySelectorAll('button')].pop(); if(b) b.click(); })()`);
-  await new Promise(r => setTimeout(r, 900));
+  // Read the dialog, not the page behind it: the slips list is still in the
+  // DOM and would otherwise supply the numbers being asserted on.
+  const modalText = () => wc.executeJavaScript(`(() => {
+    const o = [...document.querySelectorAll('div.fixed.inset-0.z-50')].pop();
+    return o ? o.innerText.replace(/\s+/g, ' ') : '';
+  })()`);
+
+  const EXPECTED = [
+    { garments: 1,  order: '101' },
+    { garments: 2,  order: '102' },
+    { garments: 3,  order: '103' },
+    { garments: 5,  order: '105' },
+    { garments: 8,  order: '108' },
+    { garments: 14, order: '114' }
+  ];
+
+  for (let i = 0; i < slipRows; i++) {
+    await wc.executeJavaScript(
+      `document.querySelectorAll('button[title="Print Production Slip"]')[${i}].click()`);
+    await new Promise(r => setTimeout(r, 2600));
+    const t = await modalText();
+    const order = (t.match(/Production Slip — Order #(\d+)/i) || [])[1] || '?';
+    const claimed = Number((t.match(/(\d+)\s+PAGES?/i) || [])[1] || 0);
+    const items = Number((t.match(/TOTAL ITEMS\s*(\d+)/i) || [])[1] || 0);
+    const allBadges = t.match(/#\d+/g) || [];
+    const badges = allBadges.filter(b => b === '#' + order).length;
+    const foreign = [...new Set(allBadges.filter(b => b !== '#' + order))];
+    const expected = EXPECTED.find(e => e.order === order);
+
+    const pdf = await wc.printToPDF({ pageSize: 'A4', printBackground: true, margins: { marginType: 'none' } });
+    const sheets = (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
+    fs.writeFileSync(path.join(__dirname, '..', 'release', `verify-slip-${order}.pdf`), pdf);
+
+    check(`slip #${order}: ${expected ? expected.garments : '?'} garments · ${items} items · ${claimed} page(s)`,
+      !!expected && items === expected.garments * 2,
+      `expected ${expected ? expected.garments * 2 : '?'} items`);
+    check(`slip #${order}: prints as the ${claimed} A4 sheet(s) it reports`,
+      sheets === claimed && claimed >= 1, `printed ${sheets}, ${Math.round(pdf.length / 1024)} kB`);
+    check(`slip #${order}: every garment carries the #${order} badge`,
+      badges >= expected.garments, `${badges} badges`);
+    check(`slip #${order}: carries no other order's garments`,
+      foreign.length === 0, foreign.slice(0, 4).join(', '));
+
+    await wc.executeJavaScript(`(() => { const o=[...document.querySelectorAll('div.fixed.inset-0.z-50')].pop();
+      const b=o&&[...o.querySelectorAll('button')].pop(); if(b) b.click(); })()`);
+    await new Promise(r => setTimeout(r, 900));
+  }
 
   /* ---------------------------------------------------- customer bill --- */
   check('opened the customer bill', await click('button[title="Print Customer Bill"]'));
   await new Promise(r => setTimeout(r, 2500));
-  const billText = await text();
-  check('the bill carries its disclaimer', /NOT RESPONSIBLE FOR CLOTHES AFTER 2 MONTHS/i.test(billText));
+  const billText = await wc.executeJavaScript(`(() => {
+    const o = [...document.querySelectorAll('div.fixed.inset-0.z-50')].pop();
+    return o ? o.innerText.replace(/\s+/g, ' ') : '';
+  })()`);
+  check('the bill carries its exact disclaimer',
+    /WE ARE NOT RESPONSIBLE FOR CLOTHES AFTER 2 MONTHS/i.test(billText));
   check('the bill carries no measurement block', !/COAT MEASUREMENTS/i.test(billText));
+  check('the bill carries no rupee figure', !billText.includes('₹'));
+  for (const f of ['TOTAL AMOUNT', 'ADVANCE PAID', 'BALANCE', 'PAYMENT MODE', 'PAYMENT DATE']) {
+    check(`the bill has a blank ${f} line`, new RegExp(f, 'i').test(billText));
+  }
+  check('the bill has no REMARKS column', !/\bREMARKS\b/i.test(billText));
+  const bothQr = await wc.executeJavaScript(
+    `[...document.querySelectorAll('img')].filter(i => /qr/i.test(i.src)).length`);
+  check('both QR codes are on the bill', bothQr >= 2, `${bothQr} QR images`);
 
   const billPdf = await wc.printToPDF({ pageSize: 'A4', printBackground: true, margins: { marginType: 'none' } });
   fs.writeFileSync(path.join(__dirname, '..', 'release', 'verify-bill.pdf'), billPdf);
   const billPages = (billPdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
-  check('the bill prints as A4 PDF', billPdf.length > 20000, `${Math.round(billPdf.length / 1024)} kB`);
-  check('the bill is a single A4 page', billPages === 1, `${billPages} page(s)`);
+  check('the bill is a single A4 page', billPages === 1, `${billPages} page(s), ${Math.round(billPdf.length / 1024)} kB`);
+  check('no showroom navigation is on the printed bill',
+    !/Dashboard Hub|Backup & Recovery/.test(billPdf.toString('latin1')));
 
   /* ------------------------------------------------ jsPDF export ------- */
-  // Download PDF renders the sheet to a canvas and writes it with jsPDF, which
-  // needs blob: and data: URLs. If the policy were too tight this is where it
-  // would show.
   const exported = await wc.executeJavaScript(`(async () => {
     const b = [...document.querySelectorAll('button')].find(x => /Download PDF/i.test(x.textContent || ''));
     if (!b) return 'no Download PDF button';
@@ -131,7 +179,7 @@ app.whenReady().then(async () => {
       await new Promise(r => setTimeout(r, 500));
       const t = document.body.innerText;
       if (/saved|downloaded|PDF ready|Saved/i.test(t)) return 'exported';
-      if (/could not|failed|error/i.test(t)) return 'reported failure: ' + t.replace(/\\s+/g,' ').slice(0, 120);
+      if (/could not|failed|error/i.test(t)) return 'reported failure: ' + t.replace(/\s+/g,' ').slice(0, 120);
     }
     return 'still working after 30s';
   })()`);

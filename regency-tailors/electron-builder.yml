@@ -48,7 +48,11 @@ win:
     - target: nsis
       arch:
         - x64
-  icon: build/icon.png
+  # A real multi-resolution .ico: 256/128/64/48/32/24/16, rendered from the
+  # same brand mark. NSIS reads this file directly and rejects a PNG, and
+  # Windows picks the size it needs for the taskbar, Start Menu and Explorer
+  # rather than downscaling one bitmap for all of them.
+  icon: build/icon.ico
   # Windows 10 and 11, 64-bit. No other architecture is built.
   artifactName: ${productName} Setup ${version}.${ext}
   # There is no code-signing certificate for this project yet; see
@@ -67,9 +71,9 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: Regency Tailor
   menuCategory: false
-  installerIcon: build/icon.png
-  uninstallerIcon: build/icon.png
-  installerHeaderIcon: build/icon.png
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
   # The uninstaller removes the application. Showroom records live in Supabase,
   # so nothing a customer needs is stored on this machine to lose.
   deleteAppDataOnUninstall: false
