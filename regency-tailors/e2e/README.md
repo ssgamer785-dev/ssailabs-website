@@ -69,7 +69,22 @@ CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e
 | Auth gate (`auth-gate.mjs`) | An unauthenticated visitor sees the sign-in screen only: no dashboard, no records, no data written to browser storage, deep links do not bypass it |
 | Order uuid (`order-uuid.mjs`) | The real wizard places an order against a PostgREST that enforces uuid columns: a provisional `CUST-…` id never reaches `orders.customer_id` |
 | Data consistency (`consistency.mjs`) | One journey — new customer, four garments, all 41 measurements, PLACE ORDER — then every screen is compared against the rows the database actually holds: ledger, profile, orders, dossier, measurements, production slip, customer bill, and again after a hard refresh |
+| Trash permanent delete (`integrity.mjs`) | The red bin button removes the whole tree the record owns and nothing else: a customer takes their orders, garment lines, payments, fittings, measurements and measurement values with them; an order takes its own children but never its customer; a refused purge deletes nothing and says so; and none of it comes back on a refresh |
 | Data integrity (`integrity.mjs`) | The edges: a customer edit reaching every screen, an open dossier showing the status the database now holds, a refused write never reported as saved, a returning phone number not opening a second ledger row, a refused order never announced as placed, delete → trash → restore returning the same logical row, rapid and double clicks not duplicating an order, the client portal's blanks and zeroes, the backup file's contents, and sign out → sign in |
+
+## The database suites
+
+`npm run test:db` boots a throwaway PostgreSQL cluster, applies the auth stub
+and every migration in order, and runs `supabase/tests/1*_test_*.sql`. It needs
+the PostgreSQL server binaries (`PGBIN=/usr/lib/postgresql/16/bin`).
+
+| File | What it proves |
+| --- | --- |
+| `10_test_rls.sql` | One predicate guards every table; anon and an unauthorised account get nothing |
+| `11_test_integrity.sql` | Constraints, generated columns, sequences and triggers behave as the app assumes |
+| `12_test_backup_restore.sql` | Export/restore, hostile payloads, settings handling, audit log never restored |
+| `13_test_purge_trash.sql` | Permanent deletion: the whole owned tree, nothing else, all-or-nothing, admin only, and absent from a later export |
+| `14_test_backup_roundtrip.sql` | A full tree out and back with its uuids, relationships, soft-delete state, measurements, payments and sequence intact — and untouched when a payload is bad |
 
 ## The PostgREST shim
 
@@ -77,7 +92,8 @@ CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e
 host in-page. It is not a stub: it enforces the uuid columns, the foreign keys,
 `customers_phone_unique_live`, `measurements.customer_id`'s unique constraint
 and `order_items (order_id, position)`, and it serves `customers_with_stats`
-and the `trash_items` view the way the migrations define them — so the app's
-real repository code meets the same errors it would meet in production. Set
+and the `trash_items` view the way the migrations define them, and it answers
+`rpc/purge_trash_entry` the way the migration does — so the app's real
+repository code meets the same errors it would meet in production. Set
 `window.__PGREST_PERSIST` before it loads and the tables survive a reload,
 which is what makes the refresh and sign-out tests mean anything.

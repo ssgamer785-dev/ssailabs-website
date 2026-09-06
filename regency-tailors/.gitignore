@@ -1,6 +1,8 @@
 node_modules/
 build/
 dist/
+# throwaway build the browser suites are pointed at, never deployed
+dist-e2e/
 coverage/
 .DS_Store
 *.log

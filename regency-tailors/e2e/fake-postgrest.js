@@ -166,6 +166,66 @@
 
     if (u.pathname.startsWith('/auth/v1/')) return ok({});
 
+    // The two database functions the app calls. `purge_trash_entry` mirrors
+    // the migration: an allow-list, trash-only, and the owned tree removed in
+    // foreign-key order — including the ON DELETE RESTRICT on orders.customer_id
+    // that made deleting the parent row alone fail in production.
+    if (u.pathname === '/rest/v1/rpc/purge_trash_entry') {
+      const type = body?.p_entity_type;
+      const id = body?.p_entity_id;
+      if (!['Customer', 'Order', 'Measurement', 'Worker'].includes(type)) {
+        return err('22023', `Unknown record type "${type}" — nothing was deleted`);
+      }
+      if (!UUID_RE.test(String(id || ''))) return err('22004', 'A record id is required to delete permanently');
+
+      const counts = { entity_type: type, entity_id: id };
+      const drop = (table, pred) => {
+        const before = db[table].length;
+        db[table] = db[table].filter(r => !pred(r));
+        return before - db[table].length;
+      };
+
+      if (type === 'Customer') {
+        const c = db.customers.find(r => r.id === id && r.deleted_at);
+        if (!c) return err('P0002', 'That customer is not in the trash, so nothing was deleted');
+        const orderIds = db.orders.filter(o => o.customer_id === id).map(o => o.id);
+        const measIds = db.measurements.filter(m => m.customer_id === id).map(m => m.id);
+        counts.measurement_values = drop('measurement_values', r => measIds.includes(r.measurement_id));
+        counts.measurements       = drop('measurements',       r => r.customer_id === id);
+        counts.order_payments     = drop('order_payments',     r => orderIds.includes(r.order_id));
+        counts.order_items        = drop('order_items',        r => orderIds.includes(r.order_id));
+        counts.fittings           = drop('fittings',           r => orderIds.includes(r.order_id));
+        counts.orders             = drop('orders',             r => r.customer_id === id);
+        counts.customers          = drop('customers',          r => r.id === id);
+        counts.title = c.name;
+      } else if (type === 'Order') {
+        const o = db.orders.find(r => r.id === id && r.deleted_at);
+        if (!o) return err('P0002', 'That order is not in the trash, so nothing was deleted');
+        let untagged = 0;
+        for (const m of db.measurements) if (m.last_order_id === id) { m.last_order_id = null; untagged++; }
+        counts.measurements_untagged = untagged;
+        counts.order_payments = drop('order_payments', r => r.order_id === id);
+        counts.order_items    = drop('order_items',    r => r.order_id === id);
+        counts.fittings       = drop('fittings',       r => r.order_id === id);
+        counts.orders         = drop('orders',         r => r.id === id);
+        counts.title = `Order ${o.order_number}`;
+      } else if (type === 'Measurement') {
+        const m = db.measurements.find(r => r.id === id && r.deleted_at);
+        if (!m) return err('P0002', 'That measurement profile is not in the trash, so nothing was deleted');
+        counts.measurement_values = drop('measurement_values', r => r.measurement_id === id);
+        counts.measurements       = drop('measurements',       r => r.id === id);
+        counts.title = 'Measurement profile';
+      } else {
+        const w = db.workers.find(r => r.id === id && r.deleted_at);
+        if (!w) return err('P0002', 'That artisan record is not in the trash, so nothing was deleted');
+        counts.workers = drop('workers', r => r.id === id);
+        counts.title = w.name;
+      }
+      window.__PGREST.writes.push({ table: 'rpc:purge_trash_entry', method: 'POST', body });
+      persist();
+      return ok(counts);
+    }
+
     const table = u.pathname.replace('/rest/v1/', '');
     const select = u.searchParams.get('select') || '*';
     const preds = predicates(u.searchParams);

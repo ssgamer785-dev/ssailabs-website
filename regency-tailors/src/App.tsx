@@ -172,16 +172,26 @@ export default function App() {
    * Runs a database write, then re-reads. On failure the message is surfaced
    * and the screen is resynced from the server, so the UI never silently keeps
    * a change the database rejected.
+   *
+   * The order of those two matters, and used to be wrong. The failure was
+   * written to the banner and then the reload ran in a `finally`; the reload
+   * succeeds — it is only a read, and nothing is wrong with the connection —
+   * so it reported its own success by clearing the banner, taking the write's
+   * error with it. Deleting a customer whose foreign key refused, changing a
+   * status RLS would not allow, emptying the trash: every one of them failed
+   * silently, or flashed for as long as nine queries took and then vanished.
+   * The reload still runs and still reports a genuine load failure; it just no
+   * longer gets to overwrite the message about the write that failed.
    */
   const push = useCallback(async (write: () => Promise<unknown>) => {
+    let failure: string | null = null;
     try {
       await write();
-      setDataError(null);
     } catch (err: any) {
-      setDataError(err?.message || 'That change could not be saved.');
-    } finally {
-      await refresh();
+      failure = err?.message || 'That change could not be saved.';
     }
+    await refresh();
+    if (failure) setDataError(failure);
   }, [refresh]);
 
   /**
@@ -200,13 +210,11 @@ export default function App() {
     let failure: string | null = null;
     try {
       await write();
-      setDataError(null);
     } catch (err: any) {
       failure = err?.message || 'That change could not be saved.';
-      setDataError(failure);
-    } finally {
-      await refresh();
     }
+    await refresh();
+    if (failure) setDataError(failure);
     return failure;
   }, [refresh]);
 
@@ -221,14 +229,18 @@ export default function App() {
    * "Backup restored successfully".
    */
   const pushOrThrow = useCallback(async (write: () => Promise<unknown>) => {
+    let failure: Error | null = null;
     try {
       await write();
-      setDataError(null);
     } catch (err: any) {
-      setDataError(err?.message || 'That change could not be saved.');
-      throw err instanceof Error ? err : new Error(String(err?.message || err));
-    } finally {
-      await refresh();
+      failure = err instanceof Error ? err : new Error(String(err?.message || err));
+    }
+    await refresh();
+    if (failure) {
+      // Same ordering as `push`: the reload runs, and then the failure gets
+      // the last word on the banner rather than being cleared by it.
+      setDataError(failure.message || 'That change could not be saved.');
+      throw failure;
     }
   }, [refresh]);
 

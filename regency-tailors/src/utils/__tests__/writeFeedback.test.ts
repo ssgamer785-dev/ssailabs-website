@@ -78,6 +78,39 @@ describe('"Notes Saved" means the database saved it', () => {
   });
 });
 
+describe('a failed write keeps its error banner', () => {
+  const app = read('App.tsx');
+
+  /**
+   * Every write helper reloads the dataset afterwards. That reload is only a
+   * read, so it almost always succeeds — and it used to report its success by
+   * clearing the banner, erasing the message about the write that had just
+   * failed. A refused permanent delete, a refused status change and a refused
+   * trash restore all failed silently. The reload still runs and still reports
+   * a genuine load failure; it just no longer overwrites the write's error.
+   */
+  for (const helper of ['push', 'pushResult', 'pushOrThrow']) {
+    it(`${helper} lets the failure outlive the reload`, () => {
+      const start = app.indexOf(`const ${helper} = useCallback`);
+      expect(start, `${helper} not found`).toBeGreaterThan(-1);
+      const body = app.slice(start, app.indexOf('}, [refresh]);', start));
+
+      // The reload must not sit in a finally that runs after the error is set.
+      expect(body, `${helper} still clears the error in a finally`).not.toMatch(/finally\s*\{/);
+      // And the failure is re-asserted after it.
+      expect(body).toMatch(/await refresh\(\);[\s\S]{0,220}if \(failure\)/);
+      // Success is still allowed to clear the banner, via refresh itself.
+      expect(body).not.toMatch(/await write\(\);\s*\n\s*setDataError\(null\)/);
+    });
+  }
+
+  it('refresh is still what clears the banner on a clean load', () => {
+    const start = app.indexOf('const refresh = useCallback');
+    const body = app.slice(start, app.indexOf('}, [applyDataset, displayName]);', start));
+    expect(body).toContain('setDataError(null)');
+  });
+});
+
 describe('PLACE ORDER cannot be submitted twice', () => {
   const wizard = read('components/modals/OrderModal.tsx');
 

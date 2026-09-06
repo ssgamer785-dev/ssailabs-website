@@ -54,7 +54,12 @@ export async function loadDataset(activeUser: string): Promise<ShowroomDataset> 
 
   const [customersRes, ordersRes, measurementsRes, fittingsRes, workersRes, invoicesRes, expensesRes, trashRes, settingsRes] =
     await Promise.all([
-      db.from('customers_with_stats').select('*').is('deleted_at', null).order('created_at', { ascending: false }),
+      // Every customer, live and binned. The ledger is filtered below; the
+      // binned ones are kept only so that records which name a customer can
+      // still show whose they are — a measurement profile whose customer had
+      // been moved to the trash used to render with an empty name and phone,
+      // because the lookup this builds had no row to find.
+      db.from('customers_with_stats').select('*').order('created_at', { ascending: false }),
       db.from('orders').select('*, order_items(*), order_payments(*)').is('deleted_at', null).order('order_number', { ascending: false }),
       db.from('measurements').select('*, measurement_values(*)').is('deleted_at', null),
       db.from('fittings').select('*').order('scheduled_date', { ascending: true }),
@@ -75,8 +80,11 @@ export async function loadDataset(activeUser: string): Promise<ShowroomDataset> 
   fail('Could not load trash', trashRes.error);
   fail('Could not load showroom settings', settingsRes.error);
 
-  const customers = (customersRes.data || []).map(r => toCustomer(r as CustomerRow));
-  const byCustomerId = new Map(customers.map(c => [c.id, c]));
+  const allCustomers = ((customersRes.data || []) as CustomerRow[])
+    .map(row => ({ row, customer: toCustomer(row) }));
+  const byCustomerId = new Map(allCustomers.map(c => [c.customer.id, c.customer]));
+  // The ledger, the dashboard and every picker show live customers only.
+  const customers = allCustomers.filter(c => !c.row.deleted_at).map(c => c.customer);
 
   const orders = (ordersRes.data || []).map(r => toOrder(r as unknown as OrderRow));
   const byOrderDbId = new Map(orders.map(o => [o.dbId!, o]));
@@ -464,20 +472,70 @@ export async function restoreTrashItem(item: TrashItem): Promise<void> {
   fail('Could not restore the record', error);
 }
 
-/** Permanent removal. Restricted to records already in trash so a live record
- *  can never be destroyed by this path. */
-export async function purgeTrashItem(item: TrashItem): Promise<void> {
+/**
+ * Permanent removal of one trashed record and everything it owns.
+ *
+ * This used to delete the parent row straight from here:
+ *
+ *     from('customers').delete().eq('id', dbId).not('deleted_at','is',null)
+ *
+ * `orders.customer_id` is ON DELETE RESTRICT, so Postgres refused with
+ * `orders_customer_id_fkey` and no customer who had ever placed an order could
+ * be emptied from the trash. Loosening the constraint or switching it to
+ * CASCADE would have made the error go away and taken the protection with it.
+ *
+ * The work belongs in the database instead: `purge_trash_entry` deletes the
+ * record's own orders, garment lines, payments, fittings, measurements and
+ * measurement values in foreign-key order, inside one transaction, and refuses
+ * anything that is not already in the trash. The entity type is checked
+ * against a four-value allow-list inside the function — this call passes a
+ * label, never a table name — and authorisation is decided there by
+ * `is_authorized_admin()`, not here.
+ */
+export async function purgeTrashItem(item: TrashItem): Promise<PurgeResult> {
   const db = requireSupabase();
-  const table = TRASH_TABLES[item.itemType];
+  const entityType = TRASH_TABLES[item.itemType] ? item.itemType : undefined;
   const dbId = (item.originalData as { dbId?: string } | undefined)?.dbId;
-  if (!table || !dbId) throw new Error('This trash entry cannot be deleted automatically.');
-  const { error } = await db.from(table).delete().eq('id', dbId).not('deleted_at', 'is', null);
+  if (!entityType || !dbId) throw new Error('This trash entry cannot be deleted automatically.');
+
+  const { data, error } = await db.rpc('purge_trash_entry', {
+    p_entity_type: entityType,
+    p_entity_id: dbId
+  });
   fail('Could not permanently delete the record', error);
+  return (data || {}) as PurgeResult;
 }
 
+/** What the database reports it removed, so the screen can say so honestly. */
+export interface PurgeResult {
+  entity_type?: string;
+  title?: string;
+  customers?: number;
+  orders?: number;
+  order_items?: number;
+  order_payments?: number;
+  fittings?: number;
+  measurements?: number;
+  measurement_values?: number;
+  workers?: number;
+}
+
+/**
+ * Empties the whole bin, one entry at a time.
+ *
+ * Each entry is its own transaction, so a record that cannot be purged stops
+ * the run and reports itself rather than leaving a half-deleted tree behind:
+ * everything before it is gone, everything after it is untouched, and the
+ * message names the one that failed.
+ */
 export async function emptyTrash(items: TrashItem[]): Promise<void> {
   for (const item of items) {
-    await purgeTrashItem(item);
+    try {
+      await purgeTrashItem(item);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`Stopped while emptying the trash — "${item.title}" could not be deleted: ${reason}`);
+    }
   }
 }
 

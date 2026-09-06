@@ -395,7 +395,7 @@ const tab = async (page, name) => {
   const orderNo = String(start.orders[0].order_number);
 
   await tab(page, /Showroom Orders/i);
-  await page.locator('button[title*="Delete" i], button[title*="Trash" i]').first().click();
+  await page.locator('button[title="Delete Order"]').first().click();
   await page.waitForTimeout(2200);
 
   const afterDel = await dbOf(page);
@@ -730,6 +730,279 @@ const tab = async (page, name) => {
     D.customers.length === 1 && D.orders.length === 1,
     `${D.customers.length} customers, ${D.orders.length} orders`);
   check('no uncaught page error across sign out and back in', pageErrors.length === 0, pageErrors.join(' | '));
+  await browser.close();
+}
+
+/* ==================================================================== */
+/* 11. TRASH — PERMANENT DELETE, through the real red button            */
+/* ==================================================================== */
+{
+  section('TRASH → PERMANENT DELETE — the whole tree, or nothing');
+  const { browser, ctx, page, pageErrors } = await boot({ persist: true });
+  // Customer A with two orders, garment lines, a payment, a fitting and a
+  // measurement profile. Customer B must survive all of it.
+  await ctx.addInitScript(() => {
+    const w = setInterval(() => {
+      if (!window.__PGREST) return;
+      clearInterval(w);
+      const D = window.__PGREST.db;
+      // This script runs on every navigation; the reload test needs the tables
+      // as the app left them, not seeded afresh.
+      if (D.customers.length || D.orders.length) return;
+      const A = '00000000-0000-4000-8000-0000000000aa';
+      const B = '00000000-0000-4000-8000-0000000000bb';
+      const A1 = '00000000-0000-4000-8000-0000000000a1';
+      const A2 = '00000000-0000-4000-8000-0000000000a2';
+      const B1 = '00000000-0000-4000-8000-0000000000b1';
+      const MA = '00000000-0000-4000-8000-0000000000ma'.replace('m', '0');
+      const MB = '00000000-0000-4000-8000-0000000000mb'.replace('m', '0');
+      const cust = (id, name, phone) => ({ id, name, phone, phone_normalized: phone,
+        city: 'Jalandhar', address: 'Model Town', email: null, deleted_at: null,
+        created_at: new Date().toISOString() });
+      const ord = (id, customer_id, n, name, phone) => ({ id, customer_id, order_number: n,
+        status: 'New', production_status: 'New', production_notes: '', customer_name: name,
+        customer_phone: phone, order_date: '2026-09-01', delivery_date: '2026-09-25',
+        deleted_at: null, subtotal: 0, discount: 0, tax_amount: 0, total_amount: 0,
+        advance_paid: 0, balance_due: 0,
+        measurements_snapshot: { unit: 'inches', coat: { length: '31.5', chest: '40' } } });
+      D.customers.push(cust(A, 'Purge Customer A', '9840000001'), cust(B, 'Keep Customer B', '9840000002'));
+      D.orders.push(ord(A1, A, 71, 'Purge Customer A', '9840000001'),
+                    ord(A2, A, 72, 'Purge Customer A', '9840000001'),
+                    ord(B1, B, 73, 'Keep Customer B', '9840000002'));
+      D.order_items.push(
+        { id: '00000000-0000-4000-8000-0000000000i1', order_id: A1, position: 1, garment_type: 'Coat', quantity: 2, price: 0 },
+        { id: '00000000-0000-4000-8000-0000000000i2', order_id: A1, position: 2, garment_type: 'Pant', quantity: 2, price: 0 },
+        { id: '00000000-0000-4000-8000-0000000000i3', order_id: A2, position: 1, garment_type: 'Shirt', quantity: 1, price: 0 },
+        { id: '00000000-0000-4000-8000-0000000000i4', order_id: B1, position: 1, garment_type: 'Kurta Pajama', quantity: 1, price: 0 });
+      D.order_payments.push({ id: '00000000-0000-4000-8000-0000000000p1', order_id: A1, amount: 5000, method: 'Cash' });
+      D.fittings.push({ id: '00000000-0000-4000-8000-0000000000f1', order_id: A1, scheduled_date: '2026-09-20', status: 'Scheduled' });
+      D.measurements.push(
+        { id: MA, customer_id: A, unit: 'inches', last_order_id: A1, deleted_at: null, last_updated: '2026-09-01' },
+        { id: MB, customer_id: B, unit: 'inches', last_order_id: B1, deleted_at: null, last_updated: '2026-09-01' });
+      D.measurement_values.push(
+        { id: '00000000-0000-4000-8000-0000000000v1', measurement_id: MA, garment_category: 'coat', data: { chest: '40' } },
+        { id: '00000000-0000-4000-8000-0000000000v2', measurement_id: MA, garment_category: 'pant', data: { waist: '34' } },
+        { id: '00000000-0000-4000-8000-0000000000v3', measurement_id: MB, garment_category: 'kurta', data: { chest: '38' } });
+    }, 0);
+  });
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(2200);
+
+  const A = '00000000-0000-4000-8000-0000000000aa';
+  const B = '00000000-0000-4000-8000-0000000000bb';
+
+  // Move customer A to the bin through the ledger's own delete button.
+  await tab(page, /Customers Ledger/i);
+  const row = page.locator('tr').filter({ hasText: 'Purge Customer A' }).first();
+  await row.locator('button[title="Move Customer to Trash"]').first().click();
+  await page.waitForTimeout(600);
+  await page.getByRole('button', { name: /^Move to Trash$/ }).click();
+  await page.waitForTimeout(2200);
+
+  const binned = await dbOf(page);
+  check('the ledger delete only soft-deleted the customer',
+    binned.customers.find(c => c.id === A)?.deleted_at != null && binned.customers.length === 2);
+  check('their orders are still on disk while the record is in the bin',
+    binned.orders.filter(o => o.customer_id === A).length === 2);
+
+  const ledgerAfterBin = await tab(page, /Customers Ledger/i);
+  check('the binned customer left the ledger', !ledgerAfterBin.includes('Purge Customer A'));
+  check('the other customer is still in the ledger', ledgerAfterBin.includes('Keep Customer B'));
+
+  // Now the red permanent-delete button in Trash.
+  const trashTxt = await tab(page, /Trash/i);
+  check('the customer is listed in Trash', /Purge Customer A/i.test(trashTxt), trashTxt.slice(0, 200));
+
+  const before = await dbOf(page);
+  await page.locator('button[title="Delete Permanently"]').first().click();
+  await page.waitForTimeout(2600);
+
+  const D = await dbOf(page);
+  check('customer A is gone from the database', !D.customers.some(c => c.id === A),
+    D.customers.map(c => c.name).join(', '));
+  check('both of their orders are gone', D.orders.filter(o => o.customer_id === A).length === 0,
+    String(D.orders.length));
+  check('their garment lines are gone',
+    D.order_items.filter(i => !D.orders.some(o => o.id === i.order_id)).length === 0 &&
+    D.order_items.length === 1, String(D.order_items.length));
+  check('their payment is gone', D.order_payments.length === 0, String(D.order_payments.length));
+  check('their fitting is gone', D.fittings.length === 0, String(D.fittings.length));
+  check('their measurement profile is gone', D.measurements.filter(m => m.customer_id === A).length === 0);
+  check('their measurement values are gone', D.measurement_values.length === 1,
+    String(D.measurement_values.length));
+  check('NO ORPHANS: every order still has a customer',
+    D.orders.every(o => D.customers.some(c => c.id === o.customer_id)));
+  check('NO ORPHANS: every garment line still has an order',
+    D.order_items.every(i => D.orders.some(o => o.id === i.order_id)));
+  check('NO ORPHANS: every measurement value still has a profile',
+    D.measurement_values.every(v => D.measurements.some(m => m.id === v.measurement_id)));
+
+  check('customer B survived untouched', D.customers.some(c => c.id === B));
+  check('order B1 survived', D.orders.filter(o => o.customer_id === B).length === 1);
+  check('B keeps their garment line and measurements',
+    D.order_items.length === 1 && D.measurement_values.length === 1);
+  check('nothing was deleted that the purge did not own',
+    before.customers.length - D.customers.length === 1);
+
+  const trashAfter = await tab(page, /Trash/i);
+  check('the entry has left the Trash screen', !/Purge Customer A/i.test(trashAfter));
+  const ledgerAfter = await tab(page, /Customers Ledger/i);
+  check('and does not come back to the ledger', !ledgerAfter.includes('Purge Customer A'));
+  const ordersAfter = await tab(page, /Showroom Orders/i);
+  check('and their orders are gone from the orders screen',
+    !ordersAfter.includes('Purge Customer A'), ordersAfter.slice(0, 160));
+  const searchBox = page.getByPlaceholder(/Search/i).first();
+  if (await searchBox.count()) {
+    await searchBox.fill('Purge Customer A');
+    await page.waitForTimeout(900);
+    // The typed text is echoed by the search field itself, so the assertion is
+    // on the result list rather than the page.
+    const hits = await page.evaluate(() => {
+      const box = document.querySelector('input[placeholder*="Search" i]');
+      const panel = box && box.closest('div')?.parentElement;
+      return panel ? panel.innerText : '';
+    });
+    check('and search returns no result for them',
+      !/Purge Customer A/.test(hits.replace(/Purge Customer A(?=\s*$)/, '')) ||
+      /no (result|match)/i.test(hits), hits.replace(/\s+/g, ' ').slice(0, 140));
+    await searchBox.fill('');
+    await page.waitForTimeout(400);
+  }
+
+  // Refresh must not resurrect anything.
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(2200);
+  const afterReload = await tab(page, /Customers Ledger/i);
+  check('a browser refresh does not bring the deleted customer back',
+    !afterReload.includes('Purge Customer A') && afterReload.includes('Keep Customer B'));
+
+  check('no uncaught page error through the whole purge', pageErrors.length === 0, pageErrors.join(' | '));
+  await browser.close();
+}
+
+{
+  section('TRASH → PERMANENT DELETE of an order leaves the customer alone');
+  const { browser, ctx, page, pageErrors } = await boot();
+  await ctx.addInitScript(SEED);
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(2200);
+
+  const start = await dbOf(page);
+  const orderUuid = start.orders[0].id;
+  const customerUuid = start.customers[0].id;
+
+  await tab(page, /Showroom Orders/i);
+  await page.locator('button[title="Delete Order"]').first().click();
+  await page.waitForTimeout(2200);
+  await tab(page, /Trash/i);
+  await page.locator('button[title="Delete Permanently"]').first().click();
+  await page.waitForTimeout(2600);
+
+  const D = await dbOf(page);
+  check('the order is gone', !D.orders.some(o => o.id === orderUuid), String(D.orders.length));
+  check('its garment lines are gone', D.order_items.filter(i => i.order_id === orderUuid).length === 0);
+  check('THE CUSTOMER IS STILL THERE', D.customers.some(c => c.id === customerUuid),
+    D.customers.map(c => c.name).join(', '));
+  check('the customer keeps their measurement profile',
+    D.measurements.filter(m => m.customer_id === customerUuid).length === 1);
+  check('and its values', D.measurement_values.length === 1);
+  check('the profile no longer points at the deleted order',
+    D.measurements.every(m => m.last_order_id !== orderUuid));
+  const ledger = await tab(page, /Customers Ledger/i);
+  check('the customer is still in the ledger', ledger.includes('Ranjit Sahota'));
+  check('no uncaught page error', pageErrors.length === 0, pageErrors.join(' | '));
+  await browser.close();
+}
+
+{
+  section('TRASH → a refused permanent delete says so and deletes nothing');
+  const { browser, ctx, page, pageErrors } = await boot();
+  await ctx.addInitScript(SEED);
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(2200);
+
+  await tab(page, /Showroom Orders/i);
+  await page.locator('button[title="Delete Order"]').first().click();
+  await page.waitForTimeout(2200);
+
+  // The database refuses the purge, the way an unauthorised account would be.
+  await page.evaluate(() => {
+    const rf = window.fetch;
+    window.fetch = async (i, init = {}) => {
+      const url = typeof i === 'string' ? i : (i.url || String(i));
+      if (/rpc\/purge_trash_entry/.test(url)) {
+        return new Response(JSON.stringify({
+          message: 'Not authorised to permanently delete showroom records',
+          code: '42501', details: null, hint: null
+        }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+      }
+      return rf(i, init);
+    };
+  });
+
+  const before = await dbOf(page);
+  await tab(page, /Trash/i);
+  await page.locator('button[title="Delete Permanently"]').first().click();
+  await page.waitForTimeout(2600);
+
+  const after = await dbOf(page);
+  check('a refused purge deleted nothing at all',
+    after.orders.length === before.orders.length &&
+    after.order_items.length === before.order_items.length &&
+    after.customers.length === before.customers.length);
+  check('the entry is still in the trash', after.orders.some(o => o.deleted_at));
+  await page.waitForTimeout(1200);
+  const body = await txt(page);
+  check('and the screen says the delete failed',
+    /DATA NOT SAVED|not authoris|could not permanently delete/i.test(body),
+    body.match(/.{0,30}(DATA NOT SAVED|not authoris|could not permanently delete).{0,70}/i)?.[0]
+      || body.slice(0, 200));
+  check('no uncaught page error', pageErrors.length === 0, pageErrors.join(' | '));
+  await browser.close();
+}
+
+/* ==================================================================== */
+/* 12. A BINNED CUSTOMER — what each screen says, and what it promises  */
+/* ==================================================================== */
+{
+  section('BINNED CUSTOMER — the dialog must describe what actually happens');
+  const { browser, ctx, page, pageErrors } = await boot();
+  await ctx.addInitScript(SEED);
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(2200);
+
+  await tab(page, /Customers Ledger/i);
+  await page.locator('tr').filter({ hasText: 'Ranjit Sahota' }).first()
+    .locator('button[title="Move Customer to Trash"]').click();
+  await page.waitForTimeout(600);
+  const dialog = (await page.locator('div.fixed.inset-0.z-50').innerText()).replace(/\s+/g, ' ');
+  check('the dialog does not promise that related records go to the trash too',
+    !/related records will be moved to Trash/i.test(dialog), dialog.slice(0, 150));
+  check('it says the customer leaves the ledger', /stop appearing in the Customers Ledger/i.test(dialog));
+  check('and that their orders stay in the workshop', /orders stay in the workshop/i.test(dialog));
+
+  await page.getByRole('button', { name: /^Move to Trash$/ }).click();
+  await page.waitForTimeout(2200);
+
+  const D = await dbOf(page);
+  check('only the customer row was soft-deleted', !!D.customers[0].deleted_at && !D.orders[0].deleted_at);
+  check('nothing was hard-deleted', D.customers.length === 1 && D.orders.length === 1);
+
+  const ledger = await tab(page, /Customers Ledger/i);
+  check('the ledger no longer lists them', !ledger.includes('Ranjit Sahota'));
+  const orders = await tab(page, /Showroom Orders/i);
+  check('their order is still in the workshop queue, as the dialog now says',
+    orders.includes('Ranjit Sahota'));
+
+  // The lookup used to be built from live customers only, so a measurement
+  // profile belonging to a binned customer rendered with no name at all.
+  const meas = await tab(page, /Measurements Entry/i);
+  check('their measurement profile still shows whose it is',
+    meas.includes('Ranjit Sahota'), meas.slice(0, 160));
+
+  const trash = await tab(page, /Trash/i);
+  check('and the customer is in the trash, restorable', /Ranjit Sahota/.test(trash));
+  check('no uncaught page error', pageErrors.length === 0, pageErrors.join(' | '));
   await browser.close();
 }
 

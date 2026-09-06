@@ -356,7 +356,19 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
             </div>
 
             <p className="text-xs text-[#6E6454] leading-relaxed">
-              This customer (<span className="font-semibold text-[#071426]">{customerToDelete.name}</span>) and related records will be moved to Trash. You can restore them anytime from the Trash section.
+              {/*
+                What this actually does, rather than what it used to claim.
+                Moving a customer to the trash sets `deleted_at` on their own
+                record and nothing else: their orders stay in the workshop
+                queue and on the production slips, because those garments are
+                still being made. The old wording promised that "related
+                records" went to the trash too, which left the owner expecting
+                the orders to disappear from Showroom Orders — and they do not.
+              */}
+              <span className="font-semibold text-[#071426]">{customerToDelete.name}</span> will be
+              moved to Trash and will stop appearing in the Customers Ledger. Their orders stay in
+              the workshop queue and nothing is deleted — you can restore the customer at any time
+              from the Trash section.
             </p>
 
             <div className="flex items-center justify-end gap-3 pt-2">
