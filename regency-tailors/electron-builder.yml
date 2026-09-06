@@ -1,0 +1,82 @@
+# =========================================================================
+# Regency Tailor — Windows desktop packaging
+#
+# The same build the website serves, wrapped in a window. `dist/` is produced
+# by `npm run build` and copied in whole; nothing about the web build changes
+# for the desktop, and there is no second bundle to keep in step.
+#
+# Build:  npm run build && npm run electron:build:win
+# Output: release/Regency Tailor Setup <version>.exe
+# =========================================================================
+appId: com.ssailabs.regencytailor
+productName: Regency Tailor
+copyright: Regency Tailor
+
+directories:
+  output: release
+  buildResources: build
+
+# Only the shell. The renderer is added below as an unpacked resource so that
+# `app://` can serve it as ordinary files rather than reading through an asar.
+#
+# node_modules is excluded deliberately. electron-builder ships production
+# dependencies by default, and this project's are all the renderer's — React,
+# Vite, jsPDF and the rest — which Vite has already bundled into dist. Left in,
+# the installer carried a second uncompiled copy of them plus google-auth-library
+# and @google/genai, none of which the main process requires. It requires
+# nothing but Electron.
+files:
+  - electron/main.cjs
+  - electron/preload.cjs
+  - package.json
+  - '!node_modules/**/*'
+
+extraResources:
+  - from: dist
+    to: app
+
+# The main process is tiny and the renderer is already minified by Vite.
+asar: true
+compression: normal
+
+# Nothing in this project needs a native module, so there is nothing to rebuild.
+npmRebuild: false
+buildDependenciesFromSource: false
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.png
+  # Windows 10 and 11, 64-bit. No other architecture is built.
+  artifactName: ${productName} Setup ${version}.${ext}
+  # There is no code-signing certificate for this project yet; see
+  # docs/DESKTOP.md for what SmartScreen does on first run and how to add one.
+  signAndEditExecutable: true
+
+nsis:
+  # A real installer the counter hand can step through, not a silent one-click
+  # that drops the app somewhere they will never find it.
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  # Per-user by default: no administrator prompt, which matters on a laptop
+  # where the showroom owner is not the machine's administrator.
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Regency Tailor
+  menuCategory: false
+  installerIcon: build/icon.png
+  uninstallerIcon: build/icon.png
+  installerHeaderIcon: build/icon.png
+  # The uninstaller removes the application. Showroom records live in Supabase,
+  # so nothing a customer needs is stored on this machine to lose.
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+  # An installer that can be run again over the top to upgrade in place.
+  differentialPackage: false
+
+# No publish provider: this project has no update server, and adding one is a
+# deliberate decision rather than a default. See docs/DESKTOP.md.
+publish: null

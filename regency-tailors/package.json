@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -18,7 +18,11 @@
     "test:bill": "node e2e/order-bill.mjs",
     "test:order-uuid": "node e2e/order-uuid.mjs",
     "test:consistency": "node e2e/consistency.mjs",
-    "test:integrity": "node e2e/integrity.mjs"
+    "test:integrity": "node e2e/integrity.mjs",
+    "electron:dev": "npm run build && electron electron/main.cjs",
+    "electron:pack": "npm run build && electron-builder --win dir --x64",
+    "electron:build:win": "npm run build && electron-builder --win nsis --x64",
+    "electron:verify": "npm run build && electron electron/verify.cjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -42,6 +46,8 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "autoprefixer": "^10.4.21",
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.25.0",
     "jsdom": "^30.0.1",
     "playwright": "^1.62.1",
@@ -50,5 +56,8 @@
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
     "vitest": "^3.2.7"
-  }
+  },
+  "description": "Regency Tailor \u2014 bespoke showroom and tailoring suite",
+  "author": "S.S Ai Labs",
+  "main": "electron/main.cjs"
 }

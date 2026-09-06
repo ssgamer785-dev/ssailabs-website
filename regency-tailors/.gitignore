@@ -1,8 +1,15 @@
 node_modules/
 build/
+# …except the packaging resources electron-builder reads from it. `build/` is
+# ignored above as a generic output directory; the Windows icon is a source
+# asset that has to travel with the repository.
+!build/
+!build/icon.png
 dist/
 # throwaway build the browser suites are pointed at, never deployed
 dist-e2e/
+# packaged desktop builds: produced by electron-builder, never committed
+release/
 coverage/
 .DS_Store
 *.log
