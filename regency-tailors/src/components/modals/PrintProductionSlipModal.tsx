@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useLayoutEffect } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { X, Printer, Scissors, Download, Check, Image as ImageIcon, Loader2, Layers } from 'lucide-react';
 import { Order, ProductionStatus } from '../../types';
 import { ProductionSlipPage } from '../production/ProductionSlipPage';
@@ -59,10 +59,19 @@ export const PrintProductionSlipModal: React.FC<PrintProductionSlipModalProps> =
   // Restart from the loosest tier whenever the slip's content changes, so a
   // tier tightened for a fourteen-garment order does not stay tight for the
   // single-garment order opened next.
+  //
+  // Done while rendering rather than in a layout effect. A layout effect here
+  // runs *after* the sheets' own, in the same commit, and so overwrote the
+  // tightening they had just asked for; the tier then equalled what was already
+  // rendered, React skipped the re-render, the sheets never measured again, and
+  // any slip needing a tier below the loosest printed clipped. Resetting during
+  // render happens before the sheets measure, so it cannot undo their reply.
   const orderKey = order ? `${order.id || order.orderNumber || ''}:${pages.length}` : '';
-  useLayoutEffect(() => {
+  const [densityKey, setDensityKey] = useState(orderKey);
+  if (orderKey !== densityKey) {
+    setDensityKey(orderKey);
     setDensity(INITIAL_SLIP_DENSITY);
-  }, [orderKey]);
+  }
 
   // One step per commit: tightening re-renders every sheet, which re-runs
   // their measurements against the new tier and calls back again if needed.

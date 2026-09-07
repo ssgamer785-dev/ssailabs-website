@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   paginateProductionSlip,
   getGarmentCardHeightMm,
@@ -215,5 +218,50 @@ describe('paginateProductionSlip', () => {
     const order = { ...orderWith([]), items: 'broken' as any };
     expect(() => paginateProductionSlip(order)).not.toThrow();
     expect(paginateProductionSlip(order)).toHaveLength(1);
+  });
+});
+
+/* ---------------------------------------------------------------------------
+ * The page counts above are only achievable if the sheet can actually reach
+ * the tier they are priced at.
+ *
+ * The slip renders at the loosest of four density tiers and steps down —
+ * roomy, normal, compact, dense — each time a sheet reports that its content
+ * overflowed. The budget above is calibrated against `dense`, the floor: an
+ * eight-garment order is one sheet only because the type is allowed to get
+ * that small. If the step-down never runs, the model's plan is unreachable and
+ * the sheet prints with its last garment's measurements under the footer.
+ *
+ * That is exactly what happened. The reset that returns a newly opened slip to
+ * the loosest tier lived in a layout effect, which React runs after the
+ * sheets' own — so it overwrote the tightening they had just requested in the
+ * same commit, the tier came out equal to what was already rendered, React
+ * skipped the re-render, and the sheets never measured a second time. Every
+ * overflowing sheet printed at `roomy` having never tried anything tighter.
+ *
+ * These read the source because the fault was in when the reset runs, not in
+ * what it computes: a jsdom render reports every height as zero and would call
+ * a clipped sheet fine.
+ * ------------------------------------------------------------------------- */
+describe('the slip can actually reach the tier its page count is priced at', () => {
+  const modal = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), '../../components/modals/PrintProductionSlipModal.tsx'),
+    'utf8'
+  );
+
+  it('resets the tier while rendering, not in an effect that outruns the sheets', () => {
+    const reset = modal.slice(modal.indexOf('const orderKey ='), modal.indexOf('const handleOverflow'));
+    expect(reset).toContain('if (orderKey !== densityKey)');
+    expect(reset).not.toMatch(/use(Layout)?Effect/);
+  });
+
+  it('still steps one tier at a time and stops at the floor', () => {
+    expect(modal).toContain('tighterSlipDensity(current) ?? current');
+  });
+
+  it('and every sheet of one slip prints at the same tier', () => {
+    // A single document-wide tier, not one per sheet: two sheets of the same
+    // slip at different type sizes would read as a fault.
+    expect(modal).toContain('density={density}');
   });
 });
