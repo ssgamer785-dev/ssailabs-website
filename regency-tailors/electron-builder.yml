@@ -35,6 +35,18 @@ extraResources:
   - from: dist
     to: app
 
+# The entry point, stated here rather than inherited from package.json.
+#
+# electron-builder takes the main file from the app's package.json and falls
+# back to "index.js" when it cannot find one — and the repository root holds a
+# second, unrelated project with the same "name" and no "main" at all. Read
+# that one by mistake and the build produces an asar it then rejects:
+#   Application entry file "index.js" ... was not found in this archive.
+# Writing it into the packaged metadata makes the entry explicit and removes
+# the field ordering of package.json as something the installer depends on.
+extraMetadata:
+  main: electron/main.cjs
+
 # The main process is tiny and the renderer is already minified by Vite.
 asar: true
 compression: normal
