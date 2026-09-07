@@ -33,6 +33,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A blank or missing secret is not a build error: Vite inlines an empty
+      # string, isSupabaseConfigured in src/lib/supabase.ts turns false, and the
+      # run happily produces an installer that opens on "Database not
+      # configured" — a whole Windows QA cycle spent to discover it. These are
+      # the same checks that file makes at runtime, made here instead, before
+      # the install and test steps cost five minutes.
+      - name: Require the Supabase build variables
+        shell: pwsh
+        env:
+          VITE_SUPABASE_URL: ${{ inputs.supabase_url || secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          $placeholders = @('', 'https://your-supabase-project.supabase.co',
+                            'your-supabase-anon-key',
+                            'https://placeholder.supabase.co', 'placeholder-anon-key')
+          $url = "$env:VITE_SUPABASE_URL".Trim()
+          $key = "$env:VITE_SUPABASE_ANON_KEY".Trim()
+          $where = 'Settings -> Secrets and variables -> Actions -> New repository secret'
+          if (($placeholders -contains $url) -or (-not $url.StartsWith('https://'))) {
+            throw "VITE_SUPABASE_URL is missing, blank or not an https URL. Add the repository secret VITE_SUPABASE_URL ($where), or pass supabase_url when starting the workflow."
+          }
+          if ($placeholders -contains $key) {
+            throw "VITE_SUPABASE_ANON_KEY is missing or blank. Add the repository secret VITE_SUPABASE_ANON_KEY ($where). Use the publishable/anon key only."
+          }
+          if (($key -like 'sb_secret_*') -or ($key -like '*service_role*')) {
+            throw 'VITE_SUPABASE_ANON_KEY looks like a privileged key. Only the publishable/anon key may be built into a client.'
+          }
+          # The project URL ships in the bundle by design and is not a secret;
+          # the key is never echoed, only confirmed present.
+          Write-Host "Supabase URL: $url"
+          Write-Host 'Supabase publishable key: present.'
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -57,12 +89,48 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run build
 
-      - name: Refuse to ship a bundle carrying a service-role key
+      # Regex, not -SimpleMatch: -SimpleMatch reads 'a|b|c' as one literal
+      # string, so the alternation this check was written with could never
+      # match and the sweep passed unconditionally. The patterns look for
+      # credential *values* rather than bare prefixes, because supabase-js
+      # itself contains the literal "sb_secret_" in its key-class predicate —
+      # matching that would fail every honest build. Verified against a real
+      # bundle (no hits) and against planted credentials (caught).
+      - name: Refuse to ship a bundle carrying a privileged credential
         shell: pwsh
         run: |
-          $hits = Select-String -Path dist/assets/*.js -Pattern 'service_role|sb_secret_|SUPABASE_SERVICE' -SimpleMatch -List
-          if ($hits) { $hits; throw 'A privileged credential reached the bundle.' }
-          Write-Host 'Bundle carries no service-role credential.'
+          $patterns = @(
+            'sb_secret_[A-Za-z0-9_-]{8,}',
+            'service_role',
+            'SUPABASE_SERVICE',
+            'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'
+          )
+          $hits = Select-String -Path dist/assets/*.js -Pattern $patterns -List
+          if ($hits) {
+            $hits | ForEach-Object { Write-Host "$($_.Filename): matched $($_.Pattern)" }
+            throw 'A privileged credential reached the bundle.'
+          }
+          Write-Host 'Bundle carries no privileged credential.'
+
+      # The variables being set is not the same as the build having used them:
+      # a stale dist/, a renamed variable or an envPrefix change would all pass
+      # the check above and still ship an unconfigured app. Select-String -Quiet
+      # returns a bare boolean, so the key never reaches the log.
+      - name: Verify the renderer carries the production configuration
+        shell: pwsh
+        env:
+          VITE_SUPABASE_URL: ${{ inputs.supabase_url || secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          $url = "$env:VITE_SUPABASE_URL".Trim()
+          $key = "$env:VITE_SUPABASE_ANON_KEY".Trim()
+          if (-not (Select-String -Path dist/assets/*.js -Pattern $url -SimpleMatch -Quiet)) {
+            throw "The built renderer does not contain $url. The build did not pick up VITE_SUPABASE_URL."
+          }
+          if (-not (Select-String -Path dist/assets/*.js -Pattern $key -SimpleMatch -Quiet)) {
+            throw 'The built renderer does not contain the publishable key. The build did not pick up VITE_SUPABASE_ANON_KEY.'
+          }
+          Write-Host "Renderer carries $url and its publishable key."
 
       - name: Build Windows installer
         run: npx electron-builder --win nsis --x64 --publish never
