@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { MeasurementRecord, Customer } from '../../types';
 import { MeasurementSheetBlocks } from '../measurements/MeasurementSheetBlocks';
+import { MeasurementSection } from '../../utils/garmentMeasurements';
 import { downloadElementAsPdf } from '../../utils/documentExport';
 
 interface MeasurementsViewProps {
@@ -33,6 +34,18 @@ interface MeasurementsViewProps {
   onDeleteMeasurement: (measurement: MeasurementRecord) => void;
 }
 
+
+/** Filter label to the record key it selects on, in canonical order. */
+const MEASUREMENT_FILTERS: Record<string, MeasurementSection> = {
+  Coat: 'coat',
+  Pant: 'pant',
+  Shirt: 'shirt',
+  Kurta: 'kurta',
+  Pajama: 'pajama',
+  Waistcoat: 'waistcoat',
+  Jacket: 'jacketGarment',
+  Sherwani: 'sherwani'
+};
 
 export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
   measurements,
@@ -59,20 +72,16 @@ export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
       m.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (typeof m.garmentType === 'string' && m.garmentType.toLowerCase().includes(searchQuery.toLowerCase()));
 
-    const garmentsList = m.selectedGarments || (typeof m.garmentType === 'string' ? m.garmentType.split(', ') : []);
-    
-    let matchesFilter = true;
-    if (selectedFilter === 'Coat') {
-      matchesFilter = garmentsList.some(g => g.toLowerCase().includes('coat') || g.toLowerCase().includes('suit') || g.toLowerCase().includes('blazer'));
-    } else if (selectedFilter === 'Pant') {
-      matchesFilter = garmentsList.some(g => g.toLowerCase().includes('pant') || g.toLowerCase().includes('trouser'));
-    } else if (selectedFilter === 'Shirt') {
-      matchesFilter = garmentsList.some(g => g.toLowerCase().includes('shirt'));
-    } else if (selectedFilter === 'Kurta') {
-      matchesFilter = garmentsList.some(g => g.toLowerCase().includes('kurta'));
-    } else if (selectedFilter === 'Pajama') {
-      matchesFilter = garmentsList.some(g => g.toLowerCase().includes('pajama'));
-    }
+    /*
+     * Filter on the section the record actually holds, not on the wording of
+     * its garment list. Matching text meant "Coat" also matched "Waistcoat",
+     * so filtering for coats listed customers who have only ever been measured
+     * for a waistcoat — and no filter existed at all for the three sections
+     * the showroom added.
+     */
+    const matchesFilter =
+      selectedFilter === 'All' ||
+      Boolean((m as unknown as Record<string, unknown>)[MEASUREMENT_FILTERS[selectedFilter] ?? '']);
 
     return matchesSearch && matchesFilter;
   });
@@ -182,7 +191,7 @@ export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
           <div className="flex items-center justify-between gap-3">
             {/* Garment Filter Tabs */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0 scrollbar-none">
-              {['All', 'Coat', 'Pant', 'Shirt', 'Kurta', 'Pajama'].map(cat => (
+              {['All', ...Object.keys(MEASUREMENT_FILTERS)].map(cat => (
                 <button
                   key={cat}
                   onClick={() => setSelectedFilter(cat)}

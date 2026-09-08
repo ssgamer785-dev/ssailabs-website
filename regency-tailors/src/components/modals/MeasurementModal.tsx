@@ -491,7 +491,9 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
 
   const selectPreset = (type: 'suit2' | 'suit3' | 'kurtaPajama' | 'all') => {
     if (type === 'suit2') setSelectedGarments(['Coat', 'Pant']);
-    if (type === 'suit3') setSelectedGarments(['Coat', 'Pant', 'Shirt']);
+    // The third piece of a three-piece suit is the waistcoat. This said Shirt,
+    // which is a garment a customer wears with the suit, not part of it.
+    if (type === 'suit3') setSelectedGarments(['Coat', 'Pant', 'Waistcoat']);
     if (type === 'kurtaPajama') setSelectedGarments(['Kurta', 'Pajama']);
     if (type === 'all') setSelectedGarments(Object.keys(SECTION_FOR_KEY) as GarmentKey[]);
   };
