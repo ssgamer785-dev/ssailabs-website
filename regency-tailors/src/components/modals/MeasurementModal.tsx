@@ -23,9 +23,13 @@ import {
   PantMeasurement, 
   ShirtMeasurement, 
   KurtaMeasurement, 
-  PajamaMeasurement 
+  PajamaMeasurement,
+  WaistcoatMeasurement,
+  JacketGarmentMeasurement,
+  SherwaniMeasurement
 } from '../../types';
 import { sectionFields, MeasurementSection } from '../../utils/garmentMeasurements';
+import { useMeasurementEnter, measurementInputProps } from '../../utils/measurementFocus';
 
 interface MeasurementModalProps {
   isOpen: boolean;
@@ -40,7 +44,29 @@ interface MeasurementModalProps {
   preselectedCustomer?: Customer | null;
 }
 
-type GarmentKey = 'Coat' | 'Pant' | 'Shirt' | 'Kurta' | 'Pajama';
+/**
+ * The sheet records measurement sections, not order line items.
+ *
+ * That is why a suit is not here: a 2 or 3 Piece Suit is an order of a coat, a
+ * pant and possibly a waistcoat, and the customer's sheet already holds those
+ * three as themselves. Adding a "suit" here would be a fourth place to keep
+ * the same numbers.
+ */
+type GarmentKey =
+  | 'Coat' | 'Pant' | 'Shirt' | 'Kurta' | 'Pajama'
+  | 'Waistcoat' | 'Jacket' | 'Sherwani';
+
+/** Sheet selection to canonical section. */
+const SECTION_FOR_KEY: Record<GarmentKey, MeasurementSection> = {
+  Coat: 'coat',
+  Pant: 'pant',
+  Shirt: 'shirt',
+  Kurta: 'kurta',
+  Pajama: 'pajama',
+  Waistcoat: 'waistcoat',
+  Jacket: 'jacketGarment',
+  Sherwani: 'sherwani'
+};
 
 interface FieldConfig {
   key: string;
@@ -111,10 +137,41 @@ const FIELD_HINTS: Record<string, Record<string, { sublabel: string; placeholder
   }
 };
 
+/*
+ * Hints for the three sections the showroom added. A section with no hints is
+ * not a crash: entryFields falls back to a blank hint, so a canonical field
+ * always gets a box even before anyone writes prose for it.
+ */
+FIELD_HINTS.waistcoat = {
+  length: { sublabel: 'Waistcoat Length', placeholder: '25.0' },
+  chest: { sublabel: 'Full Chest Girth', placeholder: '40.0' },
+  stomach: { sublabel: 'Natural Waist / Belly', placeholder: '36.0' },
+  hip: { sublabel: 'Seat & Lower Hip', placeholder: '41.0' },
+  shoulder: { sublabel: 'Shoulder Seam to Seam', placeholder: '18.5' }
+};
+FIELD_HINTS.jacketGarment = {
+  length: { sublabel: 'Jacket Length', placeholder: '29.0' },
+  chest: { sublabel: 'Full Chest Girth', placeholder: '40.0' },
+  stomach: { sublabel: 'Natural Waist / Belly', placeholder: '36.0' },
+  hip: { sublabel: 'Seat & Lower Hip', placeholder: '41.0' },
+  shoulder: { sublabel: 'Shoulder Seam to Seam', placeholder: '18.5' },
+  collar: { sublabel: 'Neck / Collar', placeholder: '16.0' }
+};
+FIELD_HINTS.sherwani = {
+  length: { sublabel: 'Sherwani Length', placeholder: '44.0' },
+  chest: { sublabel: 'Full Chest Girth', placeholder: '42.0' },
+  stomach: { sublabel: 'Natural Waist / Belly', placeholder: '40.0' },
+  hip: { sublabel: 'Seat & Lower Hip', placeholder: '43.0' },
+  shoulder: { sublabel: 'Shoulder Seam to Seam', placeholder: '18.0' },
+  sleeve: { sublabel: 'Full Sleeve Length', placeholder: '23.0' },
+  xBack: { sublabel: 'Cross Back Width', placeholder: '18.0' },
+  collar: { sublabel: 'Neck / Collar', placeholder: '16.0' }
+};
+
 /** Numbered entry fields for a garment, in the canonical order. */
 function entryFields(section: MeasurementSection): FieldConfig[] {
   return sectionFields(section).map((field, index) => {
-    const hint = FIELD_HINTS[section][field.key] || { sublabel: '', placeholder: '' };
+    const hint = FIELD_HINTS[section]?.[field.key] || { sublabel: '', placeholder: '' };
     return {
       key: field.key,
       label: `${index + 1}. ${field.label}`,
@@ -130,6 +187,9 @@ const PANT_FIELDS: FieldConfig[] = entryFields('pant');
 const SHIRT_FIELDS: FieldConfig[] = entryFields('shirt');
 const KURTA_FIELDS: FieldConfig[] = entryFields('kurta');
 const PAJAMA_FIELDS: FieldConfig[] = entryFields('pajama');
+const WAISTCOAT_FIELDS: FieldConfig[] = entryFields('waistcoat');
+const JACKET_FIELDS: FieldConfig[] = entryFields('jacketGarment');
+const SHERWANI_FIELDS: FieldConfig[] = entryFields('sherwani');
 
 export const MeasurementModal: React.FC<MeasurementModalProps> = ({
   isOpen,
@@ -159,6 +219,16 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
 
   // Garment Selection (supports multiple)
   const [selectedGarments, setSelectedGarments] = useState<GarmentKey[]>([]);
+  const [waistcoat, setWaistcoat] = useState<WaistcoatMeasurement>({
+    length: '', chest: '', stomach: '', hip: '', shoulder: ''
+  });
+  const [jacketGarment, setJacketGarment] = useState<JacketGarmentMeasurement>({
+    length: '', chest: '', stomach: '', hip: '', shoulder: '', collar: ''
+  });
+  const [sherwani, setSherwani] = useState<SherwaniMeasurement>({
+    length: '', chest: '', stomach: '', hip: '', shoulder: '', sleeve: '', xBack: '', collar: ''
+  });
+  const measurementEnter = useMeasurementEnter();
 
   // Fit & Notes
   const [fitPreference, setFitPreference] = useState<string>('');
@@ -245,6 +315,9 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
         if (initialMeasurement.coat || initialMeasurement.jacket) inferred.push('Coat');
         if (initialMeasurement.pant || initialMeasurement.trouser) inferred.push('Pant');
         if (initialMeasurement.shirt) inferred.push('Shirt');
+        if (initialMeasurement.waistcoat) inferred.push('Waistcoat');
+        if (initialMeasurement.jacketGarment) inferred.push('Jacket');
+        if (initialMeasurement.sherwani) inferred.push('Sherwani');
         if (initialMeasurement.kurta) inferred.push('Kurta');
         if (initialMeasurement.pajama) inferred.push('Pajama');
         setSelectedGarments(inferred);
@@ -420,7 +493,7 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
     if (type === 'suit2') setSelectedGarments(['Coat', 'Pant']);
     if (type === 'suit3') setSelectedGarments(['Coat', 'Pant', 'Shirt']);
     if (type === 'kurtaPajama') setSelectedGarments(['Kurta', 'Pajama']);
-    if (type === 'all') setSelectedGarments(['Coat', 'Pant', 'Shirt', 'Kurta', 'Pajama']);
+    if (type === 'all') setSelectedGarments(Object.keys(SECTION_FOR_KEY) as GarmentKey[]);
   };
 
   const handleNudge = (
@@ -494,6 +567,9 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
       shirt: selectedGarments.includes('Shirt') ? shirt : undefined,
       kurta: selectedGarments.includes('Kurta') ? kurta : undefined,
       pajama: selectedGarments.includes('Pajama') ? pajama : undefined,
+      waistcoat: selectedGarments.includes('Waistcoat') ? waistcoat : undefined,
+      jacketGarment: selectedGarments.includes('Jacket') ? jacketGarment : undefined,
+      sherwani: selectedGarments.includes('Sherwani') ? sherwani : undefined,
       fitPreference,
       postureNotes: postureNotes.trim(),
       fittingNotes: fittingNotes.trim(),
@@ -557,6 +633,7 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
             <input
               type="number"
               step="0.25"
+              {...measurementInputProps}
               value={val}
               onChange={(e) => setter({ ...stateObj, [field.key]: e.target.value })}
               placeholder={field.placeholder}
@@ -1047,6 +1124,45 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
                       {selectedGarments.includes('Pajama') && <Check className="w-3 h-3 stroke-[3]" />}
                     </div>
                   </button>
+
+                  {/* The sections the showroom added. Written as a list rather
+                      than as three more copies of the pill above. */}
+                  {([
+                    ['Waistcoat', '🦺', 'Waist Coat'],
+                    ['Jacket', '🧥', 'Tailored Jacket'],
+                    ['Sherwani', '👑', 'Ceremonial']
+                  ] as [GarmentKey, string, string][]).map(([key, icon, hint]) => {
+                    const on = selectedGarments.includes(key);
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => toggleGarment(key)}
+                        className={`p-2.5 rounded-xl border text-left transition-all flex items-center justify-between cursor-pointer ${
+                          on
+                            ? 'bg-[#071426] text-white border-[#C9A24A] shadow-xs'
+                            : 'bg-[#FAF8F5] text-[#071426] border-[#E0D8CB] hover:bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">{icon}</span>
+                          <div>
+                            <div className={`font-extrabold text-xs ${on ? 'text-[#D4AF5A]' : 'text-[#071426]'}`}>
+                              {key.toUpperCase()}
+                            </div>
+                            <div className={`text-[10px] ${on ? 'text-slate-300' : 'text-[#8C7E6A]'}`}>
+                              {hint}
+                            </div>
+                          </div>
+                        </div>
+                        <div className={`w-4 h-4 rounded-md border flex items-center justify-center text-xs font-bold ${
+                          on ? 'bg-[#C9A24A] text-[#071426] border-[#C9A24A]' : 'border-[#CCC3B2] bg-white'
+                        }`}>
+                          {on && <Check className="w-3 h-3 stroke-[3]" />}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1115,7 +1231,11 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
             {/* ======================================================== */}
             {/* RIGHT COLUMN: GROUPED GARMENT MEASUREMENT SUITE (7 cols) */}
             {/* ======================================================== */}
-            <div className="lg:col-span-7 space-y-5">
+            {/* Enter steps to the next measurement instead of pressing Save.
+                Delegated from this column so it covers every garment card,
+                and only the measurement boxes — the notes and instruction
+                fields in the left column keep their ordinary Enter. */}
+            <div className="lg:col-span-7 space-y-5" {...measurementEnter}>
               
               {selectedGarments.length === 0 ? (
                 <div className="bg-white p-8 rounded-2xl border border-dashed border-[#E0D8CB] text-center space-y-2">
@@ -1261,6 +1381,45 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* The sections the showroom added. Same card, same renderer, and
+                  the fields come from the canonical definitions — so this sheet
+                  and the order wizard cannot ask for different measurements. */}
+              {([
+                ['Waistcoat', '🦺', 'WAISTCOAT SPECIFICATIONS', 'Waist Coat', WAISTCOAT_FIELDS,
+                  waistcoat, setWaistcoat],
+                ['Jacket', '🧥', 'JACKET SPECIFICATIONS', 'Tailored Jacket', JACKET_FIELDS,
+                  jacketGarment, setJacketGarment],
+                ['Sherwani', '👑', 'SHERWANI SPECIFICATIONS', 'Ceremonial Sherwani', SHERWANI_FIELDS,
+                  sherwani, setSherwani]
+              ] as [GarmentKey, string, string, string, FieldConfig[], any, (v: any) => void][])
+                .filter(([key]) => selectedGarments.includes(key))
+                .map(([key, icon, title, sub, fields, state, setState]) => (
+                  <div
+                    key={key}
+                    className="bg-[#FAF8F5] rounded-2xl border-2 border-[#C9A24A]/40 p-4 sm:p-5 space-y-4 shadow-sm"
+                  >
+                    <div className="flex items-center justify-between border-b border-[#E6E1D7] pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">{icon}</span>
+                        <div>
+                          <h3 className="text-sm font-black text-[#071426] uppercase tracking-wider">
+                            {title}
+                          </h3>
+                          <span className="text-[10px] text-[#8C7E6A] font-bold">
+                            {sub} ({unit})
+                          </span>
+                        </div>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#071426] text-[#D4AF5A]">
+                        {fields.length} Parameters
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {fields.map(f => renderParamField(f, state, setState))}
+                    </div>
+                  </div>
+                ))}
 
             </div>
 

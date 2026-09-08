@@ -33,14 +33,33 @@ import {
   ShirtMeasurement, 
   KurtaMeasurement, 
   PajamaMeasurement, 
+  WaistcoatMeasurement,
+  JacketGarmentMeasurement,
+  SherwaniMeasurement,
   Invoice, 
   TrashItem
 } from '../../types';
 import {
+  MEASUREMENT_SECTIONS,
   sectionFields,
+  garmentSections,
   measurementDisplayValue,
   MeasurementSection
 } from '../../utils/garmentMeasurements';
+import { MeasurementSectionInputs } from '../measurements/MeasurementSectionInputs';
+
+/** Decoration only; the titles and fields come from the canonical definitions. */
+const SECTION_ICON: Record<MeasurementSection, string> = {
+  coat: '🧥',
+  pant: '👖',
+  shirt: '👔',
+  kurta: '👘',
+  pajama: '🩳',
+  waistcoat: '🦺',
+  jacketGarment: '🧥',
+  sherwani: '👑'
+};
+import { useMeasurementEnter } from '../../utils/measurementFocus';
 
 interface OrderModalProps {
   isOpen: boolean;
@@ -85,7 +104,16 @@ type OrderStep = 1 | 2 | 3 | 4 | 5;
 /* The garments the showroom sells. Coat and Pant are separate products: a
  * customer ordering both gets two line items, each with its own quantity,
  * measurements and remark. There is deliberately no combined entry. */
-type GarmentKey = 'Coat' | 'Pant' | 'Shirt' | 'Kurta Pajama';
+type GarmentKey =
+  | 'Coat'
+  | 'Pant'
+  | 'Shirt'
+  | 'Kurta Pajama'
+  | 'Jacket'
+  | 'Waistcoat'
+  | 'Sherwani'
+  | '2 Piece Suit'
+  | '3 Piece Suit';
 
 interface GarmentConfig {
   key: GarmentKey;
@@ -134,8 +162,64 @@ const GARMENT_CONFIGS: GarmentConfig[] = [
     label: 'KURTA PAJAMA',
     sublabel: 'Royal Bespoke Kurta with Tailored Pajama',
     icon: '👘'
+  },
+  {
+    key: 'Jacket',
+    label: 'JACKET',
+    sublabel: 'Tailored Jacket',
+    icon: '🧥'
+  },
+  {
+    key: 'Waistcoat',
+    label: 'WAISTCOAT',
+    sublabel: 'Bespoke Waist Coat',
+    icon: '🦺'
+  },
+  {
+    key: 'Sherwani',
+    label: 'SHERWANI',
+    sublabel: 'Ceremonial Sherwani',
+    icon: '👑'
+  },
+  {
+    key: '2 Piece Suit',
+    label: '2 PIECE SUIT',
+    sublabel: 'Coat and Pant, measured as both',
+    icon: '🤵'
+  },
+  {
+    key: '3 Piece Suit',
+    label: '3 PIECE SUIT',
+    sublabel: 'Coat, Pant and Waistcoat, measured as all three',
+    icon: '🤵'
   }
 ];
+
+/** A garment row's initial state. Built from the catalogue so a garment cannot
+ *  be offered for selection without somewhere to record it. */
+const blankGarmentState = () =>
+  Object.fromEntries(
+    GARMENT_CONFIGS.map(g => [
+      g.key,
+      {
+        selected: false,
+        quantity: 1,
+        fabricName: '',
+        fabricCode: '',
+        styleNotes: '',
+        specialInstructions: '',
+        remarks: ''
+      }
+    ])
+  ) as Record<GarmentKey, {
+    selected: boolean;
+    quantity: number;
+    fabricName: string;
+    fabricCode: string;
+    styleNotes: string;
+    specialInstructions: string;
+    remarks?: string;
+  }>;
 
 export const OrderModal: React.FC<OrderModalProps> = ({
   isOpen,
@@ -218,44 +302,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       specialInstructions: string;
       remarks?: string;
     };
-  }>({
-    Coat: {
-      selected: false,
-      quantity: 1,
-      fabricName: '',
-      fabricCode: '',
-      styleNotes: '',
-      specialInstructions: '',
-      remarks: ''
-    },
-    Pant: {
-      selected: false,
-      quantity: 1,
-      fabricName: '',
-      fabricCode: '',
-      styleNotes: '',
-      specialInstructions: '',
-      remarks: ''
-    },
-    Shirt: {
-      selected: false,
-      quantity: 1,
-      fabricName: '',
-      fabricCode: '',
-      styleNotes: '',
-      specialInstructions: '',
-      remarks: ''
-    },
-    'Kurta Pajama': {
-      selected: false,
-      quantity: 1,
-      fabricName: '',
-      fabricCode: '',
-      styleNotes: '',
-      specialInstructions: '',
-      remarks: ''
-    }
-  });
+  }>(blankGarmentState());
 
   // STEP 4: Measurements State
   const [unit, setUnit] = useState<'inches' | 'cm'>('inches');
@@ -319,6 +366,56 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     bottom: '',
     body: ''
   });
+
+  const [waistcoatMeas, setWaistcoatMeas] = useState<WaistcoatMeasurement>({
+    length: '', chest: '', stomach: '', hip: '', shoulder: ''
+  });
+  const [jacketGarmentMeas, setJacketGarmentMeas] = useState<JacketGarmentMeasurement>({
+    length: '', chest: '', stomach: '', hip: '', shoulder: '', collar: ''
+  });
+  const [sherwaniMeas, setSherwaniMeas] = useState<SherwaniMeasurement>({
+    length: '', chest: '', stomach: '', hip: '', shoulder: '', sleeve: '', xBack: '', collar: ''
+  });
+
+  /**
+   * Every measurement section, and where its values live.
+   *
+   * The wizard used to name each section three times over — once to decide
+   * whether to show it, once to draw its boxes, once to put it in the saved
+   * snapshot. Nine garments across five of those lists is where a section gets
+   * shown but not saved. Naming them once here means the rest of the wizard
+   * asks this map rather than repeating itself.
+   */
+  const SECTION_STATE: Record<
+    MeasurementSection,
+    { values: Record<string, unknown>; set: React.Dispatch<React.SetStateAction<any>> }
+  > = {
+    coat: { values: coatMeas as Record<string, unknown>, set: setCoatMeas },
+    pant: { values: pantMeas as Record<string, unknown>, set: setPantMeas },
+    shirt: { values: shirtMeas as Record<string, unknown>, set: setShirtMeas },
+    kurta: { values: kurtaMeas as Record<string, unknown>, set: setKurtaMeas },
+    pajama: { values: pajamaMeas as Record<string, unknown>, set: setPajamaMeas },
+    waistcoat: { values: waistcoatMeas as Record<string, unknown>, set: setWaistcoatMeas },
+    jacketGarment: { values: jacketGarmentMeas as Record<string, unknown>, set: setJacketGarmentMeas },
+    sherwani: { values: sherwaniMeas as Record<string, unknown>, set: setSherwaniMeas }
+  };
+
+  const measurementEnter = useMeasurementEnter();
+
+  /**
+   * Pours a stored record's measurements into the entry state.
+   *
+   * Driven by the section map rather than a line per garment: reopening an
+   * order used to restore five sections by name, and a waistcoat added to the
+   * canon but not to that list would come back blank — the counter hand would
+   * see an empty form for measurements the customer had already given.
+   */
+  const loadSections = (record: Partial<MeasurementRecord>) => {
+    (Object.keys(SECTION_STATE) as MeasurementSection[]).forEach(section => {
+      const stored = (record as Record<string, unknown>)[section];
+      if (stored && typeof stored === 'object') SECTION_STATE[section].set(stored);
+    });
+  };
 
   // Track if modal was already opened
   const wasOpenRef = useRef(false);
@@ -384,44 +481,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     setSpecialInstructions('');
 
     // Step 3: Default Garment
-    setSelectedGarments({
-      Coat: {
-        selected: false,
-        quantity: 1,
-        fabricName: '',
-        fabricCode: '',
-        styleNotes: '',
-        specialInstructions: '',
-        remarks: ''
-      },
-      Pant: {
-        selected: false,
-        quantity: 1,
-        fabricName: '',
-        fabricCode: '',
-        styleNotes: '',
-        specialInstructions: '',
-        remarks: ''
-      },
-      Shirt: {
-        selected: false,
-        quantity: 1,
-        fabricName: '',
-        fabricCode: '',
-        styleNotes: '',
-        specialInstructions: '',
-        remarks: ''
-      },
-      'Kurta Pajama': {
-        selected: false,
-        quantity: 1,
-        fabricName: '',
-        fabricCode: '',
-        styleNotes: '',
-        specialInstructions: '',
-        remarks: ''
-      }
-    });
+    setSelectedGarments(blankGarmentState());
 
     // Step 4: Measurements
     setUnit('inches');
@@ -478,6 +538,11 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       bottom: '',
       body: ''
     });
+    setWaistcoatMeas({ length: '', chest: '', stomach: '', hip: '', shoulder: '' });
+    setJacketGarmentMeas({ length: '', chest: '', stomach: '', hip: '', shoulder: '', collar: '' });
+    setSherwaniMeas({
+      length: '', chest: '', stomach: '', hip: '', shoulder: '', sleeve: '', xBack: '', collar: ''
+    });
   };
 
   // Reset form whenever modal opens fresh
@@ -525,7 +590,24 @@ export const OrderModal: React.FC<OrderModalProps> = ({
            * edits keeps exactly the record it was placed with.
            */
           const keysForItem = (garmentType: string): GarmentKey[] => {
-            const t = (garmentType || '').toLowerCase();
+            const raw = (garmentType || '').trim();
+            const t = raw.toLowerCase();
+
+            /*
+             * A garment the catalogue offers reopens as itself. This has to
+             * come first: "Waistcoat" contains "coat" and "2 Piece Suit"
+             * contains "suit", so the keyword rules below — which predate
+             * these garments and exist for legacy line items — would reopen a
+             * waistcoat order as a coat and lose the measurements with it.
+             */
+            const exact = GARMENT_CONFIGS.find(
+              c => c.key.toLowerCase() === t || c.key.toLowerCase().replace(/\s+/g, '') === t.replace(/\s+/g, '')
+            );
+            if (exact) return [exact.key];
+            // '2-Piece Suit' and '3-Piece Suit' are stored spellings of the same garments.
+            if (/3\s*-?\s*piece/.test(t)) return ['3 Piece Suit'];
+            if (/2\s*-?\s*piece/.test(t)) return ['2 Piece Suit'];
+
             if (t.includes('kurta') || t.includes('ethnic') || t.includes('pajama')) return ['Kurta Pajama'];
             if (t.includes('shirt')) return ['Shirt'];
             const coat = t.includes('coat') || t.includes('blazer') || t.includes('jacket') || t.includes('suit');
@@ -564,11 +646,9 @@ export const OrderModal: React.FC<OrderModalProps> = ({
           // Snapshot measurements
           if (initialOrder.measurementsSnapshot) {
             const s = initialOrder.measurementsSnapshot;
-            if (s.coat) setCoatMeas(s.coat);
-            if (s.pant) setPantMeas(s.pant);
-            if (s.shirt) setShirtMeas(s.shirt);
-            if (s.kurta) setKurtaMeas(s.kurta);
-            if (s.pajama) setPajamaMeas(s.pajama);
+            // Every section the record carries, by the record's own keys, so a
+            // section added to the canon reloads without another line here.
+            loadSections(s);
             if (s.unit) setUnit(s.unit);
             if (s.fitPreference) setFitPreference(s.fitPreference);
             if (s.fittingNotes) setFittingNotes(s.fittingNotes);
@@ -621,11 +701,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   const checkAndLoadPreviousMeasurements = (custId: string) => {
     const prev = measurementsPool.find(m => m.customerId === custId);
     if (prev) {
-      if (prev.coat) setCoatMeas(prev.coat);
-      if (prev.pant) setPantMeas(prev.pant);
-      if (prev.shirt) setShirtMeas(prev.shirt);
-      if (prev.kurta) setKurtaMeas(prev.kurta);
-      if (prev.pajama) setPajamaMeas(prev.pajama);
+      loadSections(prev);
       if (prev.unit) setUnit(prev.unit);
       if (prev.fitPreference) setFitPreference(prev.fitPreference);
       if (prev.fittingNotes) setFittingNotes(prev.fittingNotes);
@@ -665,6 +741,21 @@ export const OrderModal: React.FC<OrderModalProps> = ({
 
     return list;
   }, [selectedGarments]);
+
+  /**
+   * The measurement sections this order needs, in canonical order, once.
+   *
+   * Resolved through garmentSections — the same function the workshop slip and
+   * the measurement sheet use — so the boxes the counter hand fills in are by
+   * construction the boxes the slip will print. A 3 Piece Suit contributes
+   * coat, pant and waistcoat; ordering a Coat alongside it does not ask for
+   * the coat twice.
+   */
+  const activeSections = useMemo(() => {
+    const seen = new Set<MeasurementSection>();
+    activeGarmentsList.forEach(g => garmentSections(g.key).forEach(sec => seen.add(sec)));
+    return (Object.keys(SECTION_STATE) as MeasurementSection[]).filter(sec => seen.has(sec));
+  }, [activeGarmentsList]);
 
   // Filtered customer list for search
   const filteredCustomers = useMemo(() => {
@@ -758,27 +849,24 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     });
   };
 
-  // Quick Preset Packages
+  /*
+   * Quick presets.
+   *
+   * The suits are now garments in their own right, so a preset selects the
+   * garment rather than approximating it. The three-piece preset used to tick
+   * Coat, Pant and Shirt, which is not a three-piece suit — the third piece is
+   * the waistcoat, and the shirt was never part of it.
+   */
   const applyPresetPackage = (type: 'suit2' | 'suit3' | 'ethnic') => {
-    const updated = { ...selectedGarments };
-    // A two-piece suit is a coat and a pant — two products, not one.
-    if (type === 'suit2') {
-      updated.Coat!.selected = true;
-      updated.Pant!.selected = true;
-      updated.Shirt!.selected = false;
-      updated['Kurta Pajama']!.selected = false;
-    } else if (type === 'suit3') {
-      updated.Coat!.selected = true;
-      updated.Pant!.selected = true;
-      updated.Shirt!.selected = true;
-      updated['Kurta Pajama']!.selected = false;
-    } else if (type === 'ethnic') {
-      updated.Coat!.selected = false;
-      updated.Pant!.selected = false;
-      updated.Shirt!.selected = false;
-      updated['Kurta Pajama']!.selected = true;
-    }
-    setSelectedGarments(updated);
+    const wanted: GarmentKey =
+      type === 'suit2' ? '2 Piece Suit' : type === 'suit3' ? '3 Piece Suit' : 'Kurta Pajama';
+    setSelectedGarments(prev => {
+      const updated = { ...prev };
+      (Object.keys(updated) as GarmentKey[]).forEach(key => {
+        updated[key] = { ...updated[key]!, selected: key === wanted };
+      });
+      return updated;
+    });
     setFormErrors(prev => ({ ...prev, garments: undefined }));
   };
 
@@ -913,10 +1001,15 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         remarks: g.remarks || ''
       }));
 
-      const hasCoat = selectedGarments.Coat?.selected;
-      const hasPant = selectedGarments.Pant?.selected;
-      const hasShirt = selectedGarments.Shirt?.selected;
-      const hasKurtaPajama = selectedGarments['Kurta Pajama']?.selected;
+      /*
+       * The sections this order was measured for, keyed as the record keys
+       * them. Derived from the garments rather than listed by hand: a garment
+       * added to the catalogue is saved because it resolves to a section, not
+       * because someone remembered to add a line here.
+       */
+      const measuredSections = Object.fromEntries(
+        activeSections.map(sec => [sec, SECTION_STATE[sec].values])
+      ) as Partial<MeasurementRecord>;
 
       const garmentRemarksMap: Record<string, string> = {};
       activeGarmentsList.forEach(g => {
@@ -932,10 +1025,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         fittingNotes,
         lastUpdated: orderDate,
         garmentRemarks: Object.keys(garmentRemarksMap).length > 0 ? garmentRemarksMap : undefined,
-        ...(hasCoat ? { coat: coatMeas } : {}),
-        ...(hasPant ? { pant: pantMeas } : {}),
-        ...(hasShirt ? { shirt: shirtMeas } : {}),
-        ...(hasKurtaPajama ? { kurta: kurtaMeas, pajama: pajamaMeas } : {})
+        ...measuredSections
       };
 
       // 4. Build Full Measurement Record for Customer Ledger
@@ -952,10 +1042,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         fittingNotes,
         lastUpdated: orderDate,
         garmentRemarks: Object.keys(garmentRemarksMap).length > 0 ? garmentRemarksMap : undefined,
-        ...(hasCoat ? { coat: coatMeas } : {}),
-        ...(hasPant ? { pant: pantMeas } : {}),
-        ...(hasShirt ? { shirt: shirtMeas } : {}),
-        ...(hasKurtaPajama ? { kurta: kurtaMeas, pajama: pajamaMeas } : {})
+        ...measuredSections
       };
 
       // 5. Build Final Order Object
@@ -1811,7 +1898,12 @@ export const OrderModal: React.FC<OrderModalProps> = ({
               {/* STEP 4: MEASUREMENTS */}
               {/* ======================================================== */}
               {currentStep === 4 && (
-                <div className="space-y-6 animate-fadeIn">
+                // Enter moves to the next measurement box rather than pressing
+                // the wizard's first button. Delegated from here so it covers
+                // every section this step draws, and only the measurement
+                // inputs within it — the remarks boxes below each garment keep
+                // their ordinary Enter.
+                <div className="space-y-6 animate-fadeIn" {...measurementEnter}>
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E6E1D7] pb-4">
                     <div>
                       <h2 className="text-2xl md:text-3xl font-black text-[#071426] brand-font tracking-tight">
@@ -1921,246 +2013,38 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                             </div>
                           </div>
 
-                          {/* 1. Coat only */}
-                          {g.key === 'Coat' && (
-                            <div className="space-y-3">
-                              <div className="flex items-center gap-2 pb-1 text-xs font-black text-[#071426] uppercase tracking-wider">
-                                <span className="text-base">🧥</span>
-                                <span>COAT MEASUREMENTS ({unit})</span>
-                              </div>
-                              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-                                {sectionFields('coat').map(f => (
-                                  <div key={f.key} className="space-y-1">
-                                    <label className="text-[10px] font-bold text-[#8C7E6A] uppercase">{f.label}</label>
-                                    <div className="relative">
-                                      <input
-                                        type="text"
-                                        value={(coatMeas as any)[f.key] || ''}
-                                        onChange={(e) => setCoatMeas({ ...coatMeas, [f.key]: e.target.value })}
-                                        className="w-full bg-[#FAF8F5] border border-[#E0D8CB] focus:border-[#C9A24A] rounded-xl px-2.5 py-2 text-center text-sm font-extrabold text-[#071426] outline-none"
-                                      />
-                                      <div className="flex justify-between mt-1 gap-1">
-                                        <button
-                                          type="button"
-                                          onClick={() => stepMeasurement(setCoatMeas, f.key, -0.25)}
-                                          className="flex-1 py-0.5 bg-[#FAF8F5] hover:bg-[#E6E1D7] rounded text-[10px] font-bold text-[#6E6454] cursor-pointer"
-                                        >
-                                          -¼
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => stepMeasurement(setCoatMeas, f.key, 0.25)}
-                                          className="flex-1 py-0.5 bg-[#FAF8F5] hover:bg-[#E6E1D7] rounded text-[10px] font-bold text-[#6E6454] cursor-pointer"
-                                        >
-                                          +¼
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* 2. Pant only */}
-                          {g.key === 'Pant' && (
-                            <div className="space-y-3">
-                              <div className="flex items-center gap-2 pb-1 text-xs font-black text-[#071426] uppercase tracking-wider">
-                                <span className="text-base">👖</span>
-                                <span>PANT MEASUREMENTS ({unit})</span>
-                              </div>
-                              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3">
-                                {[
-                                  { key: 'length', label: 'Length' },
-                                  { key: 'waist', label: 'Waist' },
-                                  { key: 'hip', label: 'H.P. / Hip' },
-                                  { key: 'thigh', label: 'Thigh' },
-                                  { key: 'inLeg', label: 'In-Leg' },
-                                  { key: 'bottom', label: 'Bottom' },
-                                  { key: 'body', label: 'Body' }
-                                ].map(f => (
-                                  <div key={f.key} className="space-y-1">
-                                    <label className="text-[10px] font-bold text-[#8C7E6A] uppercase">{f.label}</label>
-                                    <div className="relative">
-                                      <input
-                                        type="text"
-                                        value={(pantMeas as any)[f.key] || ''}
-                                        onChange={(e) => setPantMeas({ ...pantMeas, [f.key]: e.target.value })}
-                                        className="w-full bg-[#FAF8F5] border border-[#E0D8CB] focus:border-[#C9A24A] rounded-xl px-2.5 py-2 text-center text-sm font-extrabold text-[#071426] outline-none"
-                                      />
-                                      <div className="flex justify-between mt-1 gap-1">
-                                        <button
-                                          type="button"
-                                          onClick={() => stepMeasurement(setPantMeas, f.key, -0.25)}
-                                          className="flex-1 py-0.5 bg-[#FAF8F5] hover:bg-[#E6E1D7] rounded text-[10px] font-bold text-[#6E6454] cursor-pointer"
-                                        >
-                                          -¼
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => stepMeasurement(setPantMeas, f.key, 0.25)}
-                                          className="flex-1 py-0.5 bg-[#FAF8F5] hover:bg-[#E6E1D7] rounded text-[10px] font-bold text-[#6E6454] cursor-pointer"
-                                        >
-                                          +¼
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* 3. Shirt */}
-                          {g.key === 'Shirt' && (
-                            <div className="space-y-3">
-                              <div className="flex items-center gap-2 pb-1 text-xs font-black text-[#071426] uppercase tracking-wider">
-                                <span className="text-base">👔</span>
-                                <span>SHIRT MEASUREMENTS ({unit})</span>
-                              </div>
-                              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-3">
-                                {[
-                                  { key: 'length', label: 'Length' },
-                                  { key: 'chest', label: 'Chest' },
-                                  { key: 'stomach', label: 'Stomach' },
-                                  { key: 'hip', label: 'H.P. / Hip' },
-                                  { key: 'shoulder', label: 'Shoulder' },
-                                  { key: 'sleeve', label: 'Sleeve' },
-                                  { key: 'collar', label: 'Collar' },
-                                  { key: 'cuff', label: 'Cuff' }
-                                ].map(f => (
-                                  <div key={f.key} className="space-y-1">
-                                    <label className="text-[10px] font-bold text-[#8C7E6A] uppercase">{f.label}</label>
-                                    <div className="relative">
-                                      <input
-                                        type="text"
-                                        value={(shirtMeas as any)[f.key] || ''}
-                                        onChange={(e) => setShirtMeas({ ...shirtMeas, [f.key]: e.target.value })}
-                                        className="w-full bg-[#FAF8F5] border border-[#E0D8CB] focus:border-[#C9A24A] rounded-xl px-2 py-2 text-center text-sm font-extrabold text-[#071426] outline-none"
-                                      />
-                                      <div className="flex justify-between mt-1 gap-1">
-                                        <button
-                                          type="button"
-                                          onClick={() => stepMeasurement(setShirtMeas, f.key, -0.25)}
-                                          className="flex-1 py-0.5 bg-[#FAF8F5] hover:bg-[#E6E1D7] rounded text-[10px] font-bold text-[#6E6454] cursor-pointer"
-                                        >
-                                          -¼
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => stepMeasurement(setShirtMeas, f.key, 0.25)}
-                                          className="flex-1 py-0.5 bg-[#FAF8F5] hover:bg-[#E6E1D7] rounded text-[10px] font-bold text-[#6E6454] cursor-pointer"
-                                        >
-                                          +¼
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* 4. Kurta Pajama */}
-                          {g.key === 'Kurta Pajama' && (
-                            <div className="space-y-5">
-                              {/* KURTA */}
-                              <div className="space-y-3">
+                          {/*
+                            * The garment's measurement tables, in canonical
+                            * order, from the same definition the workshop slip
+                            * prints from. A composite garment is not a special
+                            * case here: a 2 Piece Suit resolves to coat and
+                            * pant, a 3 Piece Suit adds the waistcoat, and each
+                            * is the ordinary section with the ordinary fields.
+                            *
+                            * Two garments that share a section share its
+                            * values, because a customer has one chest, not one
+                            * per line item.
+                            */}
+                          {garmentSections(g.key).map(section => {
+                            const def = MEASUREMENT_SECTIONS.find(d => d.section === section)!;
+                            const state = SECTION_STATE[section];
+                            return (
+                              <div key={section} className="space-y-3">
                                 <div className="flex items-center gap-2 pb-1 text-xs font-black text-[#071426] uppercase tracking-wider">
-                                  <span className="text-base">👘</span>
-                                  <span>KURTA MEASUREMENTS ({unit})</span>
+                                  <span className="text-base">{SECTION_ICON[section]}</span>
+                                  <span>{def.title} ({unit})</span>
                                 </div>
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-                                  {[
-                                    { key: 'length', label: 'Length' },
-                                    { key: 'chest', label: 'Chest' },
-                                    { key: 'stomach', label: 'Stomach / Waist' },
-                                    { key: 'hip', label: 'H.P. / Hip' },
-                                    { key: 'shoulder', label: 'Shoulder' },
-                                    { key: 'sleeve', label: 'Sleeve' },
-                                    { key: 'bicep', label: 'Bicep' },
-                                    { key: 'cuff', label: 'Cuff' },
-                                    { key: 'collar', label: 'Collar' }
-                                  ].map(f => (
-                                    <div key={f.key} className="space-y-1">
-                                      <label className="text-[10px] font-bold text-[#8C7E6A] uppercase">{f.label}</label>
-                                      <div className="relative">
-                                        <input
-                                          type="text"
-                                          value={(kurtaMeas as any)[f.key] || ''}
-                                          onChange={(e) => setKurtaMeas({ ...kurtaMeas, [f.key]: e.target.value })}
-                                          className="w-full bg-[#FAF8F5] border border-[#E0D8CB] focus:border-[#C9A24A] rounded-xl px-2 py-2 text-center text-sm font-extrabold text-[#071426] outline-none"
-                                        />
-                                        <div className="flex justify-between mt-1 gap-1">
-                                          <button
-                                            type="button"
-                                            onClick={() => stepMeasurement(setKurtaMeas, f.key, -0.25)}
-                                            className="flex-1 py-0.5 bg-[#FAF8F5] hover:bg-[#E6E1D7] rounded text-[10px] font-bold text-[#6E6454] cursor-pointer"
-                                          >
-                                            -¼
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => stepMeasurement(setKurtaMeas, f.key, 0.25)}
-                                            className="flex-1 py-0.5 bg-[#FAF8F5] hover:bg-[#E6E1D7] rounded text-[10px] font-bold text-[#6E6454] cursor-pointer"
-                                          >
-                                            +¼
-                                          </button>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
+                                <MeasurementSectionInputs
+                                  section={section}
+                                  values={state.values}
+                                  onChange={(key, value) =>
+                                    state.set((prev: Record<string, unknown>) => ({ ...prev, [key]: value }))
+                                  }
+                                  onStep={(key, delta) => stepMeasurement(state.set, key, delta)}
+                                />
                               </div>
-
-                              {/* PAJAMA */}
-                              <div className="space-y-3 pt-4 border-t border-[#F2ECE1]">
-                                <div className="flex items-center gap-2 pb-1 text-xs font-black text-[#071426] uppercase tracking-wider">
-                                  <span className="text-base">👖</span>
-                                  <span>PAJAMA MEASUREMENTS ({unit})</span>
-                                </div>
-                                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3">
-                                  {[
-                                    { key: 'length', label: 'Length' },
-                                    { key: 'waist', label: 'Waist' },
-                                    { key: 'hip', label: 'H.P. / Hip' },
-                                    { key: 'thigh', label: 'Thigh' },
-                                    { key: 'inLeg', label: 'In-Leg' },
-                                    { key: 'bottom', label: 'Bottom' },
-                                    { key: 'body', label: 'Body' }
-                                  ].map(f => (
-                                    <div key={f.key} className="space-y-1">
-                                      <label className="text-[10px] font-bold text-[#8C7E6A] uppercase">{f.label}</label>
-                                      <div className="relative">
-                                        <input
-                                          type="text"
-                                          value={(pajamaMeas as any)[f.key] || ''}
-                                          onChange={(e) => setPajamaMeas({ ...pajamaMeas, [f.key]: e.target.value })}
-                                          className="w-full bg-[#FAF8F5] border border-[#E0D8CB] focus:border-[#C9A24A] rounded-xl px-2 py-2 text-center text-sm font-extrabold text-[#071426] outline-none"
-                                        />
-                                        <div className="flex justify-between mt-1 gap-1">
-                                          <button
-                                            type="button"
-                                            onClick={() => stepMeasurement(setPajamaMeas, f.key, -0.25)}
-                                            className="flex-1 py-0.5 bg-[#FAF8F5] hover:bg-[#E6E1D7] rounded text-[10px] font-bold text-[#6E6454] cursor-pointer"
-                                          >
-                                            -¼
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => stepMeasurement(setPajamaMeas, f.key, 0.25)}
-                                            className="flex-1 py-0.5 bg-[#FAF8F5] hover:bg-[#E6E1D7] rounded text-[10px] font-bold text-[#6E6454] cursor-pointer"
-                                          >
-                                            +¼
-                                          </button>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-                          )}
+                            );
+                          })}
 
                           {/* PER-GARMENT REMARKS FIELD BELOW MEASUREMENTS */}
                           <div className="pt-4 border-t border-[#F2ECE1] space-y-1.5">
@@ -2297,31 +2181,28 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                       <span>3. Precision Measurements ({unit}{fitPreference ? ` • ${fitPreference}` : ''})</span>
                     </h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
-                      {selectedGarments.Coat?.selected && (
-                        <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[#E0D8CB]">
-                          <span className="font-bold text-[#071426] block mb-1">Coat:</span>
-                          <span className="text-[#574E3E]">{summariseMeasurement('coat', coatMeas)}</span>
+                      {/* One card per garment the order actually has, each
+                          listing that garment's canonical fields. A composite
+                          suit lists its components; nothing here names a
+                          garment, so a garment added to the catalogue appears
+                          on review without this block being touched. */}
+                      {activeGarmentsList.map(g => (
+                        <div key={g.key} className="p-3 bg-[#FAF8F5] rounded-xl border border-[#E0D8CB]">
+                          <span className="font-bold text-[#071426] block mb-1">{g.key}:</span>
+                          {garmentSections(g.key).map(section => {
+                            const def = MEASUREMENT_SECTIONS.find(d => d.section === section)!;
+                            const label = def.title.replace(' MEASUREMENTS', '');
+                            const line = summariseMeasurement(section, SECTION_STATE[section].values);
+                            return garmentSections(g.key).length > 1 ? (
+                              <span key={section} className="text-[#574E3E] block mt-1">
+                                {label.charAt(0) + label.slice(1).toLowerCase()} — {line}
+                              </span>
+                            ) : (
+                              <span key={section} className="text-[#574E3E]">{line}</span>
+                            );
+                          })}
                         </div>
-                      )}
-                      {selectedGarments.Pant?.selected && (
-                        <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[#E0D8CB]">
-                          <span className="font-bold text-[#071426] block mb-1">Pant:</span>
-                          <span className="text-[#574E3E]">{summariseMeasurement('pant', pantMeas)}</span>
-                        </div>
-                      )}
-                      {selectedGarments.Shirt?.selected && (
-                        <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[#E0D8CB]">
-                          <span className="font-bold text-[#071426] block mb-1">Shirt:</span>
-                          <span className="text-[#574E3E]">{summariseMeasurement('shirt', shirtMeas)}</span>
-                        </div>
-                      )}
-                      {selectedGarments['Kurta Pajama']?.selected && (
-                        <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[#E0D8CB]">
-                          <span className="font-bold text-[#071426] block mb-1">Kurta Pajama:</span>
-                          <span className="text-[#574E3E] block">Kurta — {summariseMeasurement('kurta', kurtaMeas)}</span>
-                          <span className="text-[#574E3E] block mt-1">Pajama — {summariseMeasurement('pajama', pajamaMeas)}</span>
-                        </div>
-                      )}
+                      ))}
                     </div>
                   </div>
                 </div>

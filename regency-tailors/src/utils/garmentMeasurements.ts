@@ -249,16 +249,23 @@ function buildSectionBlock(
 const sectionBlock = (name: MeasurementSection, snapshot: Partial<MeasurementRecord>) =>
   buildSectionBlock(SECTION_BY_NAME.get(name)!, snapshot);
 
-export function garmentMeasurementBlocks(
-  item: OrderItem,
-  snapshot: Partial<MeasurementRecord>
-): MeasurementCategoryBlock[] {
-  const rawType = (item?.garmentType || '').trim();
+/**
+ * Which measurement sections a garment is made of.
+ *
+ * The one place a garment name becomes a list of sections. Entry asks it which
+ * boxes to show, the workshop slip and the measurement sheet ask it which
+ * tables to print, and because they ask the same function a garment cannot be
+ * offered for entry under one set of measurements and printed under another.
+ *
+ * Empty for a garment nothing recognises; the caller decides what to do with
+ * that, which for the slip is a best-effort table rather than a blank sheet.
+ */
+export function garmentSections(garmentType: string): MeasurementSection[] {
+  const rawType = (garmentType || '').trim();
   const gType = rawType.toLowerCase();
-  const categories: MeasurementCategoryBlock[] = [];
 
   /*
-   * Named garments are resolved first, from the table above. Without this the
+   * Named garments are resolved first, from the tables above. Without this the
    * keyword matching below would claim them: "Sherwani" and "Jacket" both
    * contain words the coat rule looks for, and a "2 Piece Suit" would be a
    * coat and a pant by accident rather than by definition — which happens to
@@ -267,9 +274,9 @@ export function garmentMeasurementBlocks(
   const named =
     COMPOSITE_GARMENTS.find(g => g.match.test(rawType)) ||
     EXACT_GARMENTS.find(g => g.match.test(rawType));
-  if (named) {
-    return named.sections.map(name => sectionBlock(name, snapshot));
-  }
+  if (named) return [...named.sections];
+
+  const sections: MeasurementSection[] = [];
 
   const isSuit = gType.includes('suit');
   const isCoat =
@@ -288,25 +295,21 @@ export function garmentMeasurementBlocks(
     gType.includes('churidar') || gType.includes('dhoti') ||
     (isKurta && (gType.includes('pajama') || gType.includes('pyjama') || gType.includes('set')));
 
-  if (isCoat && !isKurta && !isShirt) {
-    categories.push(sectionBlock('coat', snapshot));
-  }
+  if (isCoat && !isKurta && !isShirt) sections.push('coat');
+  if (isPant && !isKurta && !isShirt) sections.push('pant');
+  if (isShirt) sections.push('shirt');
+  if (isKurta) sections.push('kurta');
+  if (isPajama) sections.push('pajama');
 
-  if (isPant && !isKurta && !isShirt) {
-    categories.push(sectionBlock('pant', snapshot));
-  }
+  return sections;
+}
 
-  if (isShirt) {
-    categories.push(sectionBlock('shirt', snapshot));
-  }
-
-  if (isKurta) {
-    categories.push(sectionBlock('kurta', snapshot));
-  }
-
-  if (isPajama) {
-    categories.push(sectionBlock('pajama', snapshot));
-  }
+export function garmentMeasurementBlocks(
+  item: OrderItem,
+  snapshot: Partial<MeasurementRecord>
+): MeasurementCategoryBlock[] {
+  const categories: MeasurementCategoryBlock[] = garmentSections(item?.garmentType || '')
+    .map(name => sectionBlock(name, snapshot));
 
   if (categories.length === 0) {
     categories.push({
