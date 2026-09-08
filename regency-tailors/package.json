@@ -22,7 +22,8 @@
     "electron:dev": "npm run build && electron electron/main.cjs",
     "electron:pack": "npm run build && electron-builder --win dir --x64",
     "electron:build:win": "npm run build && electron-builder --win nsis --x64",
-    "electron:verify": "npm run build && electron electron/verify.cjs"
+    "electron:verify": "npm run build && electron electron/verify.cjs",
+    "test:new-garments": "node e2e/new-garments.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -57,7 +58,7 @@
     "vite": "^6.2.3",
     "vitest": "^3.2.7"
   },
-  "description": "Regency Tailor \u2014 bespoke showroom and tailoring suite",
+  "description": "Regency Tailor — bespoke showroom and tailoring suite",
   "author": "S.S Ai Labs",
   "main": "electron/main.cjs"
 }

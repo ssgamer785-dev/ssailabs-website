@@ -70,7 +70,23 @@ export async function createOrder(page, { name, phone, city, address, garments =
 
   // Step 4: fill measurements. `measurements` = { 'COAT MEASUREMENTS': { Chest: 40, ... }, ... }
   for (const [sectionTitle, fields] of Object.entries(measurements)) {
-    const section = page.locator('div.space-y-3').filter({ hasText: sectionTitle }).last();
+    // By the section's own attribute, not by its heading text: "WAISTCOAT
+    // MEASUREMENTS" contains "COAT MEASUREMENTS", so a hasText filter matched
+    // the waistcoat when asked for the coat and quietly typed the coat's
+    // measurements into it.
+    const key = {
+      'COAT MEASUREMENTS': 'coat',
+      'PANT MEASUREMENTS': 'pant',
+      'SHIRT MEASUREMENTS': 'shirt',
+      'KURTA MEASUREMENTS': 'kurta',
+      'PAJAMA MEASUREMENTS': 'pajama',
+      'WAISTCOAT MEASUREMENTS': 'waistcoat',
+      'JACKET MEASUREMENTS': 'jacketGarment',
+      'SHERWANI MEASUREMENTS': 'sherwani'
+    }[sectionTitle];
+    const section = key
+      ? page.locator(`[data-measurement-section="${key}"]`).last()
+      : page.locator('div.space-y-3').filter({ hasText: sectionTitle }).last();
     for (const [label, val] of Object.entries(fields)) {
       const input = section.locator('div.space-y-1')
         .filter({ has: page.locator(`label:text-is("${label}")`) })
