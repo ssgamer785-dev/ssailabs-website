@@ -193,12 +193,41 @@ declare v_blocked boolean := false; v_meas uuid;
 begin
     select id into v_meas from public.measurements limit 1;
     begin
+        -- Not 'sherwani': that is a garment the showroom now measures. This
+        -- has to be a name the list will never contain, or the assertion
+        -- quietly stops testing anything the day the list grows.
         insert into public.measurement_values (measurement_id, garment_category, data)
-        values (v_meas, 'sherwani', '{}'::jsonb);
+        values (v_meas, 'not_a_garment', '{}'::jsonb);
     exception when check_violation then
         v_blocked := true;
     end;
     perform pg_temp.ok('an unknown garment category is rejected', v_blocked);
+end;
+$$;
+
+-- The three sections added for the waistcoat, jacket and sherwani. A composite
+-- suit stores nothing of its own, so there is no 'suit' category to accept.
+do $$
+declare
+    v_meas uuid;
+    v_cat  text;
+    v_ok   boolean;
+begin
+    select id into v_meas from public.measurements limit 1;
+    foreach v_cat in array array['waistcoat', 'jacket_garment', 'sherwani'] loop
+        v_ok := true;
+        begin
+            insert into public.measurement_values (measurement_id, garment_category, data)
+            values (v_meas, v_cat, '{"length":"25"}'::jsonb);
+        exception when check_violation then
+            v_ok := false;
+        end;
+        perform pg_temp.ok(format('%s measurements are accepted', v_cat), v_ok);
+    end loop;
+
+    delete from public.measurement_values
+     where measurement_id = v_meas
+       and garment_category in ('waistcoat', 'jacket_garment', 'sherwani');
 end;
 $$;
 

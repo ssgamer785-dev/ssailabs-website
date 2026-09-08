@@ -22,7 +22,15 @@ export interface MeasurementCategoryBlock {
 }
 
 /** The five measurement tables a customer's record can hold. */
-export type MeasurementSection = 'coat' | 'pant' | 'shirt' | 'kurta' | 'pajama';
+export type MeasurementSection =
+  | 'coat'
+  | 'pant'
+  | 'shirt'
+  | 'kurta'
+  | 'pajama'
+  | 'waistcoat'
+  | 'jacketGarment'
+  | 'sherwani';
 
 interface SectionFieldDefinition {
   /** Printed exactly as written, on the slip and on the measurement sheet. */
@@ -135,7 +143,75 @@ export const MEASUREMENT_SECTIONS: readonly SectionDefinition[] = [
       { label: 'Bottom', key: 'bottom' },
       { label: 'Body', key: 'body', colSpan: true }
     ]
+  },
+  /*
+   * The three sets below are exactly the fields the showroom specified for
+   * these garments — no more. A waistcoat is not measured for sleeve, and a
+   * jacket is not measured for X-back, so neither field is offered; adding
+   * "harmless" extras would put a blank on the workshop slip that a cutter has
+   * to decide whether to worry about.
+   */
+  {
+    section: 'waistcoat',
+    title: 'WAISTCOAT MEASUREMENTS',
+    subLabel: 'Waist Coat',
+    fields: [
+      { label: 'Length', key: 'length' },
+      { label: 'Chest', key: 'chest' },
+      { label: 'Stomach', key: 'stomach' },
+      { label: 'H.P. / Hip', key: 'hip' },
+      { label: 'Shoulder', key: 'shoulder' }
+    ]
+  },
+  {
+    section: 'jacketGarment',
+    title: 'JACKET MEASUREMENTS',
+    subLabel: 'Jacket',
+    fields: [
+      { label: 'Length', key: 'length' },
+      { label: 'Chest', key: 'chest' },
+      { label: 'Stomach', key: 'stomach' },
+      { label: 'H.P. / Hip', key: 'hip' },
+      { label: 'Shoulder', key: 'shoulder' },
+      { label: 'Collar', key: 'collar' }
+    ]
+  },
+  {
+    section: 'sherwani',
+    title: 'SHERWANI MEASUREMENTS',
+    subLabel: 'Sherwani',
+    fields: [
+      { label: 'Length', key: 'length' },
+      { label: 'Chest', key: 'chest' },
+      { label: 'Stomach', key: 'stomach' },
+      { label: 'H.P. / Hip', key: 'hip' },
+      { label: 'Shoulder', key: 'shoulder' },
+      { label: 'Sleeve', key: 'sleeve' },
+      { label: 'X-Back', key: 'xBack' },
+      { label: 'Collar', key: 'collar' }
+    ]
   }
+];
+
+/**
+ * Which measurement sections a garment is made of, by garment name.
+ *
+ * Composite garments are the reason this exists as data rather than as a chain
+ * of string tests: a 3 Piece Suit is a Coat, a Pant and a Waistcoat, and it has
+ * to be those exact three canonical sets everywhere the order is shown. The
+ * longest matching name wins, so "2 Piece Suit" is not mistaken for a Coat by
+ * the looser keyword matching below it.
+ */
+const COMPOSITE_GARMENTS: { match: RegExp; sections: MeasurementSection[] }[] = [
+  { match: /3\s*-?\s*piece/i, sections: ['coat', 'pant', 'waistcoat'] },
+  { match: /2\s*-?\s*piece/i, sections: ['coat', 'pant'] }
+];
+
+/** Single-section garments whose name must not fall through to the keywords. */
+const EXACT_GARMENTS: { match: RegExp; sections: MeasurementSection[] }[] = [
+  { match: /waist\s*-?\s*coat/i, sections: ['waistcoat'] },
+  { match: /sherwani/i, sections: ['sherwani'] },
+  { match: /\bjacket\b/i, sections: ['jacketGarment'] }
 ];
 
 const SECTION_BY_NAME = new Map(MEASUREMENT_SECTIONS.map(d => [d.section, d]));
@@ -177,8 +253,23 @@ export function garmentMeasurementBlocks(
   item: OrderItem,
   snapshot: Partial<MeasurementRecord>
 ): MeasurementCategoryBlock[] {
-  const gType = (item?.garmentType || '').toLowerCase().trim();
+  const rawType = (item?.garmentType || '').trim();
+  const gType = rawType.toLowerCase();
   const categories: MeasurementCategoryBlock[] = [];
+
+  /*
+   * Named garments are resolved first, from the table above. Without this the
+   * keyword matching below would claim them: "Sherwani" and "Jacket" both
+   * contain words the coat rule looks for, and a "2 Piece Suit" would be a
+   * coat and a pant by accident rather than by definition — which happens to
+   * be right for two pieces and wrong for three.
+   */
+  const named =
+    COMPOSITE_GARMENTS.find(g => g.match.test(rawType)) ||
+    EXACT_GARMENTS.find(g => g.match.test(rawType));
+  if (named) {
+    return named.sections.map(name => sectionBlock(name, snapshot));
+  }
 
   const isSuit = gType.includes('suit');
   const isCoat =

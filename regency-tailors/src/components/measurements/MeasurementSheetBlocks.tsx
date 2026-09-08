@@ -13,7 +13,10 @@ const SECTION_ICONS: Record<MeasurementSection, string> = {
   pant: '👖',
   shirt: '👔',
   kurta: '👘',
-  pajama: '🩳'
+  pajama: '🩳',
+  waistcoat: '🦺',
+  jacketGarment: '🧥',
+  sherwani: '👑'
 };
 
 interface MeasurementSheetBlocksProps {

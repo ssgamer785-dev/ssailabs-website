@@ -14,6 +14,18 @@ export type GarmentType =
   | 'Pant'
   | 'Shirt'
   | 'Kurta Pajama'
+  | 'Jacket'
+  | 'Waistcoat'
+  /**
+   * Composite garments. They are one line item on the order and one entry in
+   * the workshop's count, but they carry the measurements of their components:
+   * a 2 Piece Suit is a Coat and a Pant, a 3 Piece Suit adds a Waistcoat. The
+   * component measurements are the canonical Coat/Pant/Waistcoat sets — there
+   * is no separate "suit coat" definition to drift out of step.
+   */
+  | '2 Piece Suit'
+  | '3 Piece Suit'
+  /** Hyphenated spellings kept so orders stored under them still type-check. */
   | '3-Piece Suit'
   | '2-Piece Suit'
   | 'Sherwani'
@@ -109,6 +121,45 @@ export interface PajamaMeasurement {
   body?: number | string;
 }
 
+export interface WaistcoatMeasurement {
+  length?: number | string;
+  chest?: number | string;
+  stomach?: number | string;
+  hip?: number | string;
+  shoulder?: number | string;
+}
+
+/**
+ * The Jacket garment's own measurements.
+ *
+ * Stored under `jacketGarment`, not `jacket`: `jacket` is already taken by the
+ * legacy pre-Supabase shape that the Coat section falls back to when a modern
+ * coat value is unset (see MEASUREMENT_SECTIONS). Writing a modern jacket here
+ * under the key `jacket` would make an old order's coat read this garment's
+ * chest and hip, and make a jacket-only record render a phantom coat block on
+ * the measurement sheet.
+ */
+export interface JacketGarmentMeasurement {
+  length?: number | string;
+  chest?: number | string;
+  stomach?: number | string;
+  hip?: number | string;
+  shoulder?: number | string;
+  collar?: number | string;
+}
+
+export interface SherwaniMeasurement {
+  length?: number | string;
+  chest?: number | string;
+  stomach?: number | string;
+  hip?: number | string;
+  shoulder?: number | string;
+  sleeve?: number | string;
+  xBack?: number | string;
+  collar?: number | string;
+}
+
+/** Legacy pre-Supabase coat shape. Read on old records, never written. */
 export interface JacketMeasurement {
   chest: number;
   waist: number;
@@ -148,6 +199,9 @@ export interface MeasurementRecord {
   shirt?: ShirtMeasurement;
   kurta?: KurtaMeasurement;
   pajama?: PajamaMeasurement;
+  waistcoat?: WaistcoatMeasurement;
+  jacketGarment?: JacketGarmentMeasurement;
+  sherwani?: SherwaniMeasurement;
   jacket?: JacketMeasurement;
   trouser?: TrouserMeasurement;
   fitPreference?: 'Slim Fit' | 'Italian Cut' | 'Classic Tailored' | 'Structured Shoulder' | 'Soft Shoulder' | string;

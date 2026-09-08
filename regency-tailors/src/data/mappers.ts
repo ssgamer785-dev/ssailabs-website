@@ -23,8 +23,43 @@ import {
  * rest receive exactly the props they received when this ran on localStorage.
  */
 
-export const MEASUREMENT_CATEGORIES = ['coat', 'pant', 'shirt', 'kurta', 'pajama'] as const;
+/**
+ * The measurement sections, named as the record names them.
+ *
+ * These are the keys on MeasurementRecord, which is what the whole application
+ * reads and writes. The database column uses the same names with one
+ * exception, mapped below.
+ */
+export const MEASUREMENT_CATEGORIES = [
+  'coat', 'pant', 'shirt', 'kurta', 'pajama',
+  'waistcoat', 'jacketGarment', 'sherwani'
+] as const;
 export type MeasurementCategory = (typeof MEASUREMENT_CATEGORIES)[number];
+
+/**
+ * Record key to `measurement_values.garment_category`, and back.
+ *
+ * Only the jacket differs, and it has to: the record already uses `jacket` for
+ * the legacy pre-Supabase coat shape, so the Jacket garment is `jacketGarment`
+ * in the record and `jacket_garment` in the column. Every other section is
+ * spelled the same on both sides, and this map keeps that from being an
+ * assumption two files apart have to agree on by luck.
+ */
+const CATEGORY_COLUMN: Partial<Record<MeasurementCategory, string>> = {
+  jacketGarment: 'jacket_garment'
+};
+
+/** The database column value for a record section. */
+export const categoryToColumn = (c: MeasurementCategory): string => CATEGORY_COLUMN[c] || c;
+
+/** The record section for a database column value, or undefined if unknown. */
+export const columnToCategory = (column: string): MeasurementCategory | undefined =>
+  MEASUREMENT_CATEGORIES.find(c => categoryToColumn(c) === column);
+
+/** How a section is named to a person: 'jacketGarment' reads as 'Jacket'. */
+const CATEGORY_LABEL: Partial<Record<MeasurementCategory, string>> = {
+  jacketGarment: 'Jacket'
+};
 
 /* ----------------------------------------------------------------- rows */
 
@@ -295,13 +330,12 @@ export function toOrder(row: OrderRow): Order {
 export function toMeasurementRecord(row: MeasurementRow, customer?: Customer | null): MeasurementRecord {
   const byCategory: Partial<Record<MeasurementCategory, Record<string, unknown>>> = {};
   (row.measurement_values || []).forEach(v => {
-    if ((MEASUREMENT_CATEGORIES as readonly string[]).includes(v.garment_category)) {
-      byCategory[v.garment_category as MeasurementCategory] = v.data || {};
-    }
+    const category = columnToCategory(v.garment_category);
+    if (category) byCategory[category] = v.data || {};
   });
 
   const selected = MEASUREMENT_CATEGORIES.filter(c => byCategory[c]).map(
-    c => c.charAt(0).toUpperCase() + c.slice(1)
+    c => CATEGORY_LABEL[c] || c.charAt(0).toUpperCase() + c.slice(1)
   );
 
   return {
@@ -474,12 +508,12 @@ export function orderItemsToRows(order: Order, orderDbId: string): Record<string
 }
 
 /** Splits an app measurement record into its per-category database rows. */
-export function measurementValueRows(record: Partial<MeasurementRecord>): { garment_category: MeasurementCategory; data: Record<string, unknown> }[] {
-  const rows: { garment_category: MeasurementCategory; data: Record<string, unknown> }[] = [];
+export function measurementValueRows(record: Partial<MeasurementRecord>): { garment_category: string; data: Record<string, unknown> }[] {
+  const rows: { garment_category: string; data: Record<string, unknown> }[] = [];
   MEASUREMENT_CATEGORIES.forEach(category => {
     const data = (record as Record<string, unknown>)[category];
     if (data && typeof data === 'object') {
-      rows.push({ garment_category: category, data: data as Record<string, unknown> });
+      rows.push({ garment_category: categoryToColumn(category), data: data as Record<string, unknown> });
     }
   });
   return rows;
