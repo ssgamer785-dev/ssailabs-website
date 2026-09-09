@@ -840,6 +840,27 @@ export default function App() {
   };
 
   // Handlers: Backup & Atomic Restore
+  /**
+   * Empties the showroom's books so the client starts its live records clean.
+   *
+   * Nothing is decided here. The typed phrase is forwarded to the database,
+   * which checks that the caller is the admin, checks the phrase, empties the
+   * business tables in foreign-key order and returns numbering to #1 — all in
+   * one transaction. This function's only other job is to make the screen show
+   * what the database now holds, through the same refresh every other write
+   * uses, so a reset cannot leave stale rows on screen.
+   */
+  const handleResetAllData = useCallback(async (confirmation: string) => {
+    if (!usesSupabase) {
+      throw new Error('Resetting is only available when the showroom database is connected.');
+    }
+    let counts: Record<string, number> = {};
+    await pushOrThrow(async () => {
+      counts = await repo.resetShowroomData(confirmation);
+    });
+    return counts;
+  }, [pushOrThrow]);
+
   const handleRestoreBackup = async (incoming: RegencyBackupPayload) => {
     if (usesSupabase) {
       // A v2 file carries the exact Postgres payload; an older file is
@@ -1079,6 +1100,7 @@ export default function App() {
               trash={trash}
               profile={profile}
               onRestoreBackup={handleRestoreBackup}
+              onResetAllData={usesSupabase ? handleResetAllData : undefined}
               onRefresh={refresh}
             />
           )}

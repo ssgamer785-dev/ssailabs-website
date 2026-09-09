@@ -4,6 +4,7 @@ import {
   Upload,
   CheckCircle2,
   AlertTriangle,
+  Trash2,
   FileCheck2,
   Loader2,
   ShieldCheck,
@@ -53,6 +54,9 @@ interface BackupViewProps {
   trash: TrashItem[];
   profile: ShowroomProfile;
   onRestoreBackup: (payload: RegencyBackupPayload) => void | Promise<void>;
+  /** Absent when the showroom database is not connected, which hides the
+   *  reset entirely rather than offering a button that cannot work. */
+  onResetAllData?: (confirmation: string) => Promise<Record<string, number>>;
   onRefresh?: () => void | Promise<void>;
 }
 
@@ -67,9 +71,41 @@ export const BackupView: React.FC<BackupViewProps> = ({
   trash,
   profile,
   onRestoreBackup,
+  onResetAllData,
   onRefresh
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /* Reset All Data. The phrase must be typed exactly; the database checks it
+   * again, so this is the second of two gates, not the only one. */
+  const RESET_PHRASE = 'RESET ALL DATA';
+  const [isResetOpen, setIsResetOpen] = useState(false);
+  const [resetTyped, setResetTyped] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetDone, setResetDone] = useState<Record<string, number> | null>(null);
+
+  const closeReset = () => {
+    setIsResetOpen(false);
+    setResetTyped('');
+    setResetError(null);
+  };
+
+  const handleConfirmReset = async () => {
+    if (!onResetAllData || resetTyped !== RESET_PHRASE) return;
+    setIsResetting(true);
+    setResetError(null);
+    try {
+      const counts = await onResetAllData(RESET_PHRASE);
+      setResetDone(counts);
+      setIsResetOpen(false);
+      setResetTyped('');
+    } catch (err: unknown) {
+      setResetError(err instanceof Error ? err.message : 'The reset did not complete.');
+    } finally {
+      setIsResetting(false);
+    }
+  };
 
   // Export State
   const [isExporting, setIsExporting] = useState(false);
@@ -726,6 +762,126 @@ export const BackupView: React.FC<BackupViewProps> = ({
                   <>
                     <Upload className="w-4 h-4" />
                     <span>RESTORE BACKUP</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== DANGER ZONE: RESET ALL DATA ==================== */}
+      {onResetAllData && (
+        <div className="bg-white rounded-2xl border-2 border-red-200 shadow-2xs overflow-hidden">
+          <div className="px-4 sm:px-5 py-3 border-b border-red-100 bg-red-50/60 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-600" />
+            <h3 className="text-sm font-black text-red-800 uppercase tracking-wider">Danger Zone</h3>
+          </div>
+
+          <div className="p-4 sm:p-5 space-y-3">
+            <div>
+              <h4 className="text-sm font-extrabold text-[#071426]">Reset all data</h4>
+              <p className="text-xs text-[#6E6454] leading-relaxed mt-1">
+                Permanently deletes <strong>every customer, order, garment line, payment and
+                measurement</strong>, and starts order numbers again at <strong>#1</strong>. Intended
+                once, when the showroom goes live with its own records.
+              </p>
+              <p className="text-xs text-[#6E6454] leading-relaxed mt-2">
+                Your sign-in, the admin list and the showroom settings are kept. Take a backup
+                first — <strong>this cannot be undone</strong> from inside the app.
+              </p>
+            </div>
+
+            {resetDone && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+                <span className="font-bold">Showroom reset.</span>{' '}
+                Removed {resetDone.customers ?? 0} customers and {resetDone.orders ?? 0} orders.
+                The next order will be #1.
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => { setResetDone(null); setIsResetOpen(true); }}
+              className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs tracking-wider uppercase transition-all inline-flex items-center gap-2 cursor-pointer active:scale-[0.99]"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Reset all data</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation. Deliberately awkward: the phrase has to be typed, so
+          this cannot be completed by clicking through. */}
+      {isResetOpen && (
+        <div className="fixed inset-0 z-50 bg-[#071426]/85 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border-2 border-red-200 w-full max-w-lg p-6 space-y-4 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-[#071426]">Delete all showroom records?</h3>
+                <p className="text-xs text-[#6E6454] leading-relaxed mt-1">
+                  This removes <strong>{customers.length} customers</strong> and{' '}
+                  <strong>{orders.length} orders</strong> with their garments, payments and
+                  measurements, on every device. Order numbering restarts at #1.
+                  <br />
+                  <strong className="text-red-700">This cannot be undone.</strong>
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="reset-confirm" className="text-xs font-bold text-[#071426] uppercase tracking-wider">
+                Type <span className="font-mono text-red-700">{RESET_PHRASE}</span> to confirm
+              </label>
+              <input
+                id="reset-confirm"
+                type="text"
+                autoComplete="off"
+                value={resetTyped}
+                onChange={e => setResetTyped(e.target.value)}
+                placeholder={RESET_PHRASE}
+                className="w-full bg-[#FAF8F5] border border-[#E0D8CB] focus:border-red-400 rounded-xl px-3 py-2 text-sm font-bold text-[#071426] outline-none"
+              />
+            </div>
+
+            {resetError && (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                {resetError}
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={isResetting}
+                onClick={closeReset}
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl border border-[#E0D8CB] text-[#071426] font-extrabold text-xs tracking-wider uppercase hover:bg-[#FAF8F5] transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isResetting || resetTyped !== RESET_PHRASE}
+                onClick={handleConfirmReset}
+                className={`w-full sm:w-auto px-6 py-2.5 rounded-xl bg-red-600 text-white font-extrabold text-xs tracking-wider uppercase transition-all inline-flex items-center justify-center gap-2 ${
+                  isResetting || resetTyped !== RESET_PHRASE
+                    ? 'opacity-50 cursor-not-allowed'
+                    : 'hover:bg-red-700 cursor-pointer active:scale-[0.99]'
+                }`}
+              >
+                {isResetting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Resetting…</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Delete everything</span>
                   </>
                 )}
               </button>

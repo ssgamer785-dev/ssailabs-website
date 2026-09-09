@@ -560,6 +560,23 @@ export async function restoreBackupPayload(payload: Record<string, unknown>, rea
   return data as Record<string, unknown>;
 }
 
+/**
+ * Empties the showroom's business records and returns numbering to #1.
+ *
+ * Every decision that matters is the database's. This sends a typed phrase and
+ * nothing else — no table name, no predicate, no list of what to delete — so
+ * there is no argument here that could widen what gets removed. Authorisation
+ * is checked inside the function by is_authorized_admin(), and the whole reset
+ * is one function body, so it is one transaction: the showroom is emptied or
+ * it is untouched.
+ */
+export async function resetShowroomData(confirmation: string): Promise<Record<string, number>> {
+  const db = requireSupabase();
+  const { data, error } = await db.rpc('reset_showroom_data', { p_confirmation: confirmation });
+  fail('Could not reset the showroom data', error);
+  return (data || {}) as Record<string, number>;
+}
+
 export async function saveShowroomSettings(profile: ShowroomProfile): Promise<void> {
   const db = requireSupabase();
   const { error } = await db
