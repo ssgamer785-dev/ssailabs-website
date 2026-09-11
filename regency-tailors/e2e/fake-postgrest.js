@@ -278,6 +278,16 @@
       for (const r of targets) {
         const next = { ...r, ...body };
         if (table === 'customers') next.phone_normalized = norm(next.phone);
+        // `orders_number_is_immutable` — the trigger the migration installs.
+        // An order number is issued once by the sequence and is permanent, so
+        // an UPDATE that tries to change it is refused rather than applied.
+        if (table === 'orders' && next.order_number !== undefined &&
+            String(next.order_number) !== String(r.order_number)) {
+          const message = `Order #${r.order_number} cannot be renumbered ` +
+            `(attempted #${next.order_number}). The order number is issued once and is permanent.`;
+          window.__PGREST.errors.push({ table, col: 'order_number', value: String(next.order_number), message });
+          return err('23514', message);
+        }
         const bad = checkUuids(table, next);
         if (bad) return err('22P02', bad);
         Object.assign(r, next);

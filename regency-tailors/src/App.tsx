@@ -23,6 +23,8 @@ import {
   OrderStatus,
   ProductionStatus
 } from './types';
+import { MEASUREMENT_SECTIONS } from './utils/garmentMeasurements';
+import { mergeEditedOrder, findOrderBeingEdited } from './utils/orderEditMerge';
 import { Sidebar, NavTab } from './components/Sidebar';
 import { Header } from './components/Header';
 import { DashboardView } from './components/views/DashboardView';
@@ -64,6 +66,27 @@ const STORAGE_KEY = 'REGENCY_TAILORS_DB_V3';
  */
 function bootstrap<T>(key: string, fallback: T[]): T[] {
   return usesSupabase ? fallback : readArray<T>(key, fallback);
+}
+
+/**
+ * The measurement sections an order actually captured, by their record keys.
+ *
+ * Driven by the canonical section list rather than a list written out here:
+ * the two places that built this by hand both stopped at five sections, so a
+ * waistcoat measured on an order was saved with the order and then missing
+ * from the customer's measurement sheet.
+ *
+ * Only sections the order carries are included, so a shirt-only order never
+ * blanks a coat or pant recorded earlier.
+ */
+function capturedSections(snapshot: Partial<MeasurementRecord> | undefined): Partial<MeasurementRecord> {
+  const captured: Record<string, unknown> = {};
+  if (!snapshot) return captured as Partial<MeasurementRecord>;
+  MEASUREMENT_SECTIONS.forEach(def => {
+    const value = (snapshot as Record<string, unknown>)[def.section];
+    if (value) captured[def.section] = value;
+  });
+  return captured as Partial<MeasurementRecord>;
 }
 
 export default function App() {
@@ -447,11 +470,29 @@ export default function App() {
 
   // Handlers: Orders
   const handleSaveOrder = async (order: Order): Promise<Order | void> => {
+    /*
+     * An edit has to reach the database as an edit.
+     *
+     * The wizard builds a fresh Order from what is on screen; it does not carry
+     * `dbId`, because it has no reason to know about the database. The
+     * repository decides between INSERT and UPDATE on exactly that field — so
+     * passing the wizard's object straight through made every edit an insert,
+     * and the sequence issued a new number for an order the showroom had
+     * already printed a bill for.
+     *
+     * Merging against the stored order first is what makes an edit an edit. It
+     * restores `dbId`, and with it the order number, the money, the workflow
+     * status and the production history — none of which the wizard owns.
+     */
+    const existingOrder = findOrderBeingEdited(order, orders);
+    const isEdit = Boolean(existingOrder);
+    const mergedOrder: Order = mergeEditedOrder(order, existingOrder);
+
     if (usesSupabase) {
       // The order number comes from the database sequence, so the saved row is
       // the authoritative record — the wizard shows what the server returned.
       try {
-        const saved = await repo.saveOrder(order);
+        const saved = await repo.saveOrder(mergedOrder);
         if (order.measurementsSnapshot) {
           await repo.saveMeasurement({
             id: '',
@@ -464,11 +505,10 @@ export default function App() {
             fittingNotes: order.measurementsSnapshot.fittingNotes,
             garmentRemarks: order.measurementsSnapshot.garmentRemarks,
             lastUpdated: saved.orderDate,
-            coat: order.measurementsSnapshot.coat,
-            pant: order.measurementsSnapshot.pant,
-            shirt: order.measurementsSnapshot.shirt,
-            kurta: order.measurementsSnapshot.kurta,
-            pajama: order.measurementsSnapshot.pajama
+            // Every section the order captured, from the canonical list. This
+            // named five by hand, so a waistcoat, jacket or sherwani measured
+            // on the order never reached the customer's ledger.
+            ...capturedSections(order.measurementsSnapshot)
           });
         }
         setDataError(null);
@@ -485,35 +525,6 @@ export default function App() {
     // even if the order is later deleted and the trash emptied.
     raiseHighWaterMark(STORAGE_KEY, extractOrderNumber(order.orderNumber || order.id));
 
-    // An edit must never reset money, workflow status or production history.
-    // The wizard only owns customer details, dates, garments and measurements;
-    // everything else is carried over from the stored order.
-    const existingOrder = orders.find(o => o.id === order.id) || null;
-    const isEdit = Boolean(existingOrder);
-
-    const mergedOrder: Order = existingOrder
-      ? {
-          ...existingOrder,
-          // fields the order wizard is allowed to change
-          customerId: order.customerId,
-          customerName: order.customerName,
-          customerPhone: order.customerPhone,
-          customerEmail: order.customerEmail ?? existingOrder.customerEmail,
-          customerAddress: order.customerAddress ?? existingOrder.customerAddress,
-          items: order.items,
-          orderDate: order.orderDate,
-          deliveryDate: order.deliveryDate,
-          specialInstructions: order.specialInstructions,
-          notes: order.notes,
-          fittingNotes: order.fittingNotes,
-          measurementsSnapshot: order.measurementsSnapshot
-          // status, productionStatus, productionNotes, totalAmount, subtotal,
-          // discount, taxAmount, advancePaid, balanceDue, paymentHistory,
-          // paymentMethod, trialDate, priority, urgent, invoiceId and fittingId
-          // are intentionally preserved from `existingOrder`.
-        }
-      : order;
-
     setOrders(prev => {
       const exists = prev.some(o => o.id === mergedOrder.id);
       if (exists) return prev.map(o => o.id === mergedOrder.id ? mergedOrder : o);
@@ -525,10 +536,7 @@ export default function App() {
       const snap = mergedOrder.measurementsSnapshot;
       // Only carry garment sections that this order actually captured, so a
       // shirt-only order never blanks a previously recorded coat or pant.
-      const capturedSections: Partial<MeasurementRecord> = {};
-      (['coat', 'pant', 'shirt', 'kurta', 'pajama'] as const).forEach(section => {
-        if (snap[section]) (capturedSections as any)[section] = snap[section];
-      });
+      const captured = capturedSections(snap);
 
       const newMRecord: MeasurementRecord = {
         id: `M-${mergedOrder.id}`,
@@ -543,7 +551,7 @@ export default function App() {
         fitPreference: snap.fitPreference,
         garmentRemarks: snap.garmentRemarks,
         fittingNotes: snap.fittingNotes,
-        ...capturedSections
+        ...captured
       };
 
       setMeasurements(prev => {

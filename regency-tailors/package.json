@@ -23,7 +23,8 @@
     "electron:pack": "npm run build && electron-builder --win dir --x64",
     "electron:build:win": "npm run build && electron-builder --win nsis --x64",
     "electron:verify": "npm run build && electron electron/verify.cjs",
-    "test:new-garments": "node e2e/new-garments.mjs"
+    "test:new-garments": "node e2e/new-garments.mjs",
+    "test:order-edit": "node e2e/order-edit-number.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

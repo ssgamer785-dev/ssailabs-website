@@ -38,6 +38,7 @@ VITE_SUPABASE_URL=https://fake-project.supabase.co \
 VITE_SUPABASE_ANON_KEY=sb_publishable_TESTKEY_0000000000000000 npx vite --port=3100
 npm run test:consistency
 npm run test:integrity
+npm run test:order-edit
 
 # or against the built bundle
 npx vite build --outDir dist-e2e && npx vite preview --outDir dist-e2e --port 4180
@@ -70,6 +71,7 @@ CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e
 | Order uuid (`order-uuid.mjs`) | The real wizard places an order against a PostgREST that enforces uuid columns: a provisional `CUST-…` id never reaches `orders.customer_id` |
 | Data consistency (`consistency.mjs`) | One journey — new customer, four garments, all 41 measurements, PLACE ORDER — then every screen is compared against the rows the database actually holds: ledger, profile, orders, dossier, measurements, production slip, customer bill, and again after a hard refresh |
 | Trash permanent delete (`integrity.mjs`) | The red bin button removes the whole tree the record owns and nothing else: a customer takes their orders, garment lines, payments, fittings, measurements and measurement values with them; an order takes its own children but never its customer; a refused purge deletes nothing and says so; and none of it comes back on a refresh |
+| Order edit / number immutability (`order-edit-number.mjs`) | In Supabase mode, against the real repository: the first order is #1; editing it three times leaves it #1, one row, the same uuid, three UPDATEs and no second INSERT; it survives a reload as #1; the next new order is #2, not #4; editing #1 again leaves #1 and #2 alone; the one after that is #3; the client never sends an order number; and an UPDATE that tries to change `order_number` is refused by the database |
 | Data integrity (`integrity.mjs`) | The edges: a customer edit reaching every screen, an open dossier showing the status the database now holds, a refused write never reported as saved, a returning phone number not opening a second ledger row, a refused order never announced as placed, delete → trash → restore returning the same logical row, rapid and double clicks not duplicating an order, the client portal's blanks and zeroes, the backup file's contents, and sign out → sign in |
 
 ## The database suites
@@ -91,7 +93,9 @@ the PostgreSQL server binaries (`PGBIN=/usr/lib/postgresql/16/bin`).
 `fake-postgrest.js` is installed before the app boots and answers the Supabase
 host in-page. It is not a stub: it enforces the uuid columns, the foreign keys,
 `customers_phone_unique_live`, `measurements.customer_id`'s unique constraint
-and `order_items (order_id, position)`, and it serves `customers_with_stats`
+and `order_items (order_id, position)`, it refuses an UPDATE that changes
+`orders.order_number` the way `orders_number_is_immutable` does, and it serves
+`customers_with_stats`
 and the `trash_items` view the way the migrations define them, and it answers
 `rpc/purge_trash_entry` the way the migration does — so the app's real
 repository code meets the same errors it would meet in production. Set
