@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { useAppState, initials } from '../lib/app-state';
@@ -10,6 +10,7 @@ import { timeAgo } from '../components/community/PostMedia';
 import type { FeedPost } from '../lib/community/useFeed';
 import { PhoneShell, useRefreshHandler } from '../components/PhoneShell';
 import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
+import { AppSidebar } from '../components/ui/AppSidebar';
 
 const quickAction = css('width:63px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer');
 const quickIconWrap = css('width:52px;height:52px;border-radius:16px;background:#F2F6FE;border:1px solid #E7EEFC;display:flex;align-items:center;justify-content:center');
@@ -191,15 +192,27 @@ export function HomeScreen() {
   const highlights = useHomeHighlights();
   useRefreshHandler(highlights.reload);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   return (
     <PhoneShell scrollRef={scrollRef}>
       <div style={css('flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden')}>
         <div ref={scrollRef} className="nav-space" style={css('flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column')}>
         <div style={css('flex:none;padding:4px 20px 16px;display:flex;align-items:center;gap:14px')}>
-          <div style={css('width:44px;height:44px;border-radius:14px;background:#FFFFFF;box-shadow:0 3px 12px rgba(15,23,42,.10);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={1.9} strokeLinecap="round"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
-          </div>
+          {/* Was a bare <div> with a cursor and no handler. Same box, same
+              place, same glyph — now a real control that opens the menu. */}
+          <button
+            ref={menuButtonRef}
+            type="button"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Open menu"
+            aria-expanded={menuOpen}
+            className="pressable"
+            style={css('width:44px;height:44px;border-radius:14px;background:#FFFFFF;box-shadow:0 3px 12px rgba(15,23,42,.10);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none;border:0;padding:0')}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={1.9} strokeLinecap="round" style={css('display:block')}><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+          </button>
           <div style={css('flex:1;display:flex;flex-direction:column;gap:2px;min-width:0')}>
             <div style={css('font-size:12px;color:#8794A8;white-space:nowrap')}>Good Morning 👋</div>
             <div style={css('font-size:18px;font-weight:800;letter-spacing:-.45px;white-space:nowrap')}>{userName}</div>
@@ -321,6 +334,11 @@ export function HomeScreen() {
         </div>
       </div>
       <AuthenticatedBottomNav />
+      <AppSidebar
+        open={menuOpen}
+        unreadCount={unread}
+        onClose={() => { setMenuOpen(false); menuButtonRef.current?.focus(); }}
+      />
     </PhoneShell>
   );
 }

@@ -45,8 +45,7 @@ const ACTIVE = '#0B5FEF';
 const IDLE = '#94A3B8';
 /**
  * Idle labels are 10px, which WCAG counts as normal text and holds to 4.5:1.
- * #94A3B8 measured 2.56:1 on the bar; this is 4.76:1 on white and 4.72:1 at
- * the darkest point of the glass, so it passes AA wherever the bar sits.
+ * #94A3B8 measured 2.56:1 on the bar; this is 4.76:1 on the bar's surface.
  */
 const IDLE_LABEL = '#64748B';
 
@@ -78,11 +77,11 @@ function icons(tab: NavTab, active: boolean): ReactNode {
 }
 
 /**
- * The app's persistent tab bar, and the strongest piece of glass in the UI.
+ * The app's persistent tab bar.
  *
- * It is one translucent layer with a bright top edge and a soft depth shadow;
- * content scrolls underneath rather than being walled off by an opaque strip.
- * The selected pill slides between tabs on a spring so the eye can follow it.
+ * A solid surface separated from the content by a hairline and lifted by a
+ * soft shadow. The selected indicator slides between tabs on a spring so the
+ * eye can follow it.
  *
  * The bottom inset is honoured with env(safe-area-inset-bottom); the matching
  * --nav-space in index.css is what screens reserve so the last row of content
@@ -97,7 +96,6 @@ export function AuthenticatedBottomNav() {
   // Where the pill is actually drawn, which lags `index` by one frame after a
   // navigation so the transition has somewhere to travel from — see lastIndex.
   const [drawn, setDrawn] = useState(() => (lastIndex >= 0 && index >= 0 ? lastIndex : index));
-  const [travelling, setTravelling] = useState(false);
 
   useEffect(() => {
     if (index < 0) return;                        // no tab owns this route
@@ -109,31 +107,21 @@ export function AuthenticatedBottomNav() {
 
     // One frame at the old position, so the browser has two values to
     // interpolate between rather than a single committed one.
-    const raf = requestAnimationFrame(() => { setDrawn(index); setTravelling(true); });
+    const raf = requestAnimationFrame(() => setDrawn(index));
     return () => cancelAnimationFrame(raf);
   }, [index, drawn]);
-
-  // While the pill is in flight it stretches a little along its direction of
-  // travel and settles back — the one place the UI behaves like a liquid
-  // rather than a solid. Released on its own timer so that the travel effect
-  // re-running (which it does the moment `drawn` catches up) cannot cancel it.
-  useEffect(() => {
-    if (!travelling) return;
-    const timer = window.setTimeout(() => setTravelling(false), 210);
-    return () => window.clearTimeout(timer);
-  }, [travelling]);
 
   return (
     <nav
       aria-label="Main"
-      className="app-nav glass"
+      className="app-nav"
       style={css(
         'position:absolute;left:0;right:0;bottom:0;z-index:30;display:flex;align-items:stretch;' +
         "padding:9px 8px calc(9px + env(safe-area-inset-bottom, 12px));" +
         "font-family:'Poppins',-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif",
       )}
     >
-      {/* The selected treatment: a soft glass lozenge that travels rather than
+      {/* The selected treatment: a tinted lozenge that travels rather than
           redrawing. Hidden entirely when no tab owns the route. */}
       <div
         aria-hidden="true"
@@ -142,9 +130,7 @@ export function AuthenticatedBottomNav() {
           ...css('position:absolute;top:5px;bottom:auto;height:46px;border-radius:15px;pointer-events:none'),
           left: '8px',
           width: `calc((100% - 16px) / ${TABS.length})`,
-          transform:
-            `translate3d(calc(${Math.max(drawn, 0)} * 100%), 0, 0)` +
-            (travelling ? ' scale(1.07, 0.9)' : ' scale(1, 1)'),
+          transform: `translate3d(calc(${Math.max(drawn, 0)} * 100%), 0, 0)`,
           opacity: index < 0 ? 0 : 1,
         }}
       />

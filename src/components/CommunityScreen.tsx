@@ -140,8 +140,8 @@ function DeleteBar({ onDelete, onCancel }: { onDelete: () => void; onCancel: () 
   );
 }
 
-/** A real drop shadow with a specular lip, rather than a coloured glow. */
-const FAB_SHADOW = 'box-shadow:inset 0 1px 0 rgba(255,255,255,.30),0 1px 2px rgba(15,23,42,.14),0 8px 18px rgba(11,95,239,.24)';
+/** A real drop shadow rather than a coloured glow. */
+const FAB_SHADOW = 'box-shadow:0 1px 2px rgba(15,23,42,.14),0 8px 18px rgba(11,95,239,.24)';
 
 export function CommunityScreen({ initialTab = 'official', adminView = false, asOthers = false, reveal: revealProp, userName, onToggleReveal }: {
   initialTab?: 'official' | 'students';
