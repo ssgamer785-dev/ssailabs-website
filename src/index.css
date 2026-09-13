@@ -129,15 +129,8 @@ textarea {
   box-shadow: 0 -2px 14px rgba(15, 23, 42, 0.05);
 }
 
-/* The selected indicator slides between tabs rather than blinking between
-   them, so the eye can follow where it went. */
-.nav-pill {
-  background: #EEF4FE;
-  transition: transform var(--dur-move) var(--ease-spring),
-              opacity var(--dur-move) var(--ease-out);
-  will-change: transform;
-}
-
+/* The selected tab is marked by colour and weight only — no background sheet
+   sits behind it, so the tabs read as one row on one surface. */
 .nav-item-label, .nav-item-icon {
   transition: color var(--dur-move) var(--ease-out),
               opacity var(--dur-move) var(--ease-out),
@@ -193,14 +186,13 @@ textarea {
    contrast gives every surface a real border. */
 @media (prefers-reduced-motion: reduce) {
   .phone-frame > *:not(.app-nav):not(.refresh-sheet):not(.app-overlay) { animation: none; }
-  .nav-pill, .nav-item-label, .nav-item-icon, .pressable,
+  .nav-item-label, .nav-item-icon, .pressable,
   .overlay-scrim, .overlay-panel { transition-duration: 1ms; }
   .pressable:active { transform: none; opacity: 0.65; }
 }
 
 @media (prefers-contrast: more) {
   .app-nav { border-top-color: rgba(15, 23, 42, 0.4); box-shadow: none; }
-  .nav-pill { background: rgba(11, 95, 239, 0.18); box-shadow: inset 0 0 0 1px rgba(11, 95, 239, 0.55); }
   .overlay-panel { border-right: 1px solid rgba(15, 23, 42, 0.4); }
 }
 

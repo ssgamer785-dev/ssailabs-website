@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { css } from '../../lib/css';
 
@@ -27,18 +27,6 @@ function activeTabFor(pathname: string): NavTab | null {
   // shows, but nothing is lit, because none of these *is* a tab.
   return null;
 }
-
-/**
- * The tab the pill was last drawn on, remembered across mounts.
- *
- * Every screen renders its own <AuthenticatedBottomNav />, so navigating
- * unmounts one bar and mounts another: the pill would be a brand new element
- * already sitting at its destination, and a CSS transition has nothing to
- * animate from. Carrying the previous tab in module scope lets the fresh bar
- * paint one frame where the old one left off and then travel — which is what
- * makes the bar read as persistent rather than merely re-drawn.
- */
-let lastIndex = -1;
 
 /** Mirrors --accent in index.css; the SVGs need it as a literal. */
 const ACTIVE = '#0B5FEF';
@@ -80,8 +68,8 @@ function icons(tab: NavTab, active: boolean): ReactNode {
  * The app's persistent tab bar.
  *
  * A solid surface separated from the content by a hairline and lifted by a
- * soft shadow. The selected indicator slides between tabs on a spring so the
- * eye can follow it.
+ * soft shadow. The selected tab is marked by colour and weight alone — it
+ * carries no background of its own, so every tab sits directly on the bar.
  *
  * The bottom inset is honoured with env(safe-area-inset-bottom); the matching
  * --nav-space in index.css is what screens reserve so the last row of content
@@ -91,25 +79,6 @@ export function AuthenticatedBottomNav() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const active = activeTabFor(pathname);
-  const index = active ? TABS.findIndex(t => t.tab === active) : -1;
-
-  // Where the pill is actually drawn, which lags `index` by one frame after a
-  // navigation so the transition has somewhere to travel from — see lastIndex.
-  const [drawn, setDrawn] = useState(() => (lastIndex >= 0 && index >= 0 ? lastIndex : index));
-
-  useEffect(() => {
-    if (index < 0) return;                        // no tab owns this route
-    lastIndex = index;
-    if (drawn === index) return;
-
-    // Honour a reduced-motion preference by simply being there already.
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { setDrawn(index); return; }
-
-    // One frame at the old position, so the browser has two values to
-    // interpolate between rather than a single committed one.
-    const raf = requestAnimationFrame(() => setDrawn(index));
-    return () => cancelAnimationFrame(raf);
-  }, [index, drawn]);
 
   return (
     <nav
@@ -121,19 +90,6 @@ export function AuthenticatedBottomNav() {
         "font-family:'Poppins',-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif",
       )}
     >
-      {/* The selected treatment: a tinted lozenge that travels rather than
-          redrawing. Hidden entirely when no tab owns the route. */}
-      <div
-        aria-hidden="true"
-        className="nav-pill"
-        style={{
-          ...css('position:absolute;top:5px;bottom:auto;height:46px;border-radius:15px;pointer-events:none'),
-          left: '8px',
-          width: `calc((100% - 16px) / ${TABS.length})`,
-          transform: `translate3d(calc(${Math.max(drawn, 0)} * 100%), 0, 0)`,
-          opacity: index < 0 ? 0 : 1,
-        }}
-      />
       {TABS.map(({ tab, route, label }) => {
         const on = tab === active;
         return (
