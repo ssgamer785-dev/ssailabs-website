@@ -18,6 +18,7 @@ import {
   type RiskUnit,
 } from '../lib/calculator/position-size';
 import { PhoneShell } from '../components/PhoneShell';
+import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 
 const LABEL = css('font-size:14px;font-weight:700;letter-spacing:-.1px;color:#0F172A');
 const FIELD = css('margin-top:9px;height:52px;border:1px solid #D8DEE8;border-radius:8px;background:#FFFFFF;display:flex;align-items:center;padding:0 14px');
@@ -159,11 +160,10 @@ export function RiskCalculatorScreen() {
   return (
     <PhoneShell scrollRef={scrollRef}>
       <div style={css('flex:none;height:52px;display:flex;align-items:center;padding:0 20px;gap:12px')}>
-        <svg onClick={() => navigate(-1)} width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" style={css('cursor:pointer;flex:none')}><path d="M14.5 5.5l-7 6.5 7 6.5" /></svg>
-        <div style={css('flex:1;text-align:center;font-size:17px;font-weight:700;letter-spacing:-.35px;padding-right:22px')}>Risk Calculator</div>
+        <div style={css('flex:1;text-align:center;font-size:17px;font-weight:700;letter-spacing:-.35px')}>Risk Calculator</div>
       </div>
 
-      <div ref={scrollRef} style={css('flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch')}>
+      <div ref={scrollRef} className="nav-space" style={css('flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch')}>
         <div style={css('padding:6px 20px 0;display:flex;flex-direction:column;gap:18px')}>
 
           <Field label="Instrument">
@@ -327,6 +327,7 @@ export function RiskCalculatorScreen() {
       </div>
 
       {helpOpen && <MtHelpModal instrument={selected} onClose={() => setHelpOpen(false)} />}
+      <AuthenticatedBottomNav />
     </PhoneShell>
   );
 }

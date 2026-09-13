@@ -9,6 +9,7 @@ import { probeVideo } from '../lib/media/video-poster';
 import type { AttachmentKind, PostChannel } from '../lib/database.types';
 import { CandleChart } from '../components/CandleChart';
 import { PhoneShell } from '../components/PhoneShell';
+import { AppBackButton } from '../components/ui/AppBackButton';
 
 const attachBtn = css('width:56px;height:56px;border-radius:15px;background:#FFFFFF;border:1px solid #EAEEF4;box-shadow:0 2px 8px rgba(15,23,42,.04);display:flex;align-items:center;justify-content:center');
 const attachCol = css('width:62px;display:flex;flex-direction:column;align-items:center;gap:9px;cursor:pointer');
@@ -160,7 +161,7 @@ export function CreatePostScreen() {
   return (
     <PhoneShell>
       <div style={css('flex:none;height:52px;display:flex;align-items:center;padding:0 20px;gap:12px')}>
-        <svg onClick={() => navigate(-1)} width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" style={css('cursor:pointer;flex:none')}><path d="M14.5 5.5l-7 6.5 7 6.5" /></svg>
+        <AppBackButton fallback="/community" />
         <div style={css('flex:1;text-align:center;font-size:17px;font-weight:700;letter-spacing:-.35px')}>{editId ? 'Edit Post' : 'Create Post'}</div>
         <div onClick={submit} style={{ ...css('font-size:15px;font-weight:700;color:#0B5FEF;cursor:pointer;flex:none'), opacity: busy ? 0.5 : 1 }}>
           {busy ? 'Posting…' : editId ? 'Save' : 'Post'}

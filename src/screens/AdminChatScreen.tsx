@@ -10,6 +10,7 @@ import { useVoiceRecorder } from '../lib/chat/useVoiceRecorder';
 import { formatDuration, type MediaKind } from '../lib/chat/types';
 import { PhoneShell } from '../components/PhoneShell';
 import { MessageBubble } from '../components/chat/MessageBubble';
+import { AppBackButton } from '../components/ui/AppBackButton';
 
 function Wave({ bars, color, height, gap, seed }: { bars: number; color: string; height: number; gap: number; seed: number }) {
   const rand = makeRand(seed);
@@ -150,7 +151,7 @@ export function AdminChatScreen() {
   return (
     <PhoneShell scrollRef={scrollRef}>
       <div style={css('flex:none;height:58px;display:flex;align-items:center;padding:0 18px;gap:11px;border-bottom:1px solid #F1F4F9')}>
-        <svg onClick={() => navigate(-1)} width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" style={css('cursor:pointer;flex:none')}><path d="M14.5 5.5l-7 6.5 7 6.5" /></svg>
+        <AppBackButton fallback="/chat" />
         <div style={css('position:relative;flex:none')}>
           <div style={css('width:38px;height:38px;border-radius:50%;background:#DCE7F7;color:#29527F;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700')}>A</div>
           <div style={{ position: 'absolute', right: -1, bottom: -1, width: 11, height: 11, borderRadius: '50%', background: connection === 'online' && peerOnline ? '#22C55E' : '#CBD5E1', border: '2.2px solid #fff' }} />

@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { useChatOverview } from '../lib/chat/useChatOverview';
 import { formatTime } from '../lib/chat/types';
-import { BottomNav } from '../components/BottomNav';
 import { PhoneShell, useRefreshHandler } from '../components/PhoneShell';
 import logo from '../assets/traders-planet-logo.jpg';
+import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 
 export function ChatListScreen() {
   const navigate = useNavigate();
@@ -23,7 +23,7 @@ export function ChatListScreen() {
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth={2} strokeLinecap="round" style={css('flex:none')}><circle cx="10.8" cy="10.8" r="6.4" /><path d="M15.6 15.6l4.2 4.2" /></svg>
         <input placeholder="Search" value={search} onChange={e => setSearch(e.target.value)} style={css('flex:1;font-size:14px;height:100%')} />
       </div>
-      <div style={css('flex:1;min-height:0;padding:6px 20px 0;display:flex;flex-direction:column;overflow-y:auto')}>
+      <div className="nav-space" style={css('flex:1;min-height:0;padding:6px 20px 0;display:flex;flex-direction:column;overflow-y:auto')}>
         <div onClick={() => navigate('/chat/admin')} style={css('display:flex;align-items:center;gap:12px;padding:11px 0;cursor:pointer')}>
           <div style={css('position:relative;flex:none')}>
             <div style={css('width:46px;height:46px;border-radius:50%;background:#0F1733;display:flex;align-items:center;justify-content:center;overflow:hidden')}>
@@ -69,7 +69,7 @@ export function ChatListScreen() {
         </div>
         <div style={css('height:16px;flex:none')} />
       </div>
-      <BottomNav active="chat" />
+      <AuthenticatedBottomNav />
     </PhoneShell>
   );
 }

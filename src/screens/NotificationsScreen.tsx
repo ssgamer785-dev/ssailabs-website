@@ -4,6 +4,8 @@ import { css } from '../lib/css';
 import { useNotifications, type AppNotification } from '../lib/notifications/useNotifications';
 import type { NotificationKind } from '../lib/database.types';
 import { PhoneShell, useRefreshHandler } from '../components/PhoneShell';
+import { AppBackButton } from '../components/ui/AppBackButton';
+import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 
 const NCATS = ['All', 'Community', 'Chat'] as const;
 
@@ -89,7 +91,7 @@ export function NotificationsScreen() {
   return (
     <PhoneShell>
       <div style={css('flex:none;height:52px;display:flex;align-items:center;padding:0 20px;gap:12px')}>
-        <svg onClick={() => navigate(-1)} width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" style={css('cursor:pointer;flex:none')}><path d="M14.5 5.5l-7 6.5 7 6.5" /></svg>
+        <AppBackButton fallback="/home" />
         <div style={css('flex:1;text-align:center;font-size:17px;font-weight:700;letter-spacing:-.35px;white-space:nowrap')}>Notifications</div>
         <div onClick={markAllRead} style={css('font-size:12.5px;font-weight:600;color:#0B5FEF;cursor:pointer;flex:none;white-space:nowrap')}>Mark all read</div>
       </div>
@@ -107,7 +109,7 @@ export function NotificationsScreen() {
           );
         })}
       </div>
-      <div style={css('flex:1;min-height:0;padding:16px 0 0;display:flex;flex-direction:column;overflow-y:auto')}>
+      <div className="nav-space" style={css('flex:1;min-height:0;padding:16px 0 0;display:flex;flex-direction:column;overflow-y:auto')}>
         {error && (
           <div style={css('padding:10px 20px;font-size:12px;color:#EF4444;line-height:1.4')}>{error}</div>
         )}
@@ -127,6 +129,7 @@ export function NotificationsScreen() {
         </>
         )}
       </div>
+      <AuthenticatedBottomNav />
     </PhoneShell>
   );
 }

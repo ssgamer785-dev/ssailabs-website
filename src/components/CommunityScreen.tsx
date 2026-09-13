@@ -7,9 +7,9 @@ import { useAuth } from '../lib/auth-context';
 import { useFeed, type FeedPost } from '../lib/community/useFeed';
 import { useRefreshHandler } from './PhoneShell';
 import { useComments } from '../lib/community/useComments';
-import { BottomNav } from './BottomNav';
 import { PostMedia, timeAgo } from './community/PostMedia';
 import logo from '../assets/traders-planet-logo.jpg';
+import { AuthenticatedBottomNav } from './ui/AuthenticatedBottomNav';
 
 function Wave({ bars, color, height, gap, seed }: { bars: number; color: string; height: number; gap: number; seed: number }) {
   const rand = makeRand(seed);
@@ -140,6 +140,9 @@ function DeleteBar({ onDelete, onCancel }: { onDelete: () => void; onCancel: () 
   );
 }
 
+/** A real drop shadow with a specular lip, rather than a coloured glow. */
+const FAB_SHADOW = 'box-shadow:inset 0 1px 0 rgba(255,255,255,.30),0 1px 2px rgba(15,23,42,.14),0 8px 18px rgba(11,95,239,.24)';
+
 export function CommunityScreen({ initialTab = 'official', adminView = false, asOthers = false, reveal: revealProp, userName, onToggleReveal }: {
   initialTab?: 'official' | 'students';
   adminView?: boolean;
@@ -202,7 +205,7 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
       </div>
 
       <div style={css('flex:1;min-height:0;background:#F3F5F9;display:flex;flex-direction:column;gap:8px;overflow:hidden;border-top:1px solid #EDF0F5')}>
-        <div ref={scrollRef} onScroll={onScroll} style={css('flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch')}>
+        <div ref={scrollRef} onScroll={onScroll} className="nav-space" style={css('flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch')}>
 
           {isStudents && others && (
             <div style={css('background:#F7FAFF;border-top:1px solid #DCE9FF;border-bottom:1px solid #DCE9FF;padding:10px 18px;display:flex;gap:10px;align-items:flex-start')}>
@@ -256,8 +259,9 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
       {isStudents && (
         <Hoverable
           as="div"
+          className="pressable"
           onClick={() => navigate('/create-post')}
-          style={css('position:absolute;right:20px;bottom:104px;width:54px;height:54px;border-radius:50%;background:#0B5FEF;box-shadow:0 8px 22px rgba(11,95,239,.38);display:flex;align-items:center;justify-content:center;cursor:pointer')}
+          style={css('position:absolute;right:20px;bottom:calc(18px + var(--nav-space));width:54px;height:54px;border-radius:50%;background:#0B5FEF;' + FAB_SHADOW + ';display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:20')}
           hoverStyle={css('background:#0A52D6')}
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={2.2} strokeLinecap="round"><path d="M12 5.5v13M5.5 12h13" /></svg>
@@ -267,15 +271,16 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
       {isOfficial && admin && (
         <Hoverable
           as="div"
+          className="pressable"
           onClick={() => navigate('/create-post?channel=official')}
-          style={css('position:absolute;right:20px;bottom:104px;width:54px;height:54px;border-radius:50%;background:#0B5FEF;box-shadow:0 8px 22px rgba(11,95,239,.38);display:flex;align-items:center;justify-content:center;cursor:pointer')}
+          style={css('position:absolute;right:20px;bottom:calc(18px + var(--nav-space));width:54px;height:54px;border-radius:50%;background:#0B5FEF;' + FAB_SHADOW + ';display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:20')}
           hoverStyle={css('background:#0A52D6')}
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={2.2} strokeLinecap="round"><path d="M12 5.5v13M5.5 12h13" /></svg>
         </Hoverable>
       )}
 
-      <BottomNav active="community" />
+      <AuthenticatedBottomNav />
     </div>
   );
 }

@@ -5,6 +5,8 @@ import { Hoverable } from '../lib/Hoverable';
 import { useAppState, initials } from '../lib/app-state';
 import { useAuth } from '../lib/auth-context';
 import { PhoneShell } from '../components/PhoneShell';
+import { AppBackButton } from '../components/ui/AppBackButton';
+import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 
 function Row({ icon, label, trailing, onClick }: { icon: ReactNode; label: string; trailing?: string; onClick?: () => void }) {
   return (
@@ -38,7 +40,10 @@ export function ProfileScreen() {
 
   return (
     <PhoneShell>
-      <div style={css('flex:none;height:52px;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;letter-spacing:-.35px')}>Profile</div>
+      <div style={css('flex:none;height:52px;display:flex;align-items:center;padding:0 20px;gap:12px')}>
+        <AppBackButton fallback="/home" />
+        <div style={css('flex:1;text-align:center;font-size:17px;font-weight:700;letter-spacing:-.35px;padding-right:32px')}>Profile</div>
+      </div>
       <div style={css('flex:none;padding:10px 24px 22px;display:flex;align-items:center;gap:18px')}>
         <div style={css('width:86px;height:86px;border-radius:50%;background:#DCE7F7;color:#29527F;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;flex:none;box-shadow:0 6px 18px rgba(15,23,42,.10)')}>{initials(userName)}</div>
         <div style={css('flex:1;display:flex;flex-direction:column;gap:5px;min-width:0')}>
@@ -72,11 +77,12 @@ export function ProfileScreen() {
         <Row icon={<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={rowIcon}><circle cx="12" cy="12" r="8.5" /><path d="M9.8 9.4a2.3 2.3 0 0 1 4.4.9c0 1.5-2.2 1.8-2.2 3.2" /><path d="M12 16.6h.01" /></svg>} label="Help &amp; Support" />
         <div style={css('height:1px;background:#F1F4F9;margin:0 22px')} />
       </div>
-      <div style={css('flex:none;padding:0 20px 40px')}>
+      <div style={{ ...css('flex:none;padding:0 20px'), paddingBottom: 'calc(16px + var(--nav-space))' }}>
         <Hoverable onClick={handleLogout} style={css('height:50px;border-radius:12px;background:#FEF2F3;border:1px solid #FBD5D9;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#EF4444;cursor:pointer')} hoverStyle={css('background:#FDE7E9')}>
           Logout
         </Hoverable>
       </div>
+      <AuthenticatedBottomNav />
     </PhoneShell>
   );
 }

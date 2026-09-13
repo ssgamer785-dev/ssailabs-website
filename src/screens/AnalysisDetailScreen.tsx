@@ -9,6 +9,8 @@ import { useComments } from '../lib/community/useComments';
 import { CandleChart } from '../components/CandleChart';
 import { PhoneShell } from '../components/PhoneShell';
 import logo from '../assets/traders-planet-logo.jpg';
+import { AppBackButton } from '../components/ui/AppBackButton';
+import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 
 function Wave({ bars, color, height, gap, seed }: { bars: number; color: string; height: number; gap: number; seed: number }) {
   const rand = makeRand(seed);
@@ -119,9 +121,7 @@ export function AnalysisDetailScreen() {
   return (
     <PhoneShell>
       <div style={css('flex:none;height:56px;display:flex;align-items:center;padding:0 20px;gap:12px')}>
-        <div onClick={() => navigate(-1)} style={css('width:34px;height:34px;border-radius:50%;background:#fff;box-shadow:0 2px 10px rgba(15,23,42,.10);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')}>
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 5.5l-7 6.5 7 6.5" /></svg>
-        </div>
+        <AppBackButton fallback="/home" />
         <div style={css('flex:1;text-align:center;font-size:17px;font-weight:700;letter-spacing:-.35px;padding-right:34px')}>Gold Analysis</div>
       </div>
       <div style={css('flex:1;min-height:0;padding:4px 20px 0;display:flex;flex-direction:column;overflow-y:auto')}>
@@ -195,7 +195,7 @@ export function AnalysisDetailScreen() {
         <div style={css('flex:1')} />
       </div>
       {!rec ? (
-        <div style={css('flex:none;padding:12px 18px 26px;display:flex;align-items:center;gap:9px')}>
+        <div style={{ ...css('flex:none;padding:12px 18px 26px;display:flex;align-items:center;gap:9px'), paddingBottom: 'calc(10px + var(--nav-space))' }}>
           <div style={css('width:36px;height:36px;border-radius:50%;background:#F2F4F9;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={2.1} strokeLinecap="round"><path d="M12 6v12M6 12h12" /></svg>
           </div>
@@ -233,6 +233,7 @@ export function AnalysisDetailScreen() {
           </Hoverable>
         </div>
       )}
+      <AuthenticatedBottomNav />
     </PhoneShell>
   );
 }

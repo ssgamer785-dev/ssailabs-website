@@ -245,9 +245,10 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
           <div
             ref={barRef}
             aria-hidden="true"
-            style={css('position:absolute;left:0;right:0;top:0;height:0;overflow:hidden;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;background:linear-gradient(180deg,#F2F6FE,rgba(242,246,254,0));z-index:40;pointer-events:none;border-radius:36px 36px 0 0')}
+            className="refresh-sheet"
+            style={css('position:absolute;left:0;right:0;top:0;height:0;opacity:0;overflow:hidden;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;z-index:40;pointer-events:none;border-radius:36px 36px 0 0')}
           >
-            <div ref={puckRef} style={css('width:30px;height:30px;border-radius:50%;background:#FFFFFF;box-shadow:0 3px 10px rgba(15,23,42,.16);display:flex;align-items:center;justify-content:center;color:#0B5FEF')}>
+            <div ref={puckRef} className="refresh-puck" style={css('width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#0B5FEF')}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 5.2v13.6M6.4 13.2 12 18.8l5.6-5.6" />
               </svg>

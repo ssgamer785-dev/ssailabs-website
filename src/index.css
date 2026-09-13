@@ -54,3 +54,208 @@ textarea {
     box-shadow: none !important;
   }
 }
+
+/* ==========================================================================
+   Liquid glass — the authenticated shell's material system
+   ==========================================================================
+   One place for the translucent surfaces, the press feedback and the motion
+   tokens, so screens stay inline-styled for layout and never re-declare a
+   material. Everything here is compositor-friendly: transform and opacity
+   only, no animated geometry.
+
+   A pane of glass is not a blur. It has thickness, so it catches light along
+   its top lip and bounces a little back off the bottom; it sits above
+   something, so it casts a shadow; and it is separated from what is behind it
+   by a hairline, not by a soft edge. Those four things — lip, bounce, shadow,
+   hairline — are what the tokens below encode. The blur is only the filling.
+   ========================================================================== */
+
+:root {
+  /* Motion. Critically damped by default; the gentle overshoot is reserved
+     for the nav pill, which follows a deliberate tap. */
+  --ease-glass: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-spring: cubic-bezier(0.34, 1.42, 0.64, 1);
+  --dur-press: 110ms;
+  --dur-move: 340ms;
+  --dur-enter: 260ms;
+
+  /* Material. Light surfaces over a light ground: one layer only, never
+     stacked, or legibility collapses. */
+  --glass-bg: rgba(255, 255, 255, 0.79);
+  --glass-hairline: rgba(15, 23, 42, 0.07);
+
+  /* The sheen is the light falling across the top of the pane. It has to stop
+     well before the content sits, or it reads as a gradient instead of a
+     highlight. */
+  --glass-sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.40) 0%,
+    rgba(255, 255, 255, 0.10) 30%,
+    rgba(255, 255, 255, 0) 62%
+  );
+
+  /* Thickness: a bright lip on top, a weaker bounce underneath. */
+  --glass-lip: inset 0 1px 0 rgba(255, 255, 255, 0.88);
+  --glass-bounce: inset 0 -1px 0 rgba(255, 255, 255, 0.30);
+
+  --glass-shadow: 0 -0.5px 0 rgba(15, 23, 42, 0.07), var(--glass-lip),
+                  var(--glass-bounce), 0 -16px 38px rgba(15, 23, 42, 0.09);
+  --glass-shadow-soft: var(--glass-lip), 0 6px 20px rgba(15, 23, 42, 0.07);
+
+  /* The one accent. Kept here so the nav's selected state and the accent
+     controls cannot drift apart. */
+  --accent: #0B5FEF;
+}
+
+/* A translucent layer with a lit top edge. The saturation bump is what keeps
+   colour alive behind the blur; the brightness bump is what stops it reading
+   as grey plastic. */
+.glass {
+  background-color: var(--glass-bg);
+  background-image: var(--glass-sheen);
+  border: 1px solid var(--glass-hairline);
+  box-shadow: var(--glass-shadow-soft);
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .glass {
+    -webkit-backdrop-filter: blur(26px) saturate(190%) brightness(1.05);
+    backdrop-filter: blur(26px) saturate(190%) brightness(1.05);
+  }
+}
+
+/* Where the blur is unavailable the surface has to carry itself, so it goes
+   nearly opaque rather than washing the content out behind it. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass { background-color: rgba(255, 255, 255, 0.96); }
+}
+
+/* Physical press feedback: it starts on pointer-down, not on release, and it
+   is a transform so it never reflows. */
+.pressable {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: transform var(--dur-press) var(--ease-glass),
+              background-color var(--dur-press) var(--ease-glass),
+              opacity var(--dur-press) var(--ease-glass);
+  will-change: transform;
+}
+.pressable:active { transform: scale(0.94); }
+.pressable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
+/* A bare icon control — the back button, a header action — takes its surface
+   from the touch rather than carrying one all the time. */
+.icon-button:hover { background-color: rgba(15, 23, 42, 0.045) !important; }
+.icon-button:active { background-color: rgba(15, 23, 42, 0.075) !important; }
+
+/* Screens arrive with a short lift. Two children opt out: the nav, which is
+   meant to read as one persistent surface across navigations rather than
+   something that re-enters, and the refresh sheet, whose opacity is driven by
+   the gesture — `both` would otherwise pin it at 1 and leave the puck's crown
+   showing above the header at rest. */
+.phone-frame > *:not(.app-nav):not(.refresh-sheet) { animation: screen-enter var(--dur-enter) var(--ease-glass) both; }
+
+@keyframes screen-enter {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* --- The tab bar ---------------------------------------------------------
+   The thickest glass in the app, and the only surface that is permanently
+   over moving content. Its edges are drawn with shadows rather than a border
+   so the lip and the separation hairline can be different colours — which is
+   what a real edge looks like. */
+.app-nav {
+  border: 0;
+  box-shadow: var(--glass-shadow);
+}
+
+/* The selected pill slides between tabs rather than blinking between them, so
+   the eye can follow where it went, and it squashes very slightly along the
+   direction of travel — the one liquid note in the UI. */
+.nav-pill {
+  background-color: rgba(11, 95, 239, 0.10);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0) 60%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92),
+              inset 0 0 0 1px rgba(11, 95, 239, 0.09),
+              0 1px 2px rgba(11, 95, 239, 0.10);
+  transition: transform var(--dur-move) var(--ease-spring),
+              opacity var(--dur-move) var(--ease-glass);
+  will-change: transform;
+}
+.nav-item-label, .nav-item-icon {
+  transition: color var(--dur-move) var(--ease-glass),
+              opacity var(--dur-move) var(--ease-glass),
+              transform var(--dur-move) var(--ease-spring);
+}
+/* The active icon rises by a pixel. Any more and the row stops reading as a
+   row. */
+.nav-item-icon { transform: translate3d(0, 0, 0); }
+.nav-item-icon.is-active { transform: translate3d(0, -1px, 0); }
+
+/* --- Pull-to-refresh -----------------------------------------------------
+   The same material as the nav, so the two overlays in the app are recognisably
+   one substance. The puck is a small lens sitting on top of it. */
+.refresh-sheet {
+  background-color: rgba(255, 255, 255, 0.72);
+  background-image: linear-gradient(180deg, rgba(232, 240, 254, 0.92), rgba(232, 240, 254, 0) 88%);
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .refresh-sheet {
+    -webkit-backdrop-filter: blur(16px) saturate(170%);
+    backdrop-filter: blur(16px) saturate(170%);
+  }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .refresh-sheet { background-color: rgba(242, 246, 254, 0.99); }
+}
+.refresh-puck {
+  background-color: rgba(255, 255, 255, 0.94);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0) 70%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95),
+              0 1px 2px rgba(15, 23, 42, 0.10),
+              0 6px 16px rgba(15, 23, 42, 0.14);
+}
+
+/* --- Accessibility fallbacks ---------------------------------------------
+   Reduced motion keeps the feedback but drops anything vestibular; reduced
+   transparency frosts the glass solid; more contrast gives it a real border. */
+@media (prefers-reduced-motion: reduce) {
+  .phone-frame > *:not(.app-nav):not(.refresh-sheet) { animation: none; }
+  .nav-pill, .nav-item-label, .nav-item-icon, .pressable { transition-duration: 1ms; }
+  .pressable:active { transform: none; opacity: 0.65; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass, .refresh-sheet {
+    background-color: #FFFFFF;
+    background-image: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .refresh-sheet { background-color: #F2F6FE; }
+}
+
+@media (prefers-contrast: more) {
+  .glass {
+    background-color: #FFFFFF;
+    background-image: none;
+    border-color: rgba(15, 23, 42, 0.4);
+  }
+  .app-nav { box-shadow: 0 -1px 0 rgba(15, 23, 42, 0.4); }
+  .nav-pill {
+    background-color: rgba(11, 95, 239, 0.18);
+    background-image: none;
+    box-shadow: inset 0 0 0 1px rgba(11, 95, 239, 0.55);
+  }
+}
+
+/* The nav floats over the content, so every scroller beneath it reserves
+   exactly its height — no more, or the last row strands above the bar. */
+:root { --nav-space: calc(73px + env(safe-area-inset-bottom, 12px)); }
+.nav-space { padding-bottom: var(--nav-space) !important; }
+.nav-space-scroll { scroll-padding-bottom: var(--nav-space); }

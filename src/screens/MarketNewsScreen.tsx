@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { css } from '../lib/css';
-import { BottomNav } from '../components/BottomNav';
 import { PhoneShell } from '../components/PhoneShell';
+import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 
 /**
  * Market News.
@@ -22,7 +22,7 @@ export function MarketNewsScreen() {
     <PhoneShell scrollRef={scrollRef}>
       <div style={css('flex:none;height:52px;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;letter-spacing:-.35px')}>Market News</div>
 
-      <div ref={scrollRef} style={css('flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 38px;text-align:center;overflow-y:auto')}>
+      <div ref={scrollRef} className="nav-space" style={css('flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 38px;text-align:center;overflow-y:auto')}>
         <div style={css('width:68px;height:68px;border-radius:22px;background:#F2F6FE;border:1px solid #E7EEFC;display:flex;align-items:center;justify-content:center;flex:none')}>
           <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#0B5FEF" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
             <path d="M6.6 3.6h6.3L18 8.5v11.9H6.6z" />
@@ -41,7 +41,7 @@ export function MarketNewsScreen() {
         </div>
       </div>
 
-      <BottomNav active="news" />
+      <AuthenticatedBottomNav />
     </PhoneShell>
   );
 }

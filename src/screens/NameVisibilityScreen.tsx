@@ -3,6 +3,8 @@ import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { useAppState } from '../lib/app-state';
 import { PhoneShell } from '../components/PhoneShell';
+import { AppBackButton } from '../components/ui/AppBackButton';
+import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 
 function LinkRow({ label, sub, onClick }: { label: string; sub: string; onClick: () => void }) {
   return (
@@ -23,7 +25,7 @@ export function NameVisibilityScreen() {
   return (
     <PhoneShell>
       <div style={css('flex:none;height:52px;display:flex;align-items:center;padding:0 20px;gap:12px')}>
-        <svg onClick={() => navigate(-1)} width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" style={css('cursor:pointer;flex:none')}><path d="M14.5 5.5l-7 6.5 7 6.5" /></svg>
+        <AppBackButton fallback="/profile" />
         <div style={css('flex:1;text-align:center;font-size:17px;font-weight:700;letter-spacing:-.35px;padding-right:22px;white-space:nowrap')}>Name Visibility</div>
       </div>
 
@@ -37,16 +39,22 @@ export function NameVisibilityScreen() {
         </div>
       </div>
 
-      <div style={css('flex:none;padding:22px 22px 9px;font-size:11px;font-weight:700;color:#94A3B8;letter-spacing:.07em;white-space:nowrap')}>REFERENCE — HOW OTHERS SEE THIS</div>
+      {/* These used to be two "view as someone else" previews of the Students
+          feed. They were design-review routes and were removed with the rest of
+          the invented data: the feed a preview rendered was still the signed-in
+          user's own RLS-filtered rows, only relabelled, so it never actually
+          showed what an admin or another student sees. The honest destination
+          behind both labels is the real Students feed, which is one row. */}
+      <div style={css('flex:none;padding:22px 22px 9px;font-size:11px;font-weight:700;color:#94A3B8;letter-spacing:.07em;white-space:nowrap')}>WHERE THIS APPLIES</div>
       <div style={css('flex:none;height:1px;background:#F1F4F9;margin:0 22px')} />
-      <LinkRow label="Students Community — Admin view" sub="Real names always visible to admins" onClick={() => navigate('/community/admin-view')} />
-      <div style={css('height:1px;background:#F1F4F9;margin:0 22px')} />
-      <LinkRow label="Students Community — Member view" sub="What other students see (Unknown User)" onClick={() => navigate('/community/member-view')} />
+      <LinkRow label="Students Community" sub="Members see Unknown User until you share your name" onClick={() => navigate('/community?tab=students')} />
       <div style={css('height:1px;background:#F1F4F9;margin:0 22px')} />
       <LinkRow label="Admin Inbox" sub="Direct messages, with real names shown" onClick={() => navigate('/admin-inbox')} />
       <div style={css('height:1px;background:#F1F4F9;margin:0 22px')} />
 
       <div style={css('flex:1')} />
+      <div style={{ flex: 'none', height: 'var(--nav-space)' }} />
+      <AuthenticatedBottomNav />
     </PhoneShell>
   );
 }

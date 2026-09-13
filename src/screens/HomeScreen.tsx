@@ -8,8 +8,8 @@ import { getPostMediaUrl } from '../lib/community/media-api';
 import { useLazyMediaUrl } from '../lib/media/useLazyMediaUrl';
 import { timeAgo } from '../components/community/PostMedia';
 import type { FeedPost } from '../lib/community/useFeed';
-import { BottomNav } from '../components/BottomNav';
 import { PhoneShell, useRefreshHandler } from '../components/PhoneShell';
+import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 
 const quickAction = css('width:63px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer');
 const quickIconWrap = css('width:52px;height:52px;border-radius:16px;background:#F2F6FE;border:1px solid #E7EEFC;display:flex;align-items:center;justify-content:center');
@@ -195,7 +195,7 @@ export function HomeScreen() {
   return (
     <PhoneShell scrollRef={scrollRef}>
       <div style={css('flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden')}>
-        <div ref={scrollRef} style={css('flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column')}>
+        <div ref={scrollRef} className="nav-space" style={css('flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column')}>
         <div style={css('flex:none;padding:4px 20px 16px;display:flex;align-items:center;gap:14px')}>
           <div style={css('width:44px;height:44px;border-radius:14px;background:#FFFFFF;box-shadow:0 3px 12px rgba(15,23,42,.10);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={1.9} strokeLinecap="round"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
@@ -320,7 +320,7 @@ export function HomeScreen() {
         <div style={css('height:20px;flex:none')} />
         </div>
       </div>
-      <BottomNav active="home" />
+      <AuthenticatedBottomNav />
     </PhoneShell>
   );
 }

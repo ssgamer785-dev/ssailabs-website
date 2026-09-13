@@ -1,6 +1,7 @@
 import { css } from '../lib/css';
-import { BottomNav } from '../components/BottomNav';
 import { PhoneShell } from '../components/PhoneShell';
+import { AppBackButton } from '../components/ui/AppBackButton';
+import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 
 function ThreadRow({ initial, bg, fg, name, sub, preview, time, unreadCount, sharedTag, mutedTime }: {
   initial: string; bg: string; fg: string; name: string; sub?: string; preview: string; time: string; unreadCount?: number; sharedTag?: boolean; mutedTime?: boolean;
@@ -32,6 +33,7 @@ export function AdminInboxScreen() {
   return (
     <PhoneShell>
       <div style={css('flex:none;height:52px;display:flex;align-items:center;padding:0 20px;gap:10px')}>
+        <AppBackButton fallback="/chat" />
         <div style={css('flex:1;font-size:17px;font-weight:700;letter-spacing:-.35px;white-space:nowrap')}>Inbox</div>
         <div style={css('height:24px;padding:0 9px;border-radius:7px;background:#0F172A;display:flex;align-items:center;gap:5px;flex:none')}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={2.2} strokeLinejoin="round"><path d="M12 3.8 5.6 6.2v5.3c0 4 2.6 7.4 6.4 8.7 3.8-1.3 6.4-4.7 6.4-8.7V6.2z" /></svg>
@@ -42,7 +44,7 @@ export function AdminInboxScreen() {
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#B98F3C" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" style={css('flex:none;margin-top:1px')}><circle cx="12" cy="12" r="8.5" /><path d="M12 8.2v.01M12 11v5" /></svg>
         <div style={css("flex:1;font-size:11.5px;color:#7A5D25;line-height:1.45;text-wrap:pretty")}>Real names are always visible to admins, even when a member appears as Unknown User to others.</div>
       </div>
-      <div style={css('flex:1;min-height:0;padding:0 20px;display:flex;flex-direction:column;overflow-y:auto')}>
+      <div className="nav-space" style={css('flex:1;min-height:0;padding:0 20px;display:flex;flex-direction:column;overflow-y:auto')}>
         <ThreadRow initial="RS" bg="#DCE7F7" fg="#29527F" name="Rahul Sharma" sub="Appears to others as Unknown User" preview="Sir, gold ka setup samjha dijiye" time="10:28 AM" unreadCount={3} />
         <div style={css('height:1px;background:#F1F4F9')} />
         <ThreadRow initial="AV" bg="#E7E3F7" fg="#55488C" name="Aman Verma" preview="Thanks for explaining!" time="Yesterday" sharedTag />
@@ -52,7 +54,7 @@ export function AdminInboxScreen() {
         <ThreadRow initial="MP" bg="#F3E6EF" fg="#7A3F66" name="Mohit Patel" sub="Appears to others as Unknown User" preview="👍" time="2 days ago" />
         <div style={css('height:1px;background:#F1F4F9')} />
       </div>
-      <BottomNav active="chat" />
+      <AuthenticatedBottomNav />
     </PhoneShell>
   );
 }
