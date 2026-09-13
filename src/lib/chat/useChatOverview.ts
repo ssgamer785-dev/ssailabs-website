@@ -13,7 +13,7 @@ export interface ChatOverview {
  * Unread count and last-message preview for the Chat list row, kept current by
  * a Realtime subscription on the user's own messages.
  */
-export function useChatOverview(): { overview: ChatOverview | null; loading: boolean } {
+export function useChatOverview(): { overview: ChatOverview | null; loading: boolean; refresh: () => Promise<void> } {
   const { user } = useAuth();
   const [overview, setOverview] = useState<ChatOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,5 +50,5 @@ export function useChatOverview(): { overview: ChatOverview | null; loading: boo
     };
   }, [user, refresh]);
 
-  return { overview, loading };
+  return { overview, loading, refresh };
 }

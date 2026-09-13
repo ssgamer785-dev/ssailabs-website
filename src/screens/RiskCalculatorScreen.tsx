@@ -17,7 +17,6 @@ import {
   type CalculatorResult,
   type RiskUnit,
 } from '../lib/calculator/position-size';
-import { StatusBar } from '../components/StatusBar';
 import { PhoneShell } from '../components/PhoneShell';
 
 const LABEL = css('font-size:14px;font-weight:700;letter-spacing:-.1px;color:#0F172A');
@@ -159,8 +158,6 @@ export function RiskCalculatorScreen() {
 
   return (
     <PhoneShell scrollRef={scrollRef}>
-      <StatusBar />
-
       <div style={css('flex:none;height:52px;display:flex;align-items:center;padding:0 20px;gap:12px')}>
         <svg onClick={() => navigate(-1)} width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" style={css('cursor:pointer;flex:none')}><path d="M14.5 5.5l-7 6.5 7 6.5" /></svg>
         <div style={css('flex:1;text-align:center;font-size:17px;font-weight:700;letter-spacing:-.35px;padding-right:22px')}>Risk Calculator</div>

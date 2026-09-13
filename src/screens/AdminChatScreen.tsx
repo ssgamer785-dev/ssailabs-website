@@ -8,7 +8,6 @@ import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { useConversation } from '../lib/chat/useConversation';
 import { useVoiceRecorder } from '../lib/chat/useVoiceRecorder';
 import { formatDuration, type MediaKind } from '../lib/chat/types';
-import { StatusBar } from '../components/StatusBar';
 import { PhoneShell } from '../components/PhoneShell';
 import { MessageBubble } from '../components/chat/MessageBubble';
 
@@ -150,7 +149,6 @@ export function AdminChatScreen() {
 
   return (
     <PhoneShell scrollRef={scrollRef}>
-      <StatusBar />
       <div style={css('flex:none;height:58px;display:flex;align-items:center;padding:0 18px;gap:11px;border-bottom:1px solid #F1F4F9')}>
         <svg onClick={() => navigate(-1)} width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" style={css('cursor:pointer;flex:none')}><path d="M14.5 5.5l-7 6.5 7 6.5" /></svg>
         <div style={css('position:relative;flex:none')}>

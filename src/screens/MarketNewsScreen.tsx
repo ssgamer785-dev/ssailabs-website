@@ -1,6 +1,5 @@
 import { useRef } from 'react';
 import { css } from '../lib/css';
-import { StatusBar } from '../components/StatusBar';
 import { BottomNav } from '../components/BottomNav';
 import { PhoneShell } from '../components/PhoneShell';
 
@@ -21,7 +20,6 @@ export function MarketNewsScreen() {
 
   return (
     <PhoneShell scrollRef={scrollRef}>
-      <StatusBar />
       <div style={css('flex:none;height:52px;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;letter-spacing:-.35px')}>Market News</div>
 
       <div ref={scrollRef} style={css('flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 38px;text-align:center;overflow-y:auto')}>

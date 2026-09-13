@@ -8,9 +8,8 @@ import { getPostMediaUrl } from '../lib/community/media-api';
 import { useLazyMediaUrl } from '../lib/media/useLazyMediaUrl';
 import { timeAgo } from '../components/community/PostMedia';
 import type { FeedPost } from '../lib/community/useFeed';
-import { StatusBar } from '../components/StatusBar';
 import { BottomNav } from '../components/BottomNav';
-import { PhoneShell } from '../components/PhoneShell';
+import { PhoneShell, useRefreshHandler } from '../components/PhoneShell';
 
 const quickAction = css('width:63px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer');
 const quickIconWrap = css('width:52px;height:52px;border-radius:16px;background:#F2F6FE;border:1px solid #E7EEFC;display:flex;align-items:center;justify-content:center');
@@ -190,11 +189,11 @@ export function HomeScreen() {
   const { userName } = useAppState();
   const unread = useUnreadNotificationCount();
   const highlights = useHomeHighlights();
+  useRefreshHandler(highlights.reload);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   return (
     <PhoneShell scrollRef={scrollRef}>
-      <StatusBar />
       <div style={css('flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden')}>
         <div ref={scrollRef} style={css('flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column')}>
         <div style={css('flex:none;padding:4px 20px 16px;display:flex;align-items:center;gap:14px')}>

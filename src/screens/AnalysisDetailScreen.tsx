@@ -6,7 +6,6 @@ import { makeRand } from '../lib/rng';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth-context';
 import { useComments } from '../lib/community/useComments';
-import { StatusBar } from '../components/StatusBar';
 import { CandleChart } from '../components/CandleChart';
 import { PhoneShell } from '../components/PhoneShell';
 import logo from '../assets/traders-planet-logo.jpg';
@@ -119,7 +118,6 @@ export function AnalysisDetailScreen() {
 
   return (
     <PhoneShell>
-      <StatusBar />
       <div style={css('flex:none;height:56px;display:flex;align-items:center;padding:0 20px;gap:12px')}>
         <div onClick={() => navigate(-1)} style={css('width:34px;height:34px;border-radius:50%;background:#fff;box-shadow:0 2px 10px rgba(15,23,42,.10);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')}>
           <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 5.5l-7 6.5 7 6.5" /></svg>

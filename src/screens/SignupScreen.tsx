@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { useAuth } from '../lib/auth-context';
-import { StatusBar } from '../components/StatusBar';
 import { PhoneShell } from '../components/PhoneShell';
 
 function EyeToggle({ show, onClick }: { show: boolean; onClick: () => void }) {
@@ -71,7 +70,6 @@ export function SignupScreen() {
 
   return (
     <PhoneShell>
-      <StatusBar />
       <div style={css('flex:1;display:flex;flex-direction:column;padding:0 24px;overflow-y:auto')}>
         <div style={css('height:52px;flex:none')} />
         <div style={css('font-size:28px;font-weight:800;letter-spacing:-.8px')}>Create Account</div>

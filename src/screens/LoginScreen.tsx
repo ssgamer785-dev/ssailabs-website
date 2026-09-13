@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { useAuth } from '../lib/auth-context';
-import { StatusBar } from '../components/StatusBar';
 import { PhoneShell } from '../components/PhoneShell';
 
 export function LoginScreen() {
@@ -35,7 +34,6 @@ export function LoginScreen() {
 
   return (
     <PhoneShell>
-      <StatusBar />
       <div style={css('flex:1;display:flex;flex-direction:column;padding:0 24px')}>
         <div style={css('height:52px;flex:none')} />
         <div style={css('font-size:28px;font-weight:800;letter-spacing:-.8px')}>Welcome Back 👋</div>

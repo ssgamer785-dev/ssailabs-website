@@ -8,6 +8,15 @@ html, body, #root {
   height: 100%;
 }
 
+/* The browser's own overscroll pull-to-refresh would reload the page mid-form
+   on Chrome for Android — on login and signup that throws away whatever has
+   been typed. The app is a fixed-height shell that never wants it, and the
+   authenticated screens provide their own gesture in PhoneShell. Keyboard and
+   menu refresh (Ctrl+R, F5) are untouched by this. */
+html, body {
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   background: #EEF1F7;

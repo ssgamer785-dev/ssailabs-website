@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { makeRand } from '../lib/rng';
 import { useAuth } from '../lib/auth-context';
-import { StatusBar } from '../components/StatusBar';
 import { PhoneShell } from '../components/PhoneShell';
 import logo from '../assets/traders-planet-logo.jpg';
 
@@ -44,7 +43,6 @@ export function SplashScreen() {
 
   return (
     <PhoneShell>
-      <StatusBar />
       <div style={css('flex:1;position:relative;overflow:hidden;background:#FCFDFF;cursor:pointer')} onClick={goNext}>
         <div style={css('position:absolute;right:-190px;top:-150px;width:520px;height:520px;border-radius:50%;background:radial-gradient(circle,rgba(11,95,239,.11),rgba(11,95,239,0) 68%)')} />
         <div style={css('position:absolute;left:-150px;top:170px;width:520px;height:560px;border-radius:50%;background:radial-gradient(circle,rgba(11,95,239,.07),rgba(11,95,239,0) 66%)')} />

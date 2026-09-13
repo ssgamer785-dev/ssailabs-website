@@ -7,7 +7,6 @@ import { useAuth } from '../lib/auth-context';
 import { requestPostUploadUrl, uploadPostMedia, type PostMediaKind, type PostUploadTicket } from '../lib/community/media-api';
 import { probeVideo } from '../lib/media/video-poster';
 import type { AttachmentKind, PostChannel } from '../lib/database.types';
-import { StatusBar } from '../components/StatusBar';
 import { CandleChart } from '../components/CandleChart';
 import { PhoneShell } from '../components/PhoneShell';
 
@@ -160,7 +159,6 @@ export function CreatePostScreen() {
 
   return (
     <PhoneShell>
-      <StatusBar />
       <div style={css('flex:none;height:52px;display:flex;align-items:center;padding:0 20px;gap:12px')}>
         <svg onClick={() => navigate(-1)} width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" style={css('cursor:pointer;flex:none')}><path d="M14.5 5.5l-7 6.5 7 6.5" /></svg>
         <div style={css('flex:1;text-align:center;font-size:17px;font-weight:700;letter-spacing:-.35px')}>{editId ? 'Edit Post' : 'Create Post'}</div>

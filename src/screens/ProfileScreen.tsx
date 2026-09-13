@@ -4,7 +4,6 @@ import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { useAppState, initials } from '../lib/app-state';
 import { useAuth } from '../lib/auth-context';
-import { StatusBar } from '../components/StatusBar';
 import { PhoneShell } from '../components/PhoneShell';
 
 function Row({ icon, label, trailing, onClick }: { icon: ReactNode; label: string; trailing?: string; onClick?: () => void }) {
@@ -39,7 +38,6 @@ export function ProfileScreen() {
 
   return (
     <PhoneShell>
-      <StatusBar />
       <div style={css('flex:none;height:52px;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;letter-spacing:-.35px')}>Profile</div>
       <div style={css('flex:none;padding:10px 24px 22px;display:flex;align-items:center;gap:18px')}>
         <div style={css('width:86px;height:86px;border-radius:50%;background:#DCE7F7;color:#29527F;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;flex:none;box-shadow:0 6px 18px rgba(15,23,42,.10)')}>{initials(userName)}</div>

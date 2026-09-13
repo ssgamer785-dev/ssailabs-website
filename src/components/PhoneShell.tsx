@@ -2,8 +2,42 @@ import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { css } from '../lib/css';
 import { useMoneySound } from '../lib/useMoneySound';
 
-const THRESH = 58;
-const MAX = 84;
+/** Drag distance, after resistance, that arms the refresh. */
+const THRESHOLD = 64;
+/** How far the sheet can be dragged, however hard you pull. */
+const MAX_PULL = 96;
+/** The indicator stays up at least this long, so a fast refresh still reads. */
+const MIN_SPIN_MS = 450;
+
+type RefreshHandler = () => unknown | Promise<unknown>;
+
+/**
+ * Screens own their own data, so the shell cannot know how to reload them. Each
+ * screen registers its reload here and the shell calls whatever is registered.
+ * Nothing registered — login, signup, splash — means no gesture at all, which is
+ * how those screens stay inert without the shell having to know about routes.
+ *
+ * A module-level set rather than a context, because a screen renders PhoneShell
+ * itself: it sits *above* any provider PhoneShell could return, so a context
+ * would always read as empty from exactly the components that need it.
+ */
+const refreshHandlers = new Set<RefreshHandler>();
+
+/**
+ * Registers `fn` as this screen's pull-to-refresh action while it is mounted.
+ * Pass `enabled: false` to stand down (an auth screen, or data not ready yet).
+ */
+export function useRefreshHandler(fn: RefreshHandler, enabled = true) {
+  const latest = useRef(fn);
+  latest.current = fn;
+
+  useEffect(() => {
+    if (!enabled) return;
+    const entry = () => latest.current();
+    refreshHandlers.add(entry);
+    return () => { refreshHandlers.delete(entry); };
+  }, [enabled]);
+}
 
 function nearestScrollable(el: Element | null, stop: Element | null): Element | null {
   let cur = el;
@@ -15,14 +49,20 @@ function nearestScrollable(el: Element | null, stop: Element | null): Element | 
 }
 
 /**
- * Wraps a screen in the app's 390×844 device frame and gives it pull-to-refresh
- * (drag down or scroll up from the top of the content) with the cash-register sound.
+ * Wraps a screen in the app's 390×844 device frame and gives it pull-to-refresh.
+ *
+ * The gesture only exists where a screen has registered something to reload, so
+ * the auth screens get no pull at all — and the browser's own overscroll refresh
+ * is turned off in index.css, so a stray drag there cannot reset a half-typed
+ * form either.
  */
 export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrollRef?: RefObject<HTMLElement | null> }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const puckRef = useRef<HTMLDivElement>(null);
   const playMoney = useMoneySound();
+  const playMoneyRef = useRef(playMoney);
+  playMoneyRef.current = playMoney;
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -30,20 +70,27 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
     const puck = puckRef.current;
     if (!frame || !bar || !puck) return;
 
-    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const state = { y: 0, target: 0, dragging: false, busy: false, raf: 0, spin: 0, y0: 0, wt: 0 as unknown as number };
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    const state = {
+      y: 0, target: 0, raf: 0, spin: 0,
+      /** A pull is only live once we have committed to it, never mid-scroll. */
+      pulling: false, busy: false,
+      startX: 0, startY: 0, tracking: false, pointerDrag: false,
+      wheelTimer: 0 as unknown as number,
+    };
 
     const paint = () => {
       const h = Math.max(0, state.y);
       bar.style.height = h + 'px';
-      bar.style.opacity = String(Math.min(1, h / 26));
-      const p = Math.min(1, h / THRESH);
+      bar.style.opacity = String(Math.min(1, h / 24));
+      const p = Math.min(1, h / THRESHOLD);
       if (state.busy) {
-        state.spin += 9;
-        puck.style.transform = 'rotate(' + state.spin + 'deg) scale(1)';
+        state.spin += reduce ? 0 : 9;
+        puck.style.transform = `rotate(${state.spin}deg) scale(1)`;
         puck.style.color = '#16A34A';
       } else {
-        puck.style.transform = 'rotate(' + (p * 180) + 'deg) scale(' + (0.72 + p * 0.28) + ')';
+        // Rotates toward "release me" and settles on green once armed.
+        puck.style.transform = `rotate(${p * 180}deg) scale(${0.72 + p * 0.28})`;
         puck.style.color = p >= 1 ? '#16A34A' : '#0B5FEF';
       }
     };
@@ -57,24 +104,48 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
     };
     const run = () => { if (!state.raf) state.raf = requestAnimationFrame(tick); };
 
-    const fire = () => {
-      if (state.busy) return;
+    const settle = () => { state.target = 0; state.pulling = false; run(); };
+
+    /** Runs every registered reload, once, and holds the indicator until done. */
+    const fire = async () => {
+      if (state.busy) return;                       // one refresh at a time
+      const fns = [...refreshHandlers];
+      if (!fns.length) { settle(); return; }
+
       state.busy = true;
-      state.target = 52;
+      state.target = 54;
       run();
-      playMoney();
-      setTimeout(() => {
-        state.busy = false;
-        state.spin = 0;
-        state.target = 0;
-        run();
-      }, reduce ? 260 : 900);
+      playMoneyRef.current();
+
+      const started = Date.now();
+      try {
+        await Promise.allSettled(fns.map(fn => fn()));
+      } finally {
+        const elapsed = Date.now() - started;
+        const wait = Math.max(0, (reduce ? 0 : MIN_SPIN_MS) - elapsed);
+        window.setTimeout(() => {
+          state.busy = false;
+          state.spin = 0;
+          settle();
+        }, wait);
+      }
     };
 
-    const pull = (dy: number) => {
+    const pull = (distance: number) => {
       if (state.busy) return;
-      state.target = Math.min(MAX, Math.max(0, dy));
+      state.pulling = true;
+      // Rubber band: the further you are, the less each pixel buys.
+      const eased = MAX_PULL * (1 - Math.exp(-distance / MAX_PULL));
+      state.target = Math.max(0, eased);
       run();
+    };
+
+    const release = () => {
+      // A pointerup left over from the gesture that started the refresh must not
+      // collapse the indicator while that refresh is still running.
+      if (state.busy || !state.pulling) return;
+      if (state.target >= THRESHOLD) void fire();
+      else settle();
     };
 
     const atTop = (target: EventTarget | null) => {
@@ -82,67 +153,109 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       return !scroller || scroller.scrollTop <= 0;
     };
 
-    const onWheel = (e: WheelEvent) => {
-      if (state.busy || !atTop(e.target)) return;
-      if (e.deltaY < 0) {
-        pull(state.target + Math.min(18, -e.deltaY * 0.55));
-        clearTimeout(state.wt);
-        state.wt = window.setTimeout(() => {
-          if (state.target >= THRESH) fire();
-          else { state.target = 0; run(); }
-        }, 130);
-      }
-    };
-    const onDown = (e: PointerEvent) => {
-      if (state.busy || e.button || !atTop(e.target)) return;
-      state.dragging = true;
-      state.y0 = e.clientY;
-    };
-    const onMove = (e: PointerEvent) => {
-      if (!state.dragging) return;
-      const dy = e.clientY - state.y0;
-      if (dy > 0) { pull(dy * 0.62); e.preventDefault(); }
-    };
-    const onUp = () => {
-      if (!state.dragging) return;
-      state.dragging = false;
-      if (state.target >= THRESH) fire();
-      else { state.target = 0; run(); }
+    // ---- touch: the path that has to feel right ----------------------------
+    const onTouchStart = (e: TouchEvent) => {
+      if (state.busy || e.touches.length !== 1 || !refreshHandlers.size) return;
+      state.tracking = atTop(e.target);
+      state.startX = e.touches[0].clientX;
+      state.startY = e.touches[0].clientY;
     };
 
-    frame.addEventListener('wheel', onWheel, { passive: true });
-    frame.addEventListener('pointerdown', onDown);
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    return () => {
-      frame.removeEventListener('wheel', onWheel);
-      frame.removeEventListener('pointerdown', onDown);
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      if (state.raf) cancelAnimationFrame(state.raf);
-      clearTimeout(state.wt);
+    const onTouchMove = (e: TouchEvent) => {
+      if (!state.tracking || state.busy || e.touches.length !== 1) return;
+      const dy = e.touches[0].clientY - state.startY;
+      const dx = e.touches[0].clientX - state.startX;
+
+      // Upward, sideways, or no longer at the top: this is a scroll, not a pull.
+      if (!state.pulling) {
+        if (dy <= 0 || Math.abs(dx) > Math.abs(dy) || !atTop(e.target)) {
+          state.tracking = false;
+          return;
+        }
+        if (dy < 8) return;                         // wait for real intent
+      }
+      // Committed. Own the gesture so the page does not scroll underneath.
+      if (e.cancelable) e.preventDefault();
+      pull(dy);
     };
-  }, [playMoney, scrollRef]);
+
+    const onTouchEnd = () => {
+      state.tracking = false;
+      release();
+    };
+
+    // ---- pointer + wheel: desktop parity, unchanged in spirit --------------
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') return;        // touch handlers own that
+      if (state.busy || e.button || !refreshHandlers.size || !atTop(e.target)) return;
+      state.pointerDrag = true;
+      state.startY = e.clientY;
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (!state.pointerDrag || state.busy) return;
+      const dy = e.clientY - state.startY;
+      if (dy > 0) { pull(dy); e.preventDefault(); }
+    };
+    const onPointerUp = () => {
+      if (!state.pointerDrag) return;
+      state.pointerDrag = false;
+      release();
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      if (state.busy || !refreshHandlers.size || !atTop(e.target) || e.deltaY >= 0) return;
+      pull(state.target + Math.min(20, -e.deltaY * 0.6));
+      clearTimeout(state.wheelTimer);
+      state.wheelTimer = window.setTimeout(release, 140);
+    };
+
+    frame.addEventListener('touchstart', onTouchStart, { passive: true });
+    frame.addEventListener('touchmove', onTouchMove, { passive: false });
+    frame.addEventListener('touchend', onTouchEnd, { passive: true });
+    frame.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    frame.addEventListener('wheel', onWheel, { passive: true });
+    frame.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    return () => {
+      frame.removeEventListener('touchstart', onTouchStart);
+      frame.removeEventListener('touchmove', onTouchMove);
+      frame.removeEventListener('touchend', onTouchEnd);
+      frame.removeEventListener('touchcancel', onTouchEnd);
+      frame.removeEventListener('wheel', onWheel);
+      frame.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      if (state.raf) cancelAnimationFrame(state.raf);
+      clearTimeout(state.wheelTimer);
+      // The loop is gone; without this the sheet keeps its last painted height.
+      bar.style.height = '0px';
+      bar.style.opacity = '0';
+    };
+  }, [scrollRef]);
 
   return (
-    <div style={css('min-height:100dvh;min-height:100vh;background:#EEF1F7;display:flex;align-items:center;justify-content:center;padding:0')} className="phone-viewport">
-      <div
-        ref={frameRef}
-        style={css('position:relative;width:390px;height:844px;background:#FFFFFF;box-shadow:0 20px 50px rgba(15,23,42,.11),0 2px 6px rgba(15,23,42,.05);overflow:hidden;display:flex;flex-direction:column;color:#0F172A;border-radius:36px')}
-        className="phone-frame"
-      >
+    <>
+      <div style={css('min-height:100dvh;min-height:100vh;background:#EEF1F7;display:flex;align-items:center;justify-content:center;padding:0')} className="phone-viewport">
         <div
-          ref={barRef}
-          style={css('position:absolute;left:0;right:0;top:0;height:0;overflow:hidden;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;background:linear-gradient(180deg,#F2F6FE,rgba(242,246,254,0));z-index:40;pointer-events:none;border-radius:36px 36px 0 0')}
+          ref={frameRef}
+          style={css('position:relative;width:390px;height:844px;background:#FFFFFF;box-shadow:0 20px 50px rgba(15,23,42,.11),0 2px 6px rgba(15,23,42,.05);overflow:hidden;display:flex;flex-direction:column;color:#0F172A;border-radius:36px')}
+          className="phone-frame"
         >
-          <div ref={puckRef} style={css('width:30px;height:30px;border-radius:50%;background:#FFFFFF;box-shadow:0 3px 10px rgba(15,23,42,.16);display:flex;align-items:center;justify-content:center;color:#0B5FEF')}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 5.2v13.6M6.4 13.2 12 18.8l5.6-5.6" />
-            </svg>
+          <div
+            ref={barRef}
+            aria-hidden="true"
+            style={css('position:absolute;left:0;right:0;top:0;height:0;overflow:hidden;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;background:linear-gradient(180deg,#F2F6FE,rgba(242,246,254,0));z-index:40;pointer-events:none;border-radius:36px 36px 0 0')}
+          >
+            <div ref={puckRef} style={css('width:30px;height:30px;border-radius:50%;background:#FFFFFF;box-shadow:0 3px 10px rgba(15,23,42,.16);display:flex;align-items:center;justify-content:center;color:#0B5FEF')}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 5.2v13.6M6.4 13.2 12 18.8l5.6-5.6" />
+              </svg>
+            </div>
           </div>
+          {children}
         </div>
-        {children}
       </div>
-    </div>
+    </>
   );
 }

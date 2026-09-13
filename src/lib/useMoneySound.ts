@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useCallback, useRef } from 'react';
 
 /** Plays the "cha-ching" cash-register sound used on pull-to-refresh, via Web Audio synthesis (no audio asset). */
 export function useMoneySound() {
@@ -14,7 +14,7 @@ export function useMoneySound() {
     return acRef.current;
   }
 
-  return function playMoney() {
+  return useCallback(function playMoney() {
     const ac = audio();
     if (!ac) return;
     const t0 = ac.currentTime;
@@ -56,5 +56,5 @@ export function useMoneySound() {
     ng.gain.value = 0.16;
     src.connect(bp); bp.connect(ng); ng.connect(master);
     src.start(t0);
-  };
+  }, []);
 }

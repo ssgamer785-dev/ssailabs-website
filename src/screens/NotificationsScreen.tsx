@@ -3,8 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { useNotifications, type AppNotification } from '../lib/notifications/useNotifications';
 import type { NotificationKind } from '../lib/database.types';
-import { StatusBar } from '../components/StatusBar';
-import { PhoneShell } from '../components/PhoneShell';
+import { PhoneShell, useRefreshHandler } from '../components/PhoneShell';
 
 const NCATS = ['All', 'Community', 'Chat'] as const;
 
@@ -54,7 +53,8 @@ function whenLabel(iso: string): string {
 
 export function NotificationsScreen() {
   const navigate = useNavigate();
-  const { notifications, loading, error, markRead, markAllRead } = useNotifications();
+  const { notifications, loading, error, markRead, markAllRead, refresh } = useNotifications();
+  useRefreshHandler(refresh);
   const [notifCat, setNotifCat] = useState<typeof NCATS[number]>('All');
 
   const isUnread = (n: AppNotification) => !n.readAt;
@@ -88,7 +88,6 @@ export function NotificationsScreen() {
 
   return (
     <PhoneShell>
-      <StatusBar />
       <div style={css('flex:none;height:52px;display:flex;align-items:center;padding:0 20px;gap:12px')}>
         <svg onClick={() => navigate(-1)} width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" style={css('cursor:pointer;flex:none')}><path d="M14.5 5.5l-7 6.5 7 6.5" /></svg>
         <div style={css('flex:1;text-align:center;font-size:17px;font-weight:700;letter-spacing:-.35px;white-space:nowrap')}>Notifications</div>

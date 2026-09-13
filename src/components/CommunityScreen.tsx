@@ -5,8 +5,8 @@ import { Hoverable } from '../lib/Hoverable';
 import { makeRand } from '../lib/rng';
 import { useAuth } from '../lib/auth-context';
 import { useFeed, type FeedPost } from '../lib/community/useFeed';
+import { useRefreshHandler } from './PhoneShell';
 import { useComments } from '../lib/community/useComments';
-import { StatusBar } from './StatusBar';
 import { BottomNav } from './BottomNav';
 import { PostMedia, timeAgo } from './community/PostMedia';
 import logo from '../assets/traders-planet-logo.jpg';
@@ -156,6 +156,7 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const feed = useFeed(tab);
+  useRefreshHandler(feed.refresh);
 
   // `adminView` / `asOthers` are the design's preview modes; a real admin
   // session also gets the admin treatment.
@@ -179,8 +180,6 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
 
   return (
     <div style={css("position:relative;width:100%;height:100%;display:flex;flex-direction:column;background:#FFFFFF;overflow:hidden;font-family:'Poppins',-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;color:#0F172A")}>
-      <StatusBar />
-
       <div style={css('flex:none;height:50px;display:flex;align-items:center;justify-content:center;gap:8px;padding:0 18px')}>
         <div style={css('font-size:17px;font-weight:700;letter-spacing:-.35px;white-space:nowrap')}>{isOfficial ? 'Community' : 'Students Community'}</div>
         {(admin || others) && (

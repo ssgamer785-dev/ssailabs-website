@@ -1,5 +1,4 @@
 import { css } from '../lib/css';
-import { StatusBar } from '../components/StatusBar';
 import { BottomNav } from '../components/BottomNav';
 import { PhoneShell } from '../components/PhoneShell';
 
@@ -32,7 +31,6 @@ function ThreadRow({ initial, bg, fg, name, sub, preview, time, unreadCount, sha
 export function AdminInboxScreen() {
   return (
     <PhoneShell>
-      <StatusBar />
       <div style={css('flex:none;height:52px;display:flex;align-items:center;padding:0 20px;gap:10px')}>
         <div style={css('flex:1;font-size:17px;font-weight:700;letter-spacing:-.35px;white-space:nowrap')}>Inbox</div>
         <div style={css('height:24px;padding:0 9px;border-radius:7px;background:#0F172A;display:flex;align-items:center;gap:5px;flex:none')}>

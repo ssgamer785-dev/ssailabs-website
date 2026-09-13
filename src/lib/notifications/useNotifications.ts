@@ -42,6 +42,8 @@ export interface UseNotifications {
   error: string | null;
   markRead: (id: string) => Promise<void>;
   markAllRead: () => Promise<void>;
+  /** Re-reads the feed. Already used internally; exposed for pull-to-refresh. */
+  refresh: () => Promise<void>;
 }
 
 /** The signed-in user's notification feed, live via Realtime. */
@@ -106,7 +108,7 @@ export function useNotifications(): UseNotifications {
 
   const unreadCount = notifications.reduce((n, item) => n + (item.readAt ? 0 : 1), 0);
 
-  return { notifications, unreadCount, loading, error, markRead, markAllRead };
+  return { notifications, unreadCount, loading, error, markRead, markAllRead, refresh };
 }
 
 /**

@@ -3,22 +3,21 @@ import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { useChatOverview } from '../lib/chat/useChatOverview';
 import { formatTime } from '../lib/chat/types';
-import { StatusBar } from '../components/StatusBar';
 import { BottomNav } from '../components/BottomNav';
-import { PhoneShell } from '../components/PhoneShell';
+import { PhoneShell, useRefreshHandler } from '../components/PhoneShell';
 import logo from '../assets/traders-planet-logo.jpg';
 
 export function ChatListScreen() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
-  const { overview } = useChatOverview();
+  const { overview, refresh } = useChatOverview();
+  useRefreshHandler(refresh);
 
   const preview = overview?.lastMessagePreview ?? 'Start a conversation with the Admin';
   const unread = overview?.unreadCount ?? 0;
 
   return (
     <PhoneShell>
-      <StatusBar />
       <div style={css('flex:none;height:52px;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;letter-spacing:-.35px')}>Chat</div>
       <div style={css('flex:none;margin:4px 20px 8px;height:44px;border-radius:12px;background:#F2F4F9;display:flex;align-items:center;padding:0 14px;gap:10px')}>
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth={2} strokeLinecap="round" style={css('flex:none')}><circle cx="10.8" cy="10.8" r="6.4" /><path d="M15.6 15.6l4.2 4.2" /></svg>
