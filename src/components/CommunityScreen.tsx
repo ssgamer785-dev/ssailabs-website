@@ -182,7 +182,7 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
   }, [feed]);
 
   return (
-    <div style={css("position:relative;width:100%;height:100%;display:flex;flex-direction:column;background:#FFFFFF;overflow:hidden;font-family:'Poppins',-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif;color:#0F172A")}>
+    <div style={css("position:relative;width:100%;height:100%;display:flex;flex-direction:column;background:#FFFFFF;overflow:hidden;color:#0F172A")}>
       <div style={css('flex:none;height:50px;display:flex;align-items:center;justify-content:center;gap:8px;padding:0 18px')}>
         <div style={css('font-size:17px;font-weight:700;letter-spacing:-.35px;white-space:nowrap')}>{isOfficial ? 'Community' : 'Students Community'}</div>
         {(admin || others) && (

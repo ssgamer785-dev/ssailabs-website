@@ -86,8 +86,7 @@ export function AuthenticatedBottomNav() {
       className="app-nav"
       style={css(
         'position:absolute;left:0;right:0;bottom:0;z-index:30;display:flex;align-items:stretch;' +
-        "padding:9px 8px calc(9px + env(safe-area-inset-bottom, 12px));" +
-        "font-family:'Poppins',-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif",
+        'padding:9px 8px calc(9px + env(safe-area-inset-bottom, 12px))',
       )}
     >
       {TABS.map(({ tab, route, label }) => {

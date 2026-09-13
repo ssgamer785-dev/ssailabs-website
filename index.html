@@ -19,15 +19,10 @@
     <link rel="manifest" href="/site.webmanifest" />
     <meta name="theme-color" content="#0C091E" />
 
-    <!-- Poppins is the app's typeface. Only the four weights the UI actually
-         uses are fetched; display=swap keeps first paint immediate and falls
-         back to the stack in index.css if the request is blocked. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
-    />
+    <!-- Poppins is the app's typeface and is self-hosted: the @font-face in
+         src/index.css points at src/assets/fonts/Poppins-Regular.ttf, so the
+         font ships with the bundle instead of being fetched from a third
+         party that a network can block. -->
     <title>The Traders Planet</title>
   </head>
   <body>

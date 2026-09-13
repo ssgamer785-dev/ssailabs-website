@@ -117,8 +117,7 @@ export function AppSidebar({ open, onClose, unreadCount = 0 }: {
         className="overlay-panel"
         style={css(
           'position:absolute;left:0;top:0;bottom:0;width:278px;max-width:82%;background:#FFFFFF;' +
-          'box-shadow:2px 0 24px rgba(15,23,42,.16);display:flex;flex-direction:column;' +
-          "font-family:'Poppins',-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif",
+          'box-shadow:2px 0 24px rgba(15,23,42,.16);display:flex;flex-direction:column',
         )}
       >
         <div style={css('flex:none;padding:calc(14px + env(safe-area-inset-top, 0px)) 14px 10px 20px;display:flex;align-items:center;gap:10px')}>

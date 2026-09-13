@@ -1,7 +1,37 @@
 @import "tailwindcss";
 
+/* ==========================================================================
+   Poppins — the app's one typeface
+   ==========================================================================
+   Self-hosted from src/assets/fonts/Poppins-Regular.ttf, which Vite
+   fingerprints and serves from the same origin as everything else. It used to
+   come from fonts.googleapis.com, so the typeface depended on a third party
+   being reachable — on a blocked or offline network the whole app silently
+   rendered in a system face instead.
+
+   This is the Regular cut only: usWeightClass 400, italic bit clear. The
+   declaration says so, which means the browser synthesises the heavier
+   weights the UI asks for (500-800) from this master rather than picking a
+   different family. Real cuts for those weights would need their own files.
+   ========================================================================== */
+@font-face {
+  font-family: 'Poppins';
+  src: url('./assets/fonts/Poppins-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 * {
   box-sizing: border-box;
+}
+
+/* Every screen in this app is styled with inline style objects, so an inline
+   font-family would beat any ordinary rule here. This is the one declaration
+   that cannot be overridden by accident, and it is why no component carries a
+   font stack of its own any more. */
+*, *::before, *::after {
+  font-family: 'Poppins' !important;
 }
 
 html, body, #root {
@@ -20,14 +50,14 @@ html, body {
 body {
   margin: 0;
   background: #EEF1F7;
-  font-family: 'Poppins', -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-family: 'Poppins';
   font-weight: 400;
+  font-style: normal;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 input, textarea, button, select {
-  font-family: inherit;
   border: 0;
   background: transparent;
   outline: none;
