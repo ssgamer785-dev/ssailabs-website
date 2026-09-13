@@ -185,6 +185,74 @@ function RecentPostRow({ post, index, onOpen }: { post: FeedPost; index: number;
   );
 }
 
+/** The card's decorative line. A fixed path, not a plot — see MarketPattern. */
+const MARKET_LINE =
+  'M0 41Q35 34 52.5 38.5Q70 43 87.5 35Q105 27 122.5 30.5Q140 34 157.5 26.5' +
+  'Q175 19 192.5 25Q210 31 227.5 26Q245 21 262.5 27Q280 33 297.5 23.5Q315 14 332.5 18T350 22';
+
+/**
+ * The Market Overview card's filler, and nothing more than that.
+ *
+ * There is no market-data source behind this app, so the card cannot show a
+ * reading of anything. It used to say so in two lines of prose, which left the
+ * largest, brightest element on Home explaining what it could not do. This is
+ * the same admission made visually: chart geometry with no scale, no axis
+ * ticks, no values and no labels — shapes a trader recognises as a chart and
+ * cannot mistake for one, under the "Coming soon" badge that carries the
+ * actual meaning.
+ *
+ * Every coordinate is a constant. Nothing here is derived from data, fetched,
+ * or randomised, and the whole thing is aria-hidden so a screen reader is not
+ * handed an ornament to describe. When a real feed exists this is what it
+ * replaces.
+ */
+function MarketPattern() {
+  return (
+    <svg
+      viewBox="0 0 350 59"
+      width="100%"
+      height="59"
+      preserveAspectRatio="xMidYMid slice"
+      aria-hidden="true"
+      focusable="false"
+      style={css('display:block;overflow:visible')}
+    >
+      <defs>
+        <linearGradient id="mkt-area" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.17" />
+          <stop offset="100%" stopColor="#FFFFFF" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+
+      {/* Rules, not axes: no ticks and no scale, so they read as texture. */}
+      <g stroke="#FFFFFF" strokeOpacity="0.08" strokeWidth="1">
+        <path d="M0 14.5h350M0 30.5h350M0 46.5h350" />
+      </g>
+
+      {/* Candles, mixed rising and falling — the movement is a pattern, not a
+          direction anyone should read anything into. */}
+      <g fill="#FFFFFF">
+        <rect x="17.5" y="30" width="1" height="19" rx="0.5" opacity="0.14" /><rect x="15.5" y="34" width="5" height="11" rx="1.4" opacity="0.17" />
+        <rect x="57.5" y="24" width="1" height="21" rx="0.5" opacity="0.2" /><rect x="55.5" y="28" width="5" height="12" rx="1.4" opacity="0.3" />
+        <rect x="97.5" y="33" width="1" height="19" rx="0.5" opacity="0.14" /><rect x="95.5" y="37" width="5" height="10" rx="1.4" opacity="0.17" />
+        <rect x="137.5" y="21" width="1" height="22" rx="0.5" opacity="0.2" /><rect x="135.5" y="25" width="5" height="13" rx="1.4" opacity="0.3" />
+        <rect x="177.5" y="26" width="1" height="21" rx="0.5" opacity="0.14" /><rect x="175.5" y="31" width="5" height="11" rx="1.4" opacity="0.17" />
+        <rect x="217.5" y="16" width="1" height="23" rx="0.5" opacity="0.2" /><rect x="215.5" y="20" width="5" height="13" rx="1.4" opacity="0.3" />
+        <rect x="257.5" y="24" width="1" height="22" rx="0.5" opacity="0.14" /><rect x="255.5" y="29" width="5" height="12" rx="1.4" opacity="0.17" />
+        <rect x="297.5" y="13" width="1" height="23" rx="0.5" opacity="0.2" /><rect x="295.5" y="17" width="5" height="13" rx="1.4" opacity="0.3" />
+        <rect x="331.5" y="20" width="1" height="21" rx="0.5" opacity="0.2" /><rect x="329.5" y="24" width="5" height="11" rx="1.4" opacity="0.3" />
+      </g>
+
+      <path d={`${MARKET_LINE}L350 59L0 59Z`} fill="url(#mkt-area)" />
+      {/* The line runs off both edges rather than ending in a marker dot: a
+          dot would sit half-clipped on the bleed, and a terminal point on a
+          chart reads as "here is the latest value", which is the one thing
+          this card must not appear to say. */}
+      <path d={MARKET_LINE} fill="none" stroke="#FFFFFF" strokeOpacity="0.6" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function HomeScreen() {
   const navigate = useNavigate();
   const { userName } = useAppState();
@@ -243,18 +311,16 @@ export function HomeScreen() {
             This card used to assert a market sentiment, a percentage move and
             a sparkline, all three hard-coded — there is no market-data source
             behind this app — so a trader was shown an invented read on the
-            market every time they opened it. The card keeps its place and its
-            styling; the claim is gone until a real feed backs it. */}
-        <div style={css('flex:none;margin:0 20px;border-radius:20px;background:linear-gradient(150deg,#1C6EF6 0%,#0A4FDD 100%);box-shadow:0 14px 28px rgba(11,95,239,.28);padding:16px 18px 18px;color:#FFFFFF')}>
+            market every time they opened it. Nothing below states or implies a
+            market condition: the badge says the feature is coming, and the rest
+            is ornament. The card keeps its place, its size and its styling. */}
+        <div style={css('flex:none;margin:0 20px;border-radius:20px;background:linear-gradient(150deg,#1C6EF6 0%,#0A4FDD 100%);box-shadow:0 14px 28px rgba(11,95,239,.28);padding:16px 18px 18px;color:#FFFFFF;overflow:hidden')}>
           <div style={css('display:flex;align-items:center;justify-content:space-between')}>
             <div style={css('font-size:14.5px;font-weight:600;letter-spacing:-.2px;white-space:nowrap')}>Market Overview</div>
             <div style={css('height:22px;padding:0 9px;border-radius:7px;background:rgba(255,255,255,.16);display:flex;align-items:center;font-size:10.5px;font-weight:600;letter-spacing:.02em;white-space:nowrap')}>Coming soon</div>
           </div>
-          <div style={css('margin-top:12px;font-size:13px;color:rgba(255,255,255,.86);line-height:1.5')}>
-            Live market data isn't connected yet.
-          </div>
-          <div style={css('margin-top:5px;font-size:11.5px;color:rgba(255,255,255,.62);line-height:1.5')}>
-            Sentiment and index moves will appear here once a real feed is in place.
+          <div style={css('margin-top:12px')}>
+            <MarketPattern />
           </div>
         </div>
 
