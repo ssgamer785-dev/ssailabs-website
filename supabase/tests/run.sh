@@ -26,10 +26,12 @@ for migration in "$HERE"/../migrations/*.sql; do
   "${PSQL[@]}" -d "$DB" -q -f "$migration" 2>/dev/null
 done
 
-# Supabase grants these to the API roles automatically; the shim does not.
+# Only what lives outside the migration chain. The table and function grants
+# used to be re-applied here, after the migrations -- which silently undid
+# 20260824120000_restrict_server_only_functions.sql and let a suite report a
+# maintenance function as locked down when the harness had just reopened it.
+# The public schema is the migrations job now (20260823120000_api_grants.sql).
 "${PSQL[@]}" -d "$DB" -q -c "
-  grant select, insert, update, delete on all tables in schema public to authenticated, service_role;
-  grant execute on all functions in schema public to authenticated, service_role;
   grant select on auth.users to authenticated, service_role;"
 
 failures=0

@@ -7,7 +7,7 @@
  * request is authorized against the caller's Supabase JWT and their membership
  * of the conversation in question.
  *
- * The 100 MB per-conversation cap is enforced here, not in the browser. A
+ * The 100 MB per-user cap is enforced here, not in the browser. A
  * client can lie about anything it sends; what it cannot do is get a signed URL
  * without this file agreeing to issue one.
  */
@@ -18,7 +18,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
 import { authenticate, bucket, getAdmin, getS3, type Caller } from './r2';
 
-/** Hard cap on stored chat media per student, enforced FIFO. */
+/** Hard cap on stored chat media per user, enforced oldest-first. */
 export const MEDIA_QUOTA_BYTES = 100 * 1024 * 1024;
 
 const PUT_URL_TTL_SECONDS = 300;
@@ -152,29 +152,34 @@ export function validateUploadRequest(req: UploadRequest): UploadCheck {
   const totalBytes = sizeBytes + (wantsPoster ? (posterBytes as number) : 0);
   // No amount of cleanup can fit a file bigger than the whole allowance.
   if (totalBytes > MEDIA_QUOTA_BYTES) {
-    return { status: 'rejected', code: 413, error: 'That file is larger than the 100 MB storage allowance for this chat.' };
+    return { status: 'rejected', code: 413, error: 'That file is larger than your 100 MB storage allowance.' };
   }
 
   return { status: 'ok', totalBytes, wantsPoster };
 }
 
 /**
- * Drops the oldest media in a conversation until `incomingBytes` will fit
- * under the cap. Returns how many attachments went.
+ * Drops the uploader's own oldest media until `incomingBytes` will fit under
+ * their personal cap. Returns how many attachments went.
+ *
+ * The quota belongs to the user, not the thread: the database only ever
+ * nominates rows this user sent, so making room for one person can never
+ * delete another person's media — including the admin's, whose uploads share
+ * the student's thread.
  *
  * The database picks the victims, R2 deletion happens here, then the rows are
  * flagged purged — so a failed R2 call can't leave the DB claiming space is
  * free while the objects are still being paid for. Oldest first, always; the
  * newest media and every text message are untouched.
  */
-async function makeRoom(conversationId: string, incomingBytes: number): Promise<number> {
+async function makeRoom(userId: string, incomingBytes: number): Promise<number> {
   const db = getAdmin();
   const client = getS3();
   const b = bucket();
   if (!db || !client || !b) return 0;
 
-  const { data, error } = await db.rpc('select_chat_media_to_purge', {
-    p_conversation_id: conversationId,
+  const { data, error } = await db.rpc('select_user_media_to_purge', {
+    p_user_id: userId,
     p_limit_bytes: MEDIA_QUOTA_BYTES,
     p_incoming_bytes: incomingBytes,
   });
@@ -235,9 +240,10 @@ function maybeSweep(): void {
   sweepStaleUploads().catch(() => {});
 }
 
-async function currentUsage(conversationId: string): Promise<number> {
+/** What this user stores across every thread — the figure the cap applies to. */
+async function currentUsage(userId: string): Promise<number> {
   const { data } = await getAdmin()!
-    .from('conversations').select('media_bytes_used').eq('id', conversationId).single();
+    .from('profiles').select('media_bytes_used').eq('id', userId).single();
   return Number(data?.media_bytes_used ?? 0);
 }
 
@@ -289,8 +295,9 @@ export function chatMediaRouter(): Router {
       return res.status(403).json({ error: 'You do not have access to this conversation.' });
     }
 
-    // Oldest media goes first, and only as much as this upload actually needs.
-    const purged = await makeRoom(conversationId, totalBytes);
+    // The caller's own oldest media goes first, and only as much as this
+    // upload actually needs. Nobody else's attachments are eligible.
+    const purged = await makeRoom(caller.userId, totalBytes);
 
     const stem = `chat/${conversationId}/${Date.now()}-${randomUUID()}`;
     const storageKey = `${stem}.${EXTENSION[kind]}`;
@@ -308,7 +315,7 @@ export function chatMediaRouter(): Router {
       posterKey,
       quotaBytes: MEDIA_QUOTA_BYTES,
       purged,
-      mediaBytesUsed: await currentUsage(conversationId),
+      mediaBytesUsed: await currentUsage(caller.userId),
     });
   });
 
@@ -373,12 +380,12 @@ export function chatMediaRouter(): Router {
       return res.status(403).json({ error: 'You do not have access to this conversation.' });
     }
 
-    const purged = await makeRoom(conversationId, 0);
+    const purged = await makeRoom(caller.userId, 0);
     maybeSweep();
 
     res.json({
       purged,
-      mediaBytesUsed: await currentUsage(conversationId),
+      mediaBytesUsed: await currentUsage(caller.userId),
       quotaBytes: MEDIA_QUOTA_BYTES,
     });
   });

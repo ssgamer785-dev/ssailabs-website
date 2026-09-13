@@ -132,10 +132,17 @@ from public.profiles where id = '22222222-2222-2222-2222-222222222222';
 rollback;
 
 \echo '--- 11. An admin can reach every student conversation'
+-- Captured before the role switch, so RLS is not filtering the baseline.
+select count(*) as total_conversations from public.conversations \gset
 begin;
 set local role authenticated;
 set local app.current_user_id = '11111111-1111-1111-1111-111111111111';
-select case when count(*) = 2 then 'PASS' else 'FAIL: admin sees ' || count(*) || ' of 2' end as t11
+-- Counted against however many exist rather than a literal: the suites share
+-- one database, so a hard number breaks whenever another suite adds a thread,
+-- and what this actually asserts is that RLS hides none of them from an admin.
+select case when count(*) = :total_conversations
+            then 'PASS (' || count(*) || ' of ' || :total_conversations || ')'
+            else 'FAIL: admin sees ' || count(*) || ' of ' || :total_conversations end as t11
 from public.conversations;
 \echo '--- 12. ...and can post to the Official channel'
 insert into public.posts (id, author_id, channel, body)

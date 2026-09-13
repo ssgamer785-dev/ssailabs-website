@@ -53,7 +53,7 @@ export function CandleChart({ stamp, seed = 7 }: { stamp?: string; seed?: number
         <div style={css('width:9px;height:1px;background:rgba(148,163,184,.3)')} />
       </div>
       {stamp && (
-        <div style={css("position:absolute;right:32px;bottom:8px;font:500 10px/1 -apple-system,'SF Pro Text',Helvetica,Arial,sans-serif;color:rgba(255,255,255,.82);letter-spacing:-.1px")}>{stamp}</div>
+        <div style={css("position:absolute;right:32px;bottom:8px;font:500 10px/1 'Poppins',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:rgba(255,255,255,.82);letter-spacing:-.1px")}>{stamp}</div>
       )}
     </div>
   );

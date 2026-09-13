@@ -30,7 +30,7 @@ function Item({ tab, active, label, activeIcon, inactiveIcon }: {
 
 export function BottomNav({ active }: { active: NavTab }) {
   return (
-    <div style={css("flex:none;display:flex;align-items:flex-start;background:#FFFFFF;border-top:1px solid #EFF1F6;box-shadow:0 -4px 18px rgba(15,23,42,.035);padding:10px 6px 20px;font-family:-apple-system,'SF Pro Text','Helvetica Neue',Helvetica,Arial,sans-serif")}>
+    <div style={css("flex:none;display:flex;align-items:flex-start;background:#FFFFFF;border-top:1px solid #EFF1F6;box-shadow:0 -4px 18px rgba(15,23,42,.035);padding:10px 6px 20px;font-family:'Poppins',-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif")}>
       <Item
         tab="home" active={active === 'home'} label="Home"
         activeIcon={<svg width="23" height="23" viewBox="0 0 24 24" fill="#0B5FEF" style={css('display:block')}><path d="M4.2 10.4 12 4.3l7.8 6.1V19a1.6 1.6 0 0 1-1.6 1.6H5.8A1.6 1.6 0 0 1 4.2 19z" /></svg>}

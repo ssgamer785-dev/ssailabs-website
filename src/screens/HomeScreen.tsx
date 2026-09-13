@@ -205,10 +205,22 @@ export function HomeScreen() {
             <div style={css('font-size:12px;color:#8794A8;white-space:nowrap')}>Good Morning 👋</div>
             <div style={css('font-size:18px;font-weight:800;letter-spacing:-.45px;white-space:nowrap')}>{userName}</div>
           </div>
-          <div onClick={() => navigate('/notifications')} style={css('position:relative;width:44px;height:44px;border-radius:14px;background:#FFFFFF;box-shadow:0 3px 12px rgba(15,23,42,.10);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d="M18 16.4H6l1.4-2.3V11a4.6 4.6 0 0 1 9.2 0v3.1z" /><path d="M10.3 19.2a1.9 1.9 0 0 0 3.4 0" /></svg>
+          {/* The bell stands on its own: no card, no border, no shadow. It keeps
+              the 44px hit area the other header controls use, so the row stays
+              aligned and the tap target stays thumb-sized. */}
+          <div
+            role="button"
+            tabIndex={0}
+            aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+            onClick={() => navigate('/notifications')}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/notifications'); } }}
+            style={css('position:relative;width:44px;height:44px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none;background:transparent;border:0')}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d="M18 16.4H6l1.4-2.3V11a4.6 4.6 0 0 1 9.2 0v3.1z" /><path d="M10.3 19.2a1.9 1.9 0 0 0 3.4 0" /></svg>
             {unread > 0 && (
-              <div style={css('position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#EF4444;border:2px solid #FFFFFF;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#FFFFFF;line-height:1')}>{unread}</div>
+              /* Without the card behind it the badge hugs the glyph itself,
+                 not the old 44px box, or it floats away from the bell. */
+              <div style={css('position:absolute;top:5px;right:4px;min-width:17px;height:17px;padding:0 5px;border-radius:999px;background:#EF4444;border:2px solid #FFFFFF;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:#FFFFFF;line-height:1')}>{unread}</div>
             )}
           </div>
           <div onClick={() => navigate('/profile')} style={css('width:44px;height:44px;border-radius:50%;background:#DCE7F7;color:#29527F;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex:none;box-shadow:0 2px 8px rgba(15,23,42,.10);cursor:pointer')}>{initials(userName)}</div>

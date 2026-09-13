@@ -227,14 +227,14 @@ export function AdminChatScreen() {
           <div onClick={() => fileInput.current?.click()} style={css('width:38px;height:38px;border-radius:50%;background:#F2F4F9;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')}>
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={2.1} strokeLinecap="round"><path d="M12 6v12M6 12h12" /></svg>
           </div>
-          <div style={css('flex:1;height:44px;border-radius:999px;background:#F2F4F9;display:flex;align-items:center;padding:0 16px')}>
+          <div style={css('flex:1;min-width:0;height:44px;border-radius:999px;background:#F2F4F9;display:flex;align-items:center;padding:0 16px')}>
             <input
               placeholder="Type a message..."
               value={msg}
               onChange={e => { setMsg(e.target.value); chat.notifyTyping(); }}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void handleSendText(); } }}
               onBlur={() => chat.stopTyping()}
-              style={css('flex:1;font-size:14px;height:100%')}
+              style={css('flex:1;min-width:0;font-size:14px;height:100%')}
             />
           </div>
           <MicBtn />

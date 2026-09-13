@@ -2,7 +2,7 @@ import { css } from '../lib/css';
 
 export function StatusBar() {
   return (
-    <div style={css("height:50px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 26px 0 30px;font-family:-apple-system,'SF Pro Text','Helvetica Neue',Helvetica,Arial,sans-serif")}>
+    <div style={css("height:50px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 26px 0 30px;font-family:'Poppins',-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Helvetica,Arial,sans-serif")}>
       <div style={css('font-size:15px;font-weight:600;letter-spacing:-0.2px;color:#0F172A')}>9:41</div>
       <div style={css('display:flex;align-items:center;gap:6px')}>
         <div style={css('display:flex;align-items:flex-end;gap:1.6px;height:11px')}>

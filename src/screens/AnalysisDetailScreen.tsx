@@ -201,13 +201,13 @@ export function AnalysisDetailScreen() {
           <div style={css('width:36px;height:36px;border-radius:50%;background:#F2F4F9;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={2.1} strokeLinecap="round"><path d="M12 6v12M6 12h12" /></svg>
           </div>
-          <div style={css('flex:1;height:42px;border-radius:999px;background:#F2F4F9;display:flex;align-items:center;padding:0 16px')}>
+          <div style={css('flex:1;min-width:0;height:42px;border-radius:999px;background:#F2F4F9;display:flex;align-items:center;padding:0 16px')}>
             <input
               placeholder="Write a comment or send a voice note..."
               value={comment}
               onChange={e => setComment(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void sendComment(); } }}
-              style={css('flex:1;font-size:13.5px;height:100%')}
+              style={css('flex:1;min-width:0;font-size:13.5px;height:100%')}
             />
           </div>
           <div onClick={toggleRec} title="Hold to record a voice message" style={css('width:36px;height:36px;border-radius:50%;flex:none;cursor:pointer;display:flex;align-items:center;justify-content:center;background:#F2F4F9')}>
