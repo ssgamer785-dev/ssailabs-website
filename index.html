@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
+    <!-- Restores a saved dark theme before the first paint. Without this the
+         page paints light from index.css, React mounts, and the theme flips a
+         frame later — a white flash on every reload for anyone using dark.
+         Inline and synchronous on purpose: a deferred module would be too late.
+         The key matches THEME_STORAGE_KEY in src/lib/theme.tsx. -->
+    <script>
+      try {
+        if (localStorage.getItem('tp-theme') === 'dark') {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      } catch (e) {}
+    </script>
+
     <!-- Tab and home-screen branding. Nothing was declared here before, so the
          browser fell back to requesting /favicon.ico, which the SPA catch-all
          in server.ts answers with index.html — the tab kept whatever generic

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppStateProvider } from './lib/app-state';
 import { AuthProvider } from './lib/auth-context';
+import { ThemeProvider } from './lib/theme';
 import { RequireAuth, RedirectIfAuthed } from './components/RequireAuth';
 import { SplashScreen } from './screens/SplashScreen';
 import { LoginScreen } from './screens/LoginScreen';
@@ -20,7 +21,8 @@ import { NameVisibilityScreen } from './screens/NameVisibilityScreen';
 
 export default function App() {
   return (
-    <AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
       <AppStateProvider>
         <BrowserRouter>
           <Routes>
@@ -43,6 +45,7 @@ export default function App() {
           </Routes>
         </BrowserRouter>
       </AppStateProvider>
-    </AuthProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

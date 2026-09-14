@@ -31,7 +31,7 @@ export function AppBackButton({ fallback = '/home', label = 'Back' }: {
       onClick={goBack}
       aria-label={label}
       className="pressable icon-button"
-      style={css('width:40px;height:40px;margin-left:-8px;flex:none;display:flex;align-items:center;justify-content:center;border:0;background:transparent;padding:0;cursor:pointer;color:#0F172A;border-radius:50%')}
+      style={css('width:40px;height:40px;margin-left:-8px;flex:none;display:flex;align-items:center;justify-content:center;border:0;background:transparent;padding:0;cursor:pointer;color:var(--text-primary);border-radius:50%')}
     >
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" style={css('display:block')}>
         <path d="M14.5 5.5l-7 6.5 7 6.5" />

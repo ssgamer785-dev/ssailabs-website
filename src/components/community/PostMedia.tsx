@@ -44,7 +44,7 @@ function PostVideo({ post, height }: { post: FeedPost; height: number }) {
       // means "play it", not "take me somewhere else". Everywhere else on the
       // card still navigates exactly as it did before.
       onClick={e => { e.stopPropagation(); if (!wanted) setWanted(true); }}
-      style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: '#0F172A', cursor: showVideo ? 'default' : 'pointer' }}
+      style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: 'var(--ink-chip)', cursor: showVideo ? 'default' : 'pointer' }}
     >
       {poster.url && !showVideo && (
         <img src={poster.url} alt={post.fileName ?? 'Video'} decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
@@ -65,14 +65,14 @@ function PostVideo({ post, height }: { post: FeedPost; height: number }) {
       {!showVideo && (
         <div style={css('position:absolute;inset:0;display:flex;align-items:center;justify-content:center')}>
           {wanted && !media.failed ? (
-            <div style={css('width:34px;height:34px;border-radius:50%;border:2.5px solid rgba(255,255,255,.35);border-top-color:#FFFFFF;animation:tp-spin .8s linear infinite')}>
+            <div style={css('width:34px;height:34px;border-radius:50%;border:2.5px solid rgba(255,255,255,.35);border-top-color:var(--border-on-accent);animation:tp-spin .8s linear infinite')}>
               <style>{'@keyframes tp-spin{to{transform:rotate(360deg)}}'}</style>
             </div>
           ) : media.failed ? (
-            <div style={css('font-size:11.5px;color:#FCA5A5')}>Could not load this video</div>
+            <div style={css('font-size:11.5px;color:var(--danger-ink-2)')}>Could not load this video</div>
           ) : (
-            <div style={css('width:52px;height:52px;border-radius:50%;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center')}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="#FFFFFF" style={css('margin-left:2px')}><path d="M8.5 5.5l10 6.5-10 6.5z" /></svg>
+            <div style={css('width:52px;height:52px;border-radius:50%;background:rgba(var(--shadow-rgb),.55);display:flex;align-items:center;justify-content:center')}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--on-accent)" style={css('margin-left:2px')}><path d="M8.5 5.5l10 6.5-10 6.5z" /></svg>
             </div>
           )}
         </div>
@@ -113,9 +113,9 @@ export function PostMedia({ post, height }: { post: FeedPost; height: number }) 
   if (isVideo) return <PostVideo post={post} height={height} />;
 
   return (
-    <div ref={image.ref} style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: '#EDF0F5' }}>
+    <div ref={image.ref} style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: 'var(--surface-sunken-2)' }}>
       {image.failed || !image.url ? (
-        <div style={css('width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:#94A3B8')}>
+        <div style={css('width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:var(--text-faint)')}>
           {image.failed ? 'Could not load attachment' : 'Loading…'}
         </div>
       ) : (
@@ -133,21 +133,21 @@ export function PdfRow({ post }: { post: FeedPost }) {
   );
 
   return (
-    <div ref={ref} style={css('background:#FFFFFF;border:1px solid #EDF0F6;border-radius:12px;padding:11px 12px;display:flex;align-items:center;gap:11px')}>
-      <div style={css('width:34px;height:38px;border-radius:8px;background:#FEF1F1;display:flex;align-items:center;justify-content:center;flex:none')}>
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth={1.8} strokeLinejoin="round"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg>
+    <div ref={ref} style={css('background:var(--surface);border:1px solid var(--border-2);border-radius:12px;padding:11px 12px;display:flex;align-items:center;gap:11px')}>
+      <div style={css('width:34px;height:38px;border-radius:8px;background:var(--danger-soft);display:flex;align-items:center;justify-content:center;flex:none')}>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--danger-ink)" strokeWidth={1.8} strokeLinejoin="round"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg>
       </div>
       <div style={css('flex:1;display:flex;flex-direction:column;gap:3px;min-width:0')}>
         <div style={css('font-size:12.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
           {post.fileName ?? 'Document.pdf'}
         </div>
-        <div style={css('font-size:11px;color:#94A3B8')}>
+        <div style={css('font-size:11px;color:var(--text-faint)')}>
           {post.mediaPurged ? 'Removed (6-month retention)' : bytes(post.sizeBytes ?? 0)}
         </div>
       </div>
       {url && !post.mediaPurged && (
         <a href={url} target="_blank" rel="noreferrer" style={css('display:flex;flex:none')}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" style={css('cursor:pointer')}><path d="M12 4v11M7.6 11l4.4 4.4L16.4 11M5 19.6h14" /></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" style={css('cursor:pointer')}><path d="M12 4v11M7.6 11l4.4 4.4L16.4 11M5 19.6h14" /></svg>
         </a>
       )}
     </div>

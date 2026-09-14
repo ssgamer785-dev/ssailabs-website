@@ -33,7 +33,8 @@ export function LoginScreen() {
   }
 
   return (
-    <PhoneShell>
+    <div className="theme-light" style={{ display: 'contents' }}>
+      <PhoneShell>
       <div style={css('flex:1;display:flex;flex-direction:column;padding:0 24px')}>
         <div style={css('height:52px;flex:none')} />
         <div style={css('font-size:28px;font-weight:800;letter-spacing:-.8px')}>Welcome Back 👋</div>
@@ -93,5 +94,6 @@ export function LoginScreen() {
         </div>
       </div>
     </PhoneShell>
+    </div>
   );
 }

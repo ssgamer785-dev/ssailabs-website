@@ -109,15 +109,15 @@ export function AppSidebar({ open, onClose, unreadCount = 0 }: {
         className="overlay-scrim"
         aria-hidden="true"
         onClick={onClose}
-        style={css('position:absolute;left:0;right:0;top:0;bottom:0;background:rgba(15,23,42,.42)')}
+        style={css('position:absolute;left:0;right:0;top:0;bottom:0;background:rgba(var(--shadow-rgb),.42)')}
       />
       <nav
         ref={panelRef}
         aria-label="Menu"
         className="overlay-panel"
         style={css(
-          'position:absolute;left:0;top:0;bottom:0;width:278px;max-width:82%;background:#FFFFFF;' +
-          'box-shadow:2px 0 24px rgba(15,23,42,.16);display:flex;flex-direction:column',
+          'position:absolute;left:0;top:0;bottom:0;width:278px;max-width:82%;background:var(--surface);' +
+          'box-shadow:2px 0 24px rgba(var(--shadow-rgb),.16);display:flex;flex-direction:column',
         )}
       >
         <div style={css('flex:none;padding:calc(14px + env(safe-area-inset-top, 0px)) 14px 10px 20px;display:flex;align-items:center;gap:10px')}>
@@ -130,7 +130,7 @@ export function AppSidebar({ open, onClose, unreadCount = 0 }: {
             onClick={onClose}
             aria-label="Close menu"
             className="pressable icon-button"
-            style={css('width:40px;height:40px;flex:none;display:flex;align-items:center;justify-content:center;border:0;background:transparent;padding:0;cursor:pointer;color:#0F172A;border-radius:50%')}
+            style={css('width:40px;height:40px;flex:none;display:flex;align-items:center;justify-content:center;border:0;background:transparent;padding:0;cursor:pointer;color:var(--text-primary);border-radius:50%')}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" style={css('display:block')}>
               <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
@@ -138,7 +138,7 @@ export function AppSidebar({ open, onClose, unreadCount = 0 }: {
           </button>
         </div>
 
-        <div style={css('flex:none;height:1px;background:#F1F4F9;margin:0 20px')} />
+        <div style={css('flex:none;height:1px;background:var(--surface-divider);margin:0 20px')} />
 
         <div style={css('flex:1;min-height:0;overflow-y:auto;padding:8px 12px calc(12px + env(safe-area-inset-bottom, 0px));display:flex;flex-direction:column;gap:2px')}>
           {ITEMS.map(({ route, label, icon }) => {
@@ -152,8 +152,8 @@ export function AppSidebar({ open, onClose, unreadCount = 0 }: {
                 className="pressable"
                 style={{
                   ...css('height:46px;padding:0 12px;display:flex;align-items:center;gap:13px;border:0;cursor:pointer;border-radius:11px;text-align:left;width:100%'),
-                  background: on ? '#EEF4FE' : 'transparent',
-                  color: on ? '#0B5FEF' : '#334155',
+                  background: on ? 'var(--accent-soft-5)' : 'transparent',
+                  color: on ? 'var(--accent-ink)' : 'var(--text-secondary)',
                 }}
               >
                 <svg
@@ -167,7 +167,7 @@ export function AppSidebar({ open, onClose, unreadCount = 0 }: {
                   {label}
                 </span>
                 {route === '/notifications' && unreadCount > 0 && (
-                  <span style={css('flex:none;min-width:19px;height:19px;padding:0 6px;border-radius:999px;background:#EF4444;color:#FFFFFF;display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;line-height:1')}>
+                  <span style={css('flex:none;min-width:19px;height:19px;padding:0 6px;border-radius:999px;background:var(--danger);color:var(--on-accent);display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;line-height:1')}>
                     {unreadCount}
                   </span>
                 )}

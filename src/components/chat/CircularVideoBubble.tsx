@@ -40,17 +40,17 @@ function ProgressRing({ fraction, color }: { fraction: number; color: string }) 
 
 function PlayGlyph({ paused }: { paused: boolean }) {
   return (
-    <div style={css('width:46px;height:46px;border-radius:50%;background:rgba(15,23,42,.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center')}>
+    <div style={css('width:46px;height:46px;border-radius:50%;background:rgba(var(--shadow-rgb),.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center')}>
       {paused
-        ? <svg width="18" height="18" viewBox="0 0 24 24" fill="#FFFFFF" style={css('margin-left:2px')}><path d="M8.5 5.5l10 6.5-10 6.5z" /></svg>
-        : <svg width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF"><rect x="6.5" y="5" width="4" height="14" rx="1.2" /><rect x="13.5" y="5" width="4" height="14" rx="1.2" /></svg>}
+        ? <svg width="18" height="18" viewBox="0 0 24 24" fill="var(--on-accent)" style={css('margin-left:2px')}><path d="M8.5 5.5l10 6.5-10 6.5z" /></svg>
+        : <svg width="16" height="16" viewBox="0 0 24 24" fill="var(--on-accent)"><rect x="6.5" y="5" width="4" height="14" rx="1.2" /><rect x="13.5" y="5" width="4" height="14" rx="1.2" /></svg>}
     </div>
   );
 }
 
 function Spinner() {
   return (
-    <div style={css('width:34px;height:34px;border-radius:50%;border:2.5px solid rgba(255,255,255,.35);border-top-color:#FFFFFF;animation:tp-spin .8s linear infinite')}>
+    <div style={css('width:34px;height:34px;border-radius:50%;border:2.5px solid rgba(255,255,255,.35);border-top-color:var(--border-on-accent);animation:tp-spin .8s linear infinite')}>
       <style>{'@keyframes tp-spin{to{transform:rotate(360deg)}}'}</style>
     </div>
   );
@@ -115,7 +115,7 @@ export function CircularVideoBubble({ message, out, onRetry }: {
   const showVideo = wanted && !!media.url && !message.mediaPurged;
   const loadingVideo = wanted && !media.url && !media.failed && !message.mediaPurged;
   const ringFraction = uploading ? (message.progress ?? 0) : progress;
-  const ringColor = uploading ? '#0B5FEF' : failed ? '#EF4444' : 'rgba(255,255,255,.9)';
+  const ringColor = uploading ? 'var(--accent-ink)' : failed ? 'var(--danger-ink)' : 'rgba(255,255,255,.9)';
 
   return (
     <div style={css('display:flex;flex-direction:column;gap:6px;align-items:flex-end')}>
@@ -130,15 +130,15 @@ export function CircularVideoBubble({ message, out, onRetry }: {
           height: SIZE,
           borderRadius: '50%',
           overflow: 'hidden',
-          background: '#0F172A',
+          background: 'var(--ink-chip)',
           cursor: message.mediaPurged ? 'default' : 'pointer',
           flex: 'none',
-          boxShadow: '0 4px 16px rgba(15,23,42,.16)',
+          boxShadow: '0 4px 16px rgba(var(--shadow-rgb),.16)',
           WebkitTapHighlightColor: 'transparent',
         }}
       >
         {message.mediaPurged ? (
-          <div style={css('width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;font-size:11px;color:#CBD5E1;padding:0 26px;line-height:1.45')}>
+          <div style={css('width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;font-size:11px;color:var(--text-dim-2);padding:0 26px;line-height:1.45')}>
             Removed to stay within your 100 MB storage limit
           </div>
         ) : (
@@ -173,13 +173,13 @@ export function CircularVideoBubble({ message, out, onRetry }: {
 
             <div style={css('position:absolute;inset:0;display:flex;align-items:center;justify-content:center')}>
               {uploading ? (
-                <div style={css('font-size:14px;font-weight:700;color:#FFFFFF;text-shadow:0 1px 6px rgba(15,23,42,.5)')}>
+                <div style={css('font-size:14px;font-weight:700;color:var(--on-accent);text-shadow:0 1px 6px rgba(var(--shadow-rgb),.5)')}>
                   {Math.round((message.progress ?? 0) * 100)}%
                 </div>
               ) : loadingVideo ? (
                 <Spinner />
               ) : media.failed ? (
-                <div style={css('font-size:11px;color:#FCA5A5;text-align:center;padding:0 24px;line-height:1.4')}>
+                <div style={css('font-size:11px;color:var(--danger-ink-2);text-align:center;padding:0 24px;line-height:1.4')}>
                   Could not load this video
                 </div>
               ) : !playing ? (
@@ -191,7 +191,7 @@ export function CircularVideoBubble({ message, out, onRetry }: {
 
             {total > 0 && !uploading && (
               <div style={css('position:absolute;left:0;right:0;bottom:12px;display:flex;justify-content:center;pointer-events:none')}>
-                <div style={css('padding:2px 9px;border-radius:999px;background:rgba(15,23,42,.55);font-size:10.5px;font-weight:600;color:#FFFFFF;letter-spacing:.1px')}>
+                <div style={css('padding:2px 9px;border-radius:999px;background:rgba(var(--shadow-rgb),.55);font-size:10.5px;font-weight:600;color:var(--on-accent);letter-spacing:.1px')}>
                   {formatDuration(playing || progress > 0 ? elapsed : total)}
                 </div>
               </div>

@@ -87,11 +87,11 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       if (state.busy) {
         state.spin += reduce ? 0 : 9;
         puck.style.transform = `rotate(${state.spin}deg) scale(1)`;
-        puck.style.color = '#16A34A';
+        puck.style.color = 'var(--success-ink)';
       } else {
         // Rotates toward "release me" and settles on green once armed.
         puck.style.transform = `rotate(${p * 180}deg) scale(${0.72 + p * 0.28})`;
-        puck.style.color = p >= 1 ? '#16A34A' : '#0B5FEF';
+        puck.style.color = p >= 1 ? 'var(--success-ink)' : 'var(--accent-ink)';
       }
     };
 
@@ -236,10 +236,10 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
 
   return (
     <>
-      <div style={css('min-height:100dvh;min-height:100vh;background:#EEF1F7;display:flex;align-items:center;justify-content:center;padding:0')} className="phone-viewport">
+      <div style={css('min-height:100dvh;min-height:100vh;background:var(--app-bg);display:flex;align-items:center;justify-content:center;padding:0')} className="phone-viewport">
         <div
           ref={frameRef}
-          style={css('position:relative;width:390px;height:844px;background:#FFFFFF;box-shadow:0 20px 50px rgba(15,23,42,.11),0 2px 6px rgba(15,23,42,.05);overflow:hidden;display:flex;flex-direction:column;color:#0F172A;border-radius:36px')}
+          style={css('position:relative;width:390px;height:844px;background:var(--surface);box-shadow:0 20px 50px rgba(var(--shadow-rgb),.11),0 2px 6px rgba(var(--shadow-rgb),.05);overflow:hidden;display:flex;flex-direction:column;color:var(--text-primary);border-radius:36px')}
           className="phone-frame"
         >
           <div
@@ -248,7 +248,7 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
             className="refresh-sheet"
             style={css('position:absolute;left:0;right:0;top:0;height:0;opacity:0;overflow:hidden;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;z-index:40;pointer-events:none;border-radius:36px 36px 0 0')}
           >
-            <div ref={puckRef} className="refresh-puck" style={css('width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#0B5FEF')}>
+            <div ref={puckRef} className="refresh-puck" style={css('width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--accent-ink)')}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 5.2v13.6M6.4 13.2 12 18.8l5.6-5.6" />
               </svg>
