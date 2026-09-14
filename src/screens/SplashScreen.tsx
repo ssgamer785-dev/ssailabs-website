@@ -4,7 +4,7 @@ import { css } from '../lib/css';
 import { makeRand } from '../lib/rng';
 import { useAuth } from '../lib/auth-context';
 import { PhoneShell } from '../components/PhoneShell';
-import logo from '../assets/traders-planet-logo.jpg';
+import mark from '../assets/traders-planet-mark.png';
 
 function SplashCandles() {
   const rand = makeRand(991);
@@ -46,10 +46,23 @@ export function SplashScreen() {
       <div style={css('flex:1;position:relative;overflow:hidden;background:#FCFDFF;cursor:pointer')} onClick={goNext}>
         <div style={css('position:absolute;right:-190px;top:-150px;width:520px;height:520px;border-radius:50%;background:radial-gradient(circle,rgba(11,95,239,.11),rgba(11,95,239,0) 68%)')} />
         <div style={css('position:absolute;left:-150px;top:170px;width:520px;height:560px;border-radius:50%;background:radial-gradient(circle,rgba(11,95,239,.07),rgba(11,95,239,0) 66%)')} />
-        <div style={css('position:absolute;left:0;right:0;top:142px;display:flex;flex-direction:column;align-items:center;gap:26px')}>
-          <div style={css('width:208px;height:150px;border-radius:26px;background:#0E1630;box-shadow:0 18px 42px rgba(14,22,48,.30);display:flex;align-items:center;justify-content:center;overflow:hidden')}>
-            <img src={logo} alt="THE TRADERS PLANET" style={css('width:188px;height:132px;object-fit:contain')} />
-          </div>
+        <div style={css('position:absolute;left:0;right:0;top:124px;display:flex;flex-direction:column;align-items:center;gap:24px')}>
+          {/* The mark used to sit in a 208x150 navy tile, because the only
+              asset was a JPEG with the brand's dark background baked in — a
+              dark rectangle parked on a white splash, with the actual gold
+              only about 92px across inside it. traders-planet-mark.png is the
+              same artwork keyed off that background, so it needs no tile and
+              can be nearly three times the size. The shadow follows the alpha
+              rather than a box, so there is no rectangle behind it. */}
+          <img
+            src={mark}
+            alt=""
+            className="splash-logo"
+            width={716}
+            height={459}
+            decoding="async"
+            style={css('width:272px;height:auto;display:block;filter:drop-shadow(0 12px 20px rgba(15,23,42,.16))')}
+          />
           <div style={css('display:flex;flex-direction:column;align-items:center;gap:10px')}>
             <div style={css('font-size:21px;font-weight:800;letter-spacing:-.4px;white-space:nowrap')}>
               <span style={css('color:#0B5FEF')}>THE </span><span style={css('color:#0F172A')}>TRADERS PLANET</span>
@@ -61,8 +74,16 @@ export function SplashScreen() {
         </div>
         <SplashCandles />
         <div style={css('position:absolute;left:0;right:0;bottom:48px;display:flex;justify-content:center')}>
-          <div style={css('width:148px;height:5px;border-radius:999px;background:#DCE6F8;overflow:hidden')}>
-            <div style={css('width:62%;height:100%;border-radius:999px;background:#0B5FEF')} />
+          {/* Indeterminate by design. This was a fixed 62% fill — a number
+              nothing measured. The app's real launch state is whether auth has
+              resolved, which has no percentage to report, so the indicator
+              says "working" and claims nothing. */}
+          <div
+            role="progressbar"
+            aria-label="Loading"
+            style={css('width:148px;height:5px;border-radius:999px;background:#DCE6F8;overflow:hidden')}
+          >
+            <div className="splash-sweep" />
           </div>
         </div>
       </div>

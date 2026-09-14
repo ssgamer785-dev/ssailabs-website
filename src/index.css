@@ -211,6 +211,51 @@ textarea {
 }
 .app-overlay.is-open .overlay-panel { transform: translate3d(0, 0, 0); }
 
+/* --- Splash launch indicator ---------------------------------------------
+   An indeterminate sweep, not a progress reading. The bar it replaces was a
+   hard-coded 62% fill, which told the user a fraction that nothing measured;
+   the app's only real launch state is "auth is resolving", which has no
+   percentage to report. So this says "working" and claims nothing.
+
+   Transform and opacity only, one element, no layout touched per frame. The
+   shuttle starts and ends fully outside the clipped track, so the loop has no
+   visible seam to reset across, and the ease carries it out of one side and
+   into the other at the same speed. */
+@keyframes splash-sweep {
+  0%   { transform: translate3d(-118%, 0, 0) scaleX(0.52); }
+  55%  { transform: translate3d(42%, 0, 0) scaleX(1); }
+  100% { transform: translate3d(200%, 0, 0) scaleX(0.52); }
+}
+
+.splash-sweep {
+  /* The shuttle's size lives here rather than inline, because the
+     reduced-motion rule below has to be able to widen it — an inline width
+     would outrank the media query and leave a short dash stranded at the left
+     of the track. */
+  width: 56%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg,
+    rgba(11, 95, 239, 0), var(--accent) 32%, var(--accent) 68%, rgba(11, 95, 239, 0));
+  animation: splash-sweep 1.6s cubic-bezier(0.62, 0.04, 0.38, 1) infinite;
+  will-change: transform;
+}
+
+/* The logo settles in once rather than animating on a loop. */
+@keyframes splash-logo-in {
+  from { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+
+.splash-logo {
+  animation: splash-logo-in 620ms var(--ease-out) both;
+}
+
+@keyframes splash-breathe {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1; }
+}
+
 /* --- Accessibility fallbacks ---------------------------------------------
    Reduced motion keeps the feedback but drops anything vestibular; more
    contrast gives every surface a real border. */
@@ -219,6 +264,15 @@ textarea {
   .nav-item-label, .nav-item-icon, .pressable,
   .overlay-scrim, .overlay-panel { transition-duration: 1ms; }
   .pressable:active { transform: none; opacity: 0.65; }
+
+  /* Nothing moves: the shuttle fills its track and breathes, which still reads
+     as "busy" without any travel across the screen. */
+  .splash-sweep {
+    animation: splash-breathe 2.6s ease-in-out infinite;
+    transform: none;
+    width: 100%;
+  }
+  .splash-logo { animation: none; }
 }
 
 @media (prefers-contrast: more) {
