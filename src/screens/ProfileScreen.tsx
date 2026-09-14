@@ -10,8 +10,19 @@ import { AppBackButton } from '../components/ui/AppBackButton';
 import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 
 function Row({ icon, label, trailing, onClick }: { icon: ReactNode; label: string; trailing?: string; onClick?: () => void }) {
+  // Rows that navigate are real buttons: focusable, operable from the keyboard
+  // and announced as controls. Rows with nowhere to go stay plain, so the tab
+  // order never stops on something that does nothing. The 56px height already
+  // clears the 44px touch target, and the styling is unchanged either way.
+  const interactive = !!onClick;
   return (
-    <Hoverable onClick={onClick} style={css('height:56px;padding:0 22px;display:flex;align-items:center;gap:14px;cursor:pointer')} hoverStyle={css('background:var(--surface-hover)')}>
+    <Hoverable
+      as={interactive ? 'button' : 'div'}
+      {...(interactive ? { type: 'button' as const, className: 'row-focus' } : {})}
+      onClick={onClick}
+      style={css('width:100%;height:56px;padding:0 22px;display:flex;align-items:center;gap:14px;cursor:pointer;text-align:left;border:0;background:transparent')}
+      hoverStyle={css('background:var(--surface-hover)')}
+    >
       {icon}
       <div style={css('flex:1;font-size:14px;font-weight:500;white-space:nowrap')}>{label}</div>
       {trailing && <div style={css('font-size:12.5px;font-weight:600;color:var(--text-faint);flex:none;white-space:nowrap')}>{trailing}</div>}
@@ -124,11 +135,11 @@ export function ProfileScreen() {
           label="Notifications" onClick={() => navigate('/notifications')}
         />
         <div style={css('height:1px;background:var(--surface-divider);margin:0 22px')} />
-        <Row icon={<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={rowIcon}><path d="M12 3.8 5.6 6.2v5.3c0 4 2.6 7.4 6.4 8.7 3.8-1.3 6.4-4.7 6.4-8.7V6.2z" /></svg>} label="Privacy Policy" />
+        <Row icon={<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={rowIcon}><path d="M12 3.8 5.6 6.2v5.3c0 4 2.6 7.4 6.4 8.7 3.8-1.3 6.4-4.7 6.4-8.7V6.2z" /></svg>} label="Privacy Policy" onClick={() => navigate('/profile/privacy')} />
         <div style={css('height:1px;background:var(--surface-divider);margin:0 22px')} />
-        <Row icon={<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={rowIcon}><path d="M6.6 3.6h6.3L18 8.5v11.9H6.6z" /><path d="M9.4 12.6h5.2M9.4 16h3.6" /></svg>} label="Terms &amp; Conditions" />
+        <Row icon={<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={rowIcon}><path d="M6.6 3.6h6.3L18 8.5v11.9H6.6z" /><path d="M9.4 12.6h5.2M9.4 16h3.6" /></svg>} label="Terms &amp; Conditions" onClick={() => navigate('/profile/terms')} />
         <div style={css('height:1px;background:var(--surface-divider);margin:0 22px')} />
-        <Row icon={<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={rowIcon}><circle cx="12" cy="12" r="8.5" /><path d="M9.8 9.4a2.3 2.3 0 0 1 4.4.9c0 1.5-2.2 1.8-2.2 3.2" /><path d="M12 16.6h.01" /></svg>} label="Help &amp; Support" />
+        <Row icon={<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={rowIcon}><circle cx="12" cy="12" r="8.5" /><path d="M9.8 9.4a2.3 2.3 0 0 1 4.4.9c0 1.5-2.2 1.8-2.2 3.2" /><path d="M12 16.6h.01" /></svg>} label="Help &amp; Support" onClick={() => navigate('/profile/help')} />
         <div style={css('height:1px;background:var(--surface-divider);margin:0 22px')} />
       </div>
       <div style={{ ...css('flex:none;padding:0 20px'), paddingBottom: 'calc(16px + var(--nav-space))' }}>

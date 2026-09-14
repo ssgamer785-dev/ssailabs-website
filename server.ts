@@ -5,6 +5,7 @@ import { createServer as createViteServer } from "vite";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 import { chatMediaRouter } from "./server/chat-media";
+import { SUPPORT_EMAIL } from "./src/lib/support";
 import { postMediaRouter } from "./server/post-media";
 
 dotenv.config();
@@ -56,7 +57,7 @@ app.post("/api/start-project", async (req, res) => {
     leads.push(lead);
     console.log("📬 NEW PROJECT INQUIRY RECEIVED:", lead);
 
-    const ownerEmail = process.env.OWNER_EMAIL || "contact.ssailabs@gmail.com";
+    const ownerEmail = process.env.OWNER_EMAIL || SUPPORT_EMAIL;
 
     let emailSent = false;
 

@@ -18,6 +18,9 @@ import { AnalysisDetailScreen } from './screens/AnalysisDetailScreen';
 import { NotificationsScreen } from './screens/NotificationsScreen';
 import { AdminInboxScreen } from './screens/AdminInboxScreen';
 import { NameVisibilityScreen } from './screens/NameVisibilityScreen';
+import { PrivacyPolicyScreen } from './screens/PrivacyPolicyScreen';
+import { TermsScreen } from './screens/TermsScreen';
+import { HelpSupportScreen } from './screens/HelpSupportScreen';
 
 export default function App() {
   return (
@@ -38,6 +41,9 @@ export default function App() {
             <Route path="/chat/admin" element={<RequireAuth><AdminChatScreen /></RequireAuth>} />
             <Route path="/profile" element={<RequireAuth><ProfileScreen /></RequireAuth>} />
             <Route path="/profile/name-visibility" element={<RequireAuth><NameVisibilityScreen /></RequireAuth>} />
+            <Route path="/profile/privacy" element={<RequireAuth><PrivacyPolicyScreen /></RequireAuth>} />
+            <Route path="/profile/terms" element={<RequireAuth><TermsScreen /></RequireAuth>} />
+            <Route path="/profile/help" element={<RequireAuth><HelpSupportScreen /></RequireAuth>} />
             <Route path="/analysis" element={<RequireAuth><AnalysisDetailScreen /></RequireAuth>} />
             <Route path="/notifications" element={<RequireAuth><NotificationsScreen /></RequireAuth>} />
             <Route path="/admin-inbox" element={<RequireAuth><AdminInboxScreen /></RequireAuth>} />

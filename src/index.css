@@ -510,6 +510,14 @@ textarea {
   border-radius: 12px;
 }
 
+/* Full-width list rows and cards: a visible focus ring, but none of
+   .pressable's scale — a 56px row shrinking on press reads as a glitch. */
+.row-focus:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: -3px;
+  border-radius: 10px;
+}
+
 /* A bare icon control — the back button, a header action — takes its surface
    from the touch rather than carrying one all the time. */
 .icon-button:hover { background-color: var(--tap-wash) !important; }
