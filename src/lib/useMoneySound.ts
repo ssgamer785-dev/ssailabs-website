@@ -1,60 +1,41 @@
 import { useCallback, useRef } from 'react';
+import moneySound from '../assets/money-sound-for-trader.m4a';
 
-/** Plays the "cha-ching" cash-register sound used on pull-to-refresh, via Web Audio synthesis (no audio asset). */
+/**
+ * The cash-register sound that marks a completed pull-to-refresh.
+ *
+ * This used to be synthesised with Web Audio oscillators — an approximation of
+ * a cha-ching, built because there was no audio asset. There is one now, so it
+ * plays that file and nothing else.
+ *
+ * One element, created on first play and reused. That is what keeps a fast
+ * second pull from stacking a second voice on top of the first: rewinding to
+ * zero restarts the clip instead of overlapping it. It also means the auth
+ * screens never construct an audio element at all, since they never reach the
+ * call site.
+ *
+ * Every failure path here is silent on purpose. If the browser's autoplay
+ * policy refuses the play() promise, or the element cannot be created at all,
+ * the refresh still runs — a missing sound effect is not worth an error.
+ */
 export function useMoneySound() {
-  const acRef = useRef<AudioContext | null>(null);
+  const elRef = useRef<HTMLAudioElement | null>(null);
 
-  function audio() {
-    if (!acRef.current) {
-      const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AC) return null;
-      acRef.current = new AC();
-    }
-    if (acRef.current.state === 'suspended') acRef.current.resume();
-    return acRef.current;
-  }
-
+  // Stable across renders. PhoneShell's gesture effect depends on this
+  // callback, and a new identity each render would tear the effect down mid-
+  // refresh and strand the indicator.
   return useCallback(function playMoney() {
-    const ac = audio();
-    if (!ac) return;
-    const t0 = ac.currentTime;
-    const master = ac.createGain();
-    master.gain.value = 0.5;
-    master.connect(ac.destination);
-
-    ([[1318.5, 0], [1975.5, 0.055]] as [number, number][]).forEach(([f, d], i) => {
-      const o = ac.createOscillator(), g = ac.createGain();
-      o.type = 'triangle';
-      o.frequency.setValueAtTime(f, t0 + d);
-      g.gain.setValueAtTime(0, t0 + d);
-      g.gain.linearRampToValueAtTime(i ? 0.22 : 0.3, t0 + d + 0.008);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + d + 0.42);
-      o.connect(g); g.connect(master);
-      o.start(t0 + d); o.stop(t0 + d + 0.45);
-    });
-
-    ([[2637, 0.10], [2093, 0.155], [3136, 0.21]] as [number, number][]).forEach(([f, d]) => {
-      const o = ac.createOscillator(), g = ac.createGain();
-      o.type = 'square';
-      o.frequency.setValueAtTime(f, t0 + d);
-      g.gain.setValueAtTime(0, t0 + d);
-      g.gain.linearRampToValueAtTime(0.075, t0 + d + 0.005);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + d + 0.12);
-      o.connect(g); g.connect(master);
-      o.start(t0 + d); o.stop(t0 + d + 0.14);
-    });
-
-    const len = Math.floor(ac.sampleRate * 0.18);
-    const buf = ac.createBuffer(1, len, ac.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
-    const src = ac.createBufferSource();
-    src.buffer = buf;
-    const bp = ac.createBiquadFilter();
-    bp.type = 'bandpass'; bp.frequency.value = 520; bp.Q.value = 1.1;
-    const ng = ac.createGain();
-    ng.gain.value = 0.16;
-    src.connect(bp); bp.connect(ng); ng.connect(master);
-    src.start(t0);
+    try {
+      let el = elRef.current;
+      if (!el) {
+        el = new Audio(moneySound);
+        el.preload = 'auto';
+        elRef.current = el;
+      }
+      el.currentTime = 0;
+      void el.play().catch(() => { /* autoplay blocked; stay quiet */ });
+    } catch {
+      /* no audio support in this environment */
+    }
   }, []);
 }
