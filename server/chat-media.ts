@@ -13,10 +13,10 @@
  */
 
 import { Router, type Response } from 'express';
-import { DeleteObjectsCommand, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
-import { authenticate, bucket, getAdmin, getS3, type Caller } from './r2';
+import { asyncRoute, authenticate, bucket, deleteObjects, getAdmin, getS3, type Caller } from './r2';
 
 /** Hard cap on stored chat media per user, enforced oldest-first. */
 export const MEDIA_QUOTA_BYTES = 100 * 1024 * 1024;
@@ -188,12 +188,9 @@ async function makeRoom(userId: string, incomingBytes: number): Promise<number> 
   const victims = data as PurgeVictim[];
   const keys = objectKeysFor(victims);
 
-  if (keys.length) {
-    await client.send(new DeleteObjectsCommand({
-      Bucket: b,
-      Delete: { Objects: keys, Quiet: true },
-    }));
-  }
+  // R2 first. deleteObjects throws on a partial failure too, so the rows are
+  // only marked purged once every object is genuinely gone.
+  await deleteObjects(client, b, keys);
   await db.rpc('mark_chat_media_purged', { p_message_ids: victims.map(v => v.id) });
   return victims.length;
 }
@@ -218,12 +215,7 @@ export async function sweepStaleUploads(): Promise<number> {
   const stale = data as PurgeVictim[];
   const keys = objectKeysFor(stale);
 
-  if (keys.length) {
-    await client.send(new DeleteObjectsCommand({
-      Bucket: b,
-      Delete: { Objects: keys, Quiet: true },
-    }));
-  }
+  await deleteObjects(client, b, keys);
   const { data: removed } = await db.rpc('delete_stale_pending_uploads', {
     p_message_ids: stale.map(v => v.id),
   });
@@ -277,7 +269,7 @@ export function chatMediaRouter(): Router {
    *
    * The key is generated here — a client never chooses where its bytes land.
    */
-  router.post('/upload-url', async (req, res) => {
+  router.post('/upload-url', asyncRoute(async (req, res) => {
     if (!requireConfigured(res)) return;
     const caller = await authenticate(req);
     if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
@@ -317,14 +309,14 @@ export function chatMediaRouter(): Router {
       purged,
       mediaBytesUsed: await currentUsage(caller.userId),
     });
-  });
+  }));
 
   /**
    * Re-signs the PUT for an upload that already has a row. Retrying reuses the
    * original key, so a half-written object is overwritten rather than joined by
    * a second one that nothing references.
    */
-  router.post('/resume-upload', async (req, res) => {
+  router.post('/resume-upload', asyncRoute(async (req, res) => {
     if (!requireConfigured(res)) return;
     const caller = await authenticate(req);
     if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
@@ -362,14 +354,14 @@ export function chatMediaRouter(): Router {
       posterUploadUrl,
       posterKey: message.poster_key ?? undefined,
     });
-  });
+  }));
 
   /**
    * Reconciles storage after a send. Room is made before the upload, so this
    * normally finds nothing — it catches what the pre-flight cannot see, such as
    * two devices uploading to the same conversation at once.
    */
-  router.post('/finalize', async (req, res) => {
+  router.post('/finalize', asyncRoute(async (req, res) => {
     if (!requireConfigured(res)) return;
     const caller = await authenticate(req);
     if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
@@ -388,10 +380,10 @@ export function chatMediaRouter(): Router {
       mediaBytesUsed: await currentUsage(caller.userId),
       quotaBytes: MEDIA_QUOTA_BYTES,
     });
-  });
+  }));
 
   /** Short-lived signed GET for one object the caller is allowed to see. */
-  router.get('/media-url', async (req, res) => {
+  router.get('/media-url', asyncRoute(async (req, res) => {
     if (!requireConfigured(res)) return;
     const caller = await authenticate(req);
     if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
@@ -413,13 +405,13 @@ export function chatMediaRouter(): Router {
       { expiresIn: GET_URL_TTL_SECONDS },
     );
     res.json({ url, expiresIn: GET_URL_TTL_SECONDS });
-  });
+  }));
 
   /**
    * Removes the R2 objects behind a message the caller deleted. An upload that
    * never finished is removed entirely — there is no message to leave behind.
    */
-  router.post('/delete-media', async (req, res) => {
+  router.post('/delete-media', asyncRoute(async (req, res) => {
     if (!requireConfigured(res)) return;
     const caller = await authenticate(req);
     if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
@@ -443,12 +435,7 @@ export function chatMediaRouter(): Router {
       .filter((k): k is string => !!k)
       .map(Key => ({ Key }));
 
-    if (keys.length) {
-      await getS3()!.send(new DeleteObjectsCommand({
-        Bucket: bucket()!,
-        Delete: { Objects: keys, Quiet: true },
-      }));
-    }
+    await deleteObjects(getS3()!, bucket()!, keys);
 
     if (message.upload_status === 'pending') {
       await db.rpc('delete_stale_pending_uploads', { p_message_ids: [message.id] });
@@ -456,7 +443,7 @@ export function chatMediaRouter(): Router {
       await db.rpc('mark_chat_media_purged', { p_message_ids: [message.id] });
     }
     res.json({ ok: true });
-  });
+  }));
 
   return router;
 }

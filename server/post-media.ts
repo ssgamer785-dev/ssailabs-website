@@ -7,10 +7,11 @@
  */
 
 import { Router, type Response } from 'express';
-import { DeleteObjectsCommand, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
-import { authenticate, bucket, getAdmin, getS3 } from './r2';
+import { posix as posixPath } from 'path';
+import { asyncRoute, authenticate, bucket, deleteObjects, getAdmin, getS3 } from './r2';
 
 const PUT_URL_TTL_SECONDS = 300;
 const GET_URL_TTL_SECONDS = 900;
@@ -32,6 +33,63 @@ const EXTENSION: Record<string, string> = { image: 'bin', video: 'bin', pdf: 'pd
 /** A generated JPEG frame; anything larger is not a thumbnail. */
 const MAX_POSTER_BYTES = 2 * 1024 * 1024;
 const POSTER_MIME = 'image/jpeg';
+
+/**
+ * The object a caller-supplied post media key is actually allowed to read, or
+ * null when it must not be signed at all.
+ *
+ * Checking `startsWith('posts/')` is not enough, and the reason is easy to
+ * miss: the AWS SDK resolves "." and ".." out of the path *before* it signs,
+ * so `posts/../chat/<id>/voice.webm` is signed as `chat/<id>/voice.webm` — a
+ * correctly signed URL for someone else's private chat attachment, issued by
+ * the posts endpoint, which never runs the conversation-membership check that
+ * chat-media.ts does. The prefix has to hold on the *resolved* key, not the
+ * one the caller typed.
+ *
+ * So traversal is refused outright rather than collapsed, and the normalised
+ * result is checked again. Mirrors conversationFromKey() on the chat side,
+ * which has always rejected these segments.
+ *
+ * Deliberately not asserting the rest of the key's shape: every key we mint is
+ * `posts/<uploader-uuid>/<millis>-<uuid>.<ext>`, but pinning that here would
+ * reject any legitimate object stored under an older naming scheme, and it
+ * buys nothing — once the resolved key is inside `posts/`, private media in
+ * `chat/` is unreachable by construction.
+ */
+export function postObjectKey(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+
+  const key = raw.trim();
+  if (!key || key.length > 1024) return null;
+
+  // Absolute paths, Windows separators, control characters and anything with a
+  // URI scheme are never keys we issued.
+  if (key.startsWith('/') || key.includes('\\')) return null;
+  // Control characters, written as codepoints rather than a regex escape so
+  // the check cannot be broken by an editor folding the escape into a literal.
+  for (let i = 0; i < key.length; i++) {
+    const c = key.charCodeAt(i);
+    if (c < 0x20 || c === 0x7f) return null;
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(key)) return null;
+
+  // Our keys never contain a percent sign. Refusing it closes the encoded
+  // variants (%2e%2e, %2f) without this function having to guess how many
+  // times some downstream layer might decode.
+  if (key.includes('%')) return null;
+
+  // Explicit traversal, current-directory and empty segments.
+  const segments = key.split('/');
+  if (segments.some(part => part === '' || part === '.' || part === '..')) return null;
+
+  // Belt and braces: whatever survived the above must still resolve inside the
+  // posts namespace, which is the property the signer actually depends on.
+  const resolved = posixPath.normalize(key);
+  if (resolved !== key) return null;
+  if (!resolved.startsWith('posts/') || resolved.length <= 'posts/'.length) return null;
+
+  return resolved;
+}
 
 function signPut(key: string, mimeType: string, sizeBytes: number): Promise<string> {
   // ContentType and ContentLength are signed, so the upload can't exceed
@@ -59,7 +117,7 @@ export function postMediaRouter(): Router {
   };
 
   /** Signed PUT. The key is server-generated and namespaced by uploader. */
-  router.post('/upload-url', async (req, res) => {
+  router.post('/upload-url', asyncRoute(async (req, res) => {
     if (!requireConfigured(res)) return;
     const caller = await authenticate(req);
     if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
@@ -89,16 +147,17 @@ export function postMediaRouter(): Router {
     const posterUploadUrl = posterKey ? await signPut(posterKey, POSTER_MIME, posterBytes) : undefined;
 
     res.json({ uploadUrl, storageKey, posterUploadUrl, posterKey });
-  });
+  }));
 
   /** Signed GET. Any signed-in member may read post media. */
-  router.get('/media-url', async (req, res) => {
+  router.get('/media-url', asyncRoute(async (req, res) => {
     if (!requireConfigured(res)) return;
     const caller = await authenticate(req);
     if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
 
-    const storageKey = String(req.query.key ?? '');
-    if (!storageKey.startsWith('posts/')) {
+    // Resolved, not just prefixed: see postObjectKey().
+    const storageKey = postObjectKey(req.query.key);
+    if (!storageKey) {
       return res.status(400).json({ error: 'Invalid media key.' });
     }
 
@@ -108,10 +167,10 @@ export function postMediaRouter(): Router {
       { expiresIn: GET_URL_TTL_SECONDS },
     );
     res.json({ url, expiresIn: GET_URL_TTL_SECONDS });
-  });
+  }));
 
   /** Clears the R2 object behind a post the caller is allowed to remove. */
-  router.post('/delete-media', async (req, res) => {
+  router.post('/delete-media', asyncRoute(async (req, res) => {
     if (!requireConfigured(res)) return;
     const caller = await authenticate(req);
     if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
@@ -132,21 +191,20 @@ export function postMediaRouter(): Router {
       .map(Key => ({ Key }));
 
     if (keys.length) {
-      await getS3()!.send(new DeleteObjectsCommand({
-        Bucket: bucket()!,
-        Delete: { Objects: keys, Quiet: true },
-      }));
+      // R2 first: a failure throws, so the row is never marked purged while
+      // its object is still in the bucket.
+      await deleteObjects(getS3()!, bucket()!, keys);
       await db.rpc('mark_post_media_purged', { p_post_ids: [post.id] });
     }
     res.json({ ok: true });
-  });
+  }));
 
   /**
    * Runs the 6-month community retention sweep: clears the expired posts' R2
    * objects, then deletes the rows. Admin-only, so it can be triggered by an
    * external scheduler holding an admin token (see supabase/README.md).
    */
-  router.post('/run-retention', async (req, res) => {
+  router.post('/run-retention', asyncRoute(async (req, res) => {
     if (!requireConfigured(res)) return;
     const caller = await authenticate(req);
     if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
@@ -161,14 +219,11 @@ export function postMediaRouter(): Router {
       .map(Key => ({ Key }));
 
     if (keys.length) {
-      await getS3()!.send(new DeleteObjectsCommand({
-        Bucket: bucket()!,
-        Delete: { Objects: keys, Quiet: true },
-      }));
+      await deleteObjects(getS3()!, bucket()!, keys);
     }
     const { data: deleted } = await db.rpc('purge_expired_posts');
     res.json({ mediaCleared: victims.length, postsDeleted: deleted ?? 0 });
-  });
+  }));
 
   return router;
 }

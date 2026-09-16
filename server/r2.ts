@@ -6,9 +6,9 @@
  * signing anything.
  */
 
-import type { Request } from 'express';
+import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectsCommand, S3Client } from '@aws-sdk/client-s3';
 
 export function env(name: string): string | undefined {
   const v = process.env[name];
@@ -46,6 +46,70 @@ export function getAdmin(): SupabaseClient | null {
   if (!url || !key) return null;
   admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
   return admin;
+}
+
+/**
+ * Wraps an async route so a rejection cannot take the process down.
+ *
+ * Express 4 does not await a handler, so a rejected promise never reaches its
+ * error middleware — it surfaces as an unhandled rejection, and Node exits on
+ * those. A single failed R2 call was therefore enough to kill the server: a
+ * DeleteObjects during a quota purge answered 503, the SDK threw, and the
+ * process went with it.
+ *
+ * The failure is not hidden. It is logged in full server-side, and the caller
+ * gets a 503 telling them the operation did not happen, so nothing downstream
+ * mistakes a failed purge or a failed signature for a successful one.
+ */
+export function asyncRoute(
+  handler: (req: Request, res: Response) => Promise<unknown>,
+): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction) => {
+    handler(req, res).catch((error: unknown) => {
+      console.error(`[media] ${req.method} ${req.originalUrl} failed:`, error);
+      // Something already started writing: the response is no longer ours to
+      // shape, so hand it to Express rather than writing a second set of headers.
+      if (res.headersSent) {
+        next(error);
+        return;
+      }
+      res.status(503).json({
+        error: 'Media storage is temporarily unavailable. Please try again.',
+      });
+    });
+  };
+}
+
+/**
+ * Deletes objects from R2, treating a partial failure as a failure.
+ *
+ * DeleteObjects answers 200 even when individual keys could not be removed —
+ * in Quiet mode the response carries only the ones that failed. Sending the
+ * command and ignoring the result therefore reports success for objects that
+ * are still in the bucket, and the caller goes on to mark those rows purged.
+ * Throwing here keeps the two-phase contract intact: the database is only told
+ * the space is free once the bytes are actually gone.
+ */
+export async function deleteObjects(
+  client: S3Client,
+  bucketName: string,
+  keys: { Key: string }[],
+): Promise<void> {
+  if (!keys.length) return;
+
+  const result = await client.send(new DeleteObjectsCommand({
+    Bucket: bucketName,
+    Delete: { Objects: keys, Quiet: true },
+  }));
+
+  const errors = result.Errors ?? [];
+  if (errors.length) {
+    const first = errors[0];
+    throw new Error(
+      `R2 delete failed for ${errors.length} of ${keys.length} object(s); ` +
+      `first: ${first.Key ?? '(unknown key)'} — ${first.Code ?? 'unknown'}: ${first.Message ?? 'no message'}`,
+    );
+  }
 }
 
 export interface Caller {
