@@ -1,8 +1,12 @@
 import express from "express";
+import os from "os";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
+import { chatMediaRouter } from "./server/chat-media";
+import { SUPPORT_EMAIL } from "./src/lib/support";
+import { postMediaRouter } from "./server/post-media";
 
 dotenv.config();
 
@@ -10,6 +14,11 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json());
+
+// Cloudflare R2-backed chat attachments (signed upload/read URLs, quota purge).
+app.use("/api/chat", chatMediaRouter());
+// R2-backed community post attachments + the 6-month retention sweep.
+app.use("/api/posts", postMediaRouter());
 
 // In-memory leads storage for backup / immediate access
 const leads: Array<{
@@ -48,7 +57,7 @@ app.post("/api/start-project", async (req, res) => {
     leads.push(lead);
     console.log("📬 NEW PROJECT INQUIRY RECEIVED:", lead);
 
-    const ownerEmail = process.env.OWNER_EMAIL || "contact.ssailabs@gmail.com";
+    const ownerEmail = process.env.OWNER_EMAIL || SUPPORT_EMAIL;
 
     let emailSent = false;
 
@@ -140,8 +149,18 @@ async function startServer() {
     });
   }
 
+  // Already bound to every interface, so a phone on the same Wi-Fi can reach
+  // this. The log used to name only localhost, which reads as though the bind
+  // were loopback-only — so it now prints the addresses that actually work.
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    for (const addresses of Object.values(os.networkInterfaces())) {
+      for (const address of addresses ?? []) {
+        if (address.family === "IPv4" && !address.internal) {
+          console.log(`  on your network: http://${address.address}:${PORT}`);
+        }
+      }
+    }
   });
 }
 

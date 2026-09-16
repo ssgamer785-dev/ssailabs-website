@@ -1,0 +1,675 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   Poppins — the app's one typeface
+   ==========================================================================
+   Self-hosted from src/assets/fonts/Poppins-Regular.ttf, which Vite
+   fingerprints and serves from the same origin as everything else. It used to
+   come from fonts.googleapis.com, so the typeface depended on a third party
+   being reachable — on a blocked or offline network the whole app silently
+   rendered in a system face instead.
+
+   This is the Regular cut only: usWeightClass 400, italic bit clear. The
+   declaration says so, which means the browser synthesises the heavier
+   weights the UI asks for (500-800) from this master rather than picking a
+   different family. Real cuts for those weights would need their own files.
+   ========================================================================== */
+@font-face {
+  font-family: 'Poppins';
+  src: url('./assets/fonts/Poppins-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ==========================================================================
+   Theme
+   ==========================================================================
+   The app is styled entirely with inline style objects, so a colour cannot be
+   themed by a stylesheet rule — it has to be a custom property at the point of
+   use. Every colour in the authenticated app therefore resolves through one of
+   the tokens below, and nothing under src/ names a colour of its own.
+
+   The light values are not a new palette: they are the exact literals the app
+   already shipped, lifted out of the components one property at a time. That
+   is what makes light provably unchanged rather than merely similar — a token
+   whose light value differs from the hex it replaced would be a bug, and the
+   generator refuses to emit one.
+
+   A token's meaning comes from the property it serves, which is why the same
+   literal appears twice: #FFFFFF is --surface under `background` and
+   --on-accent under `color`. One flips in dark, the other never does, which is
+   why white text on a blue button stays white — it was never the surface.
+
+   Dark is opt-in only. There is deliberately no prefers-color-scheme rule: the
+   app starts light and stays light until someone chooses otherwise on Profile.
+   ========================================================================== */
+
+:root {
+  /* Surfaces */
+  --app-bg: #EEF1F7;
+  --surface: #FFFFFF;
+  --surface-2: #FDFDFE;
+  --surface-hover: #FAFBFD;
+  --surface-inset: #F7F8FB;
+  --surface-secondary: #F2F4F9;
+  --surface-secondary-2: #F4F6FA;
+  --surface-secondary-3: #F5F7FB;
+  --surface-divider: #F1F4F9;
+  --surface-track: #F1F3F8;
+  --surface-sunken: #F3F5F9;
+  --surface-sunken-2: #EDF0F5;
+
+  /* Text */
+  --text-primary: #0F172A;
+  --text-secondary: #334155;
+  --text-tertiary: #475569;
+  --text-tertiary-2: #526174;
+  --text-muted: #64748B;
+  --text-muted-2: #8794A8;
+  --text-faint: #94A3B8;
+  --text-placeholder: #B6BFCC;
+  --text-dim: #C2CAD6;
+  --text-dim-2: #CBD5E1;
+  --on-accent: #FFFFFF;
+  --text-on-accent-soft: #12203C;
+
+  /* Borders */
+  --border: #F1F4F9;
+  --border-2: #EDF0F6;
+  --border-3: #EDF0F5;
+  --border-4: #EAEEF4;
+  --border-5: #E7EBF1;
+  --border-strong: #D8DEE8;
+  --border-strong-2: #C2CAD6;
+  --border-strong-3: #94A3B8;
+  --border-on-accent: #FFFFFF;
+
+  /* Accent */
+  --accent: #0B5FEF;
+  --accent-ink: #0B5FEF;
+  --accent-hover: #0A52D6;
+  --accent-grad-a: #1C6EF6;
+  --accent-grad-b: #0A4FDD;
+  --accent-soft: #EDF3FE;
+  --accent-soft-2: #DCE9FF;
+  --accent-soft-3: #C6DBFF;
+  --accent-soft-4: #E7EEFC;
+  --accent-soft-5: #EEF4FE;
+  --accent-tint: #F2F6FE;
+  --accent-tint-2: #F7FAFF;
+  --accent-border: #E7EEFC;
+  --accent-border-2: #DCE9FF;
+
+  /* Semantic */
+  --danger: #EF4444;
+  --danger-ink: #EF4444;
+  --danger-ink-2: #FCA5A5;
+  --danger-soft: #FEF1F1;
+  --danger-soft-2: #FEF4F4;
+  --danger-soft-3: #FEF2F3;
+  --danger-soft-4: #FDE1E3;
+  --danger-soft-5: #FDE7E9;
+  --danger-border: #FBD5D9;
+  --success: #22C55E;
+  --success-deep: #16A34A;
+  --success-ink: #16A34A;
+  --success-ink-2: #22C55E;
+  --success-soft: #E9F8EF;
+  --warning-ink: #B98F3C;
+  --warning-ink-2: #B45309;
+  --warning-ink-3: #7A5D25;
+  --warning-ink-4: #92400E;
+  --warning-soft: #FFF9EC;
+  --warning-soft-2: #FFF8E8;
+  --warning-soft-3: #FFF6E6;
+  --warning-border: #F3E3BE;
+  --warning-border-2: #F6E3B4;
+  --violet-ink: #6B5DD3;
+  --violet-soft: #F1F0FD;
+
+  /* Avatars */
+  --avatar-bg: #DCE7F7;
+  --avatar-ink: #29527F;
+  --avatar-bg-2: #E4E9F7;
+  --avatar-ink-2: #3C5A8A;
+  --avatar-bg-3: #E7E3F7;
+  --avatar-ink-3: #55488C;
+  --avatar-bg-4: #F3E6EF;
+  --avatar-ink-4: #7A3F66;
+  --avatar-bg-5: #DEF0E6;
+  --avatar-ink-5: #2F6B4A;
+
+  /* Chips and fills */
+  --ink-chip: #0F172A;
+  --ink-chip-2: #0F1733;
+  --ink-chip-3: #080D1A;
+  --gold: #D9A63F;
+  --neutral-fill: #94A3B8;
+  --neutral-fill-2: #CBD5E1;
+  --switch-track: #D5DBE5;
+
+  /* Channels (every rgba() alpha in the app resolves through these) */
+  --shadow-rgb: 15, 23, 42;
+  --faint-rgb: 148, 163, 184;
+  /* Chrome that lives only in this file */
+  --hairline: #ECEFF4;
+  --placeholder: #A6AEBC;
+  --tap-wash: rgba(15, 23, 42, 0.045);
+  --tap-wash-strong: rgba(15, 23, 42, 0.075);
+  --refresh-rgb: 242, 246, 254;
+}
+
+[data-theme="dark"] {
+  /* Scrollbars, form controls and the canvas behind the page follow suit. */
+  color-scheme: dark;
+
+
+  /* Surfaces */
+  --app-bg: #05070D;
+  --surface: #141925;
+  --surface-2: #151A26;
+  --surface-hover: #1B2130;
+  --surface-inset: #1A1F2C;
+  --surface-secondary: #1E2431;
+  --surface-secondary-2: #1E2431;
+  --surface-secondary-3: #1D2230;
+  --surface-divider: #222836;
+  --surface-track: #1E2431;
+  --surface-sunken: #0D111A;
+  --surface-sunken-2: #0E121B;
+
+  /* Text */
+  --text-primary: #E9EDF5;
+  --text-secondary: #C7CFDD;
+  --text-tertiary: #B0BACA;
+  --text-tertiary-2: #A7B1C3;
+  --text-muted: #94A0B5;
+  --text-muted-2: #8E9AAF;
+  --text-faint: #7D8A9E;
+  --text-placeholder: #818C9F;
+  --text-dim: #626C80;
+  --text-dim-2: #6C7689;
+  --on-accent: #FFFFFF;
+  --text-on-accent-soft: #DCE9FF;
+
+  /* Borders */
+  --border: #232A38;
+  --border-2: #242B39;
+  --border-3: #232A38;
+  --border-4: #262D3C;
+  --border-5: #272E3E;
+  --border-strong: #333B4C;
+  --border-strong-2: #3B4356;
+  --border-strong-3: #4A5467;
+  --border-on-accent: #FFFFFF;
+
+  /* Accent */
+  --accent: #0B5FEF;
+  --accent-ink: #5A9CFF;
+  --accent-hover: #0A52D6;
+  --accent-grad-a: #1C6EF6;
+  --accent-grad-b: #0A4FDD;
+  --accent-soft: #16233A;
+  --accent-soft-2: #1B2C49;
+  --accent-soft-3: #22375B;
+  --accent-soft-4: #1C2A43;
+  --accent-soft-5: #17243C;
+  --accent-tint: #131E30;
+  --accent-tint-2: #121C2D;
+  --accent-border: #223150;
+  --accent-border-2: #26375A;
+
+  /* Semantic */
+  --danger: #EF4444;
+  --danger-ink: #FF8080;
+  --danger-ink-2: #FFB3B3;
+  --danger-soft: #2B1719;
+  --danger-soft-2: #2B1719;
+  --danger-soft-3: #2C181A;
+  --danger-soft-4: #351D20;
+  --danger-soft-5: #341C1F;
+  --danger-border: #4B2429;
+  --success: #22C55E;
+  --success-deep: #16A34A;
+  --success-ink: #4ADE80;
+  --success-ink-2: #5EE795;
+  --success-soft: #122619;
+  --warning-ink: #D9AE5C;
+  --warning-ink-2: #E0913C;
+  --warning-ink-3: #D3AD66;
+  --warning-ink-4: #DD9B4C;
+  --warning-soft: #2A2214;
+  --warning-soft-2: #2B2315;
+  --warning-soft-3: #2C2416;
+  --warning-border: #40331C;
+  --warning-border-2: #42351D;
+  --violet-ink: #A99BFF;
+  --violet-soft: #1E1B34;
+
+  /* Avatars */
+  --avatar-bg: #243349;
+  --avatar-ink: #A3C4EC;
+  --avatar-bg-2: #232D46;
+  --avatar-ink-2: #9FB6DA;
+  --avatar-bg-3: #2A2542;
+  --avatar-ink-3: #B6ADE4;
+  --avatar-bg-4: #2E2233;
+  --avatar-ink-4: #DFA8CC;
+  --avatar-bg-5: #14271C;
+  --avatar-ink-5: #7FD2A3;
+
+  /* Chips and fills */
+  --ink-chip: #2C3549;
+  --ink-chip-2: #232B42;
+  --ink-chip-3: #04070C;
+  --gold: #D9A63F;
+  --neutral-fill: #4A5468;
+  --neutral-fill-2: #3E4757;
+  --switch-track: #363E4E;
+
+  /* Channels (every rgba() alpha in the app resolves through these) */
+  --shadow-rgb: 0, 0, 0;
+  --faint-rgb: 110, 122, 142;
+  --hairline: #242B39;
+  --placeholder: #6A7488;
+  --tap-wash: rgba(255, 255, 255, 0.06);
+  --tap-wash-strong: rgba(255, 255, 255, 0.10);
+  --refresh-rgb: 22, 35, 58;
+}
+
+/* Splash, Login and Signup are not part of the themed app: they still carry
+   their own colours, so a dark root would half-dress them — dark frame, light
+   form. They opt out by re-declaring the light values on a wrapper, which
+   `display: contents` keeps out of the layout entirely while custom properties
+   still inherit through it. Their appearance is the shipped one in both modes. */
+.theme-light {
+  /* Surfaces */
+  --app-bg: #EEF1F7;
+  --surface: #FFFFFF;
+  --surface-2: #FDFDFE;
+  --surface-hover: #FAFBFD;
+  --surface-inset: #F7F8FB;
+  --surface-secondary: #F2F4F9;
+  --surface-secondary-2: #F4F6FA;
+  --surface-secondary-3: #F5F7FB;
+  --surface-divider: #F1F4F9;
+  --surface-track: #F1F3F8;
+  --surface-sunken: #F3F5F9;
+  --surface-sunken-2: #EDF0F5;
+
+  /* Text */
+  --text-primary: #0F172A;
+  --text-secondary: #334155;
+  --text-tertiary: #475569;
+  --text-tertiary-2: #526174;
+  --text-muted: #64748B;
+  --text-muted-2: #8794A8;
+  --text-faint: #94A3B8;
+  --text-placeholder: #B6BFCC;
+  --text-dim: #C2CAD6;
+  --text-dim-2: #CBD5E1;
+  --on-accent: #FFFFFF;
+  --text-on-accent-soft: #12203C;
+
+  /* Borders */
+  --border: #F1F4F9;
+  --border-2: #EDF0F6;
+  --border-3: #EDF0F5;
+  --border-4: #EAEEF4;
+  --border-5: #E7EBF1;
+  --border-strong: #D8DEE8;
+  --border-strong-2: #C2CAD6;
+  --border-strong-3: #94A3B8;
+  --border-on-accent: #FFFFFF;
+
+  /* Accent */
+  --accent: #0B5FEF;
+  --accent-ink: #0B5FEF;
+  --accent-hover: #0A52D6;
+  --accent-grad-a: #1C6EF6;
+  --accent-grad-b: #0A4FDD;
+  --accent-soft: #EDF3FE;
+  --accent-soft-2: #DCE9FF;
+  --accent-soft-3: #C6DBFF;
+  --accent-soft-4: #E7EEFC;
+  --accent-soft-5: #EEF4FE;
+  --accent-tint: #F2F6FE;
+  --accent-tint-2: #F7FAFF;
+  --accent-border: #E7EEFC;
+  --accent-border-2: #DCE9FF;
+
+  /* Semantic */
+  --danger: #EF4444;
+  --danger-ink: #EF4444;
+  --danger-ink-2: #FCA5A5;
+  --danger-soft: #FEF1F1;
+  --danger-soft-2: #FEF4F4;
+  --danger-soft-3: #FEF2F3;
+  --danger-soft-4: #FDE1E3;
+  --danger-soft-5: #FDE7E9;
+  --danger-border: #FBD5D9;
+  --success: #22C55E;
+  --success-deep: #16A34A;
+  --success-ink: #16A34A;
+  --success-ink-2: #22C55E;
+  --success-soft: #E9F8EF;
+  --warning-ink: #B98F3C;
+  --warning-ink-2: #B45309;
+  --warning-ink-3: #7A5D25;
+  --warning-ink-4: #92400E;
+  --warning-soft: #FFF9EC;
+  --warning-soft-2: #FFF8E8;
+  --warning-soft-3: #FFF6E6;
+  --warning-border: #F3E3BE;
+  --warning-border-2: #F6E3B4;
+  --violet-ink: #6B5DD3;
+  --violet-soft: #F1F0FD;
+
+  /* Avatars */
+  --avatar-bg: #DCE7F7;
+  --avatar-ink: #29527F;
+  --avatar-bg-2: #E4E9F7;
+  --avatar-ink-2: #3C5A8A;
+  --avatar-bg-3: #E7E3F7;
+  --avatar-ink-3: #55488C;
+  --avatar-bg-4: #F3E6EF;
+  --avatar-ink-4: #7A3F66;
+  --avatar-bg-5: #DEF0E6;
+  --avatar-ink-5: #2F6B4A;
+
+  /* Chips and fills */
+  --ink-chip: #0F172A;
+  --ink-chip-2: #0F1733;
+  --ink-chip-3: #080D1A;
+  --gold: #D9A63F;
+  --neutral-fill: #94A3B8;
+  --neutral-fill-2: #CBD5E1;
+  --switch-track: #D5DBE5;
+
+  /* Channels (every rgba() alpha in the app resolves through these) */
+  --shadow-rgb: 15, 23, 42;
+  --faint-rgb: 148, 163, 184;
+  --hairline: #ECEFF4;
+  --placeholder: #A6AEBC;
+  --tap-wash: rgba(15, 23, 42, 0.045);
+  --tap-wash-strong: rgba(15, 23, 42, 0.075);
+  --refresh-rgb: 242, 246, 254;
+  color-scheme: light;
+}
+
+/* Switching themes recolours in place: no geometry, no opacity, nothing that
+   could shift the layout or flash. The class is only on the root while the
+   change is in flight, so ordinary interaction is never slowed by it. */
+.theme-switching, .theme-switching *:not(svg):not(svg *) {
+  transition: background-color 180ms linear, border-color 180ms linear,
+              color 180ms linear, fill 180ms linear, stroke 180ms linear !important;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Every screen in this app is styled with inline style objects, so an inline
+   font-family would beat any ordinary rule here. This is the one declaration
+   that cannot be overridden by accident, and it is why no component carries a
+   font stack of its own any more. */
+*, *::before, *::after {
+  font-family: 'Poppins' !important;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+/* The browser's own overscroll pull-to-refresh would reload the page mid-form
+   on Chrome for Android — on login and signup that throws away whatever has
+   been typed. The app is a fixed-height shell that never wants it, and the
+   authenticated screens provide their own gesture in PhoneShell. Keyboard and
+   menu refresh (Ctrl+R, F5) are untouched by this. */
+html, body {
+  overscroll-behavior: none;
+}
+
+body {
+  margin: 0;
+  background: var(--app-bg);
+  font-family: 'Poppins';
+  font-weight: 400;
+  font-style: normal;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+input, textarea, button, select {
+  border: 0;
+  background: transparent;
+  outline: none;
+  color: var(--text-primary);
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--placeholder);
+}
+
+textarea {
+  resize: none;
+}
+
+/* On real phone-width viewports, drop the device bezel and fill the screen edge to edge. */
+@media (max-width: 480px) {
+  .phone-viewport {
+    padding: 0 !important;
+  }
+  .phone-frame {
+    width: 100vw !important;
+    height: 100dvh !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+}
+
+/* ==========================================================================
+   Shell chrome — the authenticated app's surfaces and motion
+   ==========================================================================
+   One place for the persistent surfaces, the press feedback and the motion
+   tokens, so screens stay inline-styled for layout and never re-declare a
+   surface. Everything here is compositor-friendly: transform and opacity
+   only, no animated geometry.
+
+   The surfaces are solid. An overlay sits above content and says so with a
+   hairline and a soft shadow — no translucency, no blur, nothing for the
+   content underneath to show through and compete with.
+   ========================================================================== */
+
+:root {
+  /* Motion. Critically damped by default; the gentle overshoot is reserved
+     for the nav indicator, which follows a deliberate tap. */
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-spring: cubic-bezier(0.34, 1.42, 0.64, 1);
+  --dur-press: 110ms;
+  --dur-move: 340ms;
+  --dur-enter: 260ms;
+
+}
+
+/* Physical press feedback: it starts on pointer-down, not on release, and it
+   is a transform so it never reflows. */
+.pressable {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: transform var(--dur-press) var(--ease-out),
+              background-color var(--dur-press) var(--ease-out),
+              opacity var(--dur-press) var(--ease-out);
+  will-change: transform;
+}
+.pressable:active { transform: scale(0.94); }
+.pressable:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
+/* Full-width list rows and cards: a visible focus ring, but none of
+   .pressable's scale — a 56px row shrinking on press reads as a glitch. */
+.row-focus:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: -3px;
+  border-radius: 10px;
+}
+
+/* A bare icon control — the back button, a header action — takes its surface
+   from the touch rather than carrying one all the time. */
+.icon-button:hover { background-color: var(--tap-wash) !important; }
+.icon-button:active { background-color: var(--tap-wash-strong) !important; }
+
+/* Screens arrive with a short lift. Three children opt out: the nav, which is
+   meant to read as one persistent surface across navigations rather than
+   something that re-enters, and the two overlays, whose opacity is driven by
+   a gesture or by open state — `both` would otherwise pin them at 1. */
+.phone-frame > *:not(.app-nav):not(.refresh-sheet):not(.app-overlay) {
+  animation: screen-enter var(--dur-enter) var(--ease-out) both;
+}
+
+@keyframes screen-enter {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* --- The tab bar ---------------------------------------------------------
+   A solid bar, separated from the content by a hairline and lifted by a soft
+   shadow. Content scrolls beneath it and is hidden by it, which is what the
+   --nav-space reservation below is for. */
+.app-nav {
+  background: var(--surface);
+  border: 0;
+  border-top: 1px solid var(--hairline);
+  box-shadow: 0 -2px 14px rgba(var(--shadow-rgb), 0.05);
+}
+
+/* The selected tab is marked by colour and weight only — no background sheet
+   sits behind it, so the tabs read as one row on one surface. */
+.nav-item-label, .nav-item-icon {
+  transition: color var(--dur-move) var(--ease-out),
+              opacity var(--dur-move) var(--ease-out),
+              transform var(--dur-move) var(--ease-spring);
+}
+/* The active icon rises by a pixel. Any more and the row stops reading as a
+   row. */
+.nav-item-icon { transform: translate3d(0, 0, 0); }
+.nav-item-icon.is-active { transform: translate3d(0, -1px, 0); }
+
+/* --- Pull-to-refresh ----------------------------------------------------- */
+.refresh-sheet {
+  background: linear-gradient(180deg, rgb(var(--refresh-rgb)) 0%, rgba(var(--refresh-rgb), 0) 92%);
+}
+.refresh-puck {
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(var(--shadow-rgb), 0.10), 0 6px 16px rgba(var(--shadow-rgb), 0.14);
+}
+
+/* --- Overlays (the menu) -------------------------------------------------
+   The scrim fades, the panel slides. Both are transform/opacity only, and
+   both are driven by the `is-open` class so the exit transition can run
+   before the overlay is taken out of the tree. */
+/* Hidden only once the exit transition has finished, so the panel animates
+   out and is then genuinely gone — not a stack of links the keyboard can
+   still reach behind a closed menu. */
+.app-overlay {
+  pointer-events: none;
+  visibility: hidden;
+  transition: visibility 0s linear var(--dur-move);
+}
+.app-overlay.is-open {
+  pointer-events: auto;
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.overlay-scrim {
+  opacity: 0;
+  transition: opacity var(--dur-enter) var(--ease-out);
+}
+.app-overlay.is-open .overlay-scrim { opacity: 1; }
+
+.overlay-panel {
+  transform: translate3d(-100%, 0, 0);
+  transition: transform var(--dur-move) var(--ease-out);
+  will-change: transform;
+}
+.app-overlay.is-open .overlay-panel { transform: translate3d(0, 0, 0); }
+
+/* --- Splash launch indicator ---------------------------------------------
+   An indeterminate sweep, not a progress reading. The bar it replaces was a
+   hard-coded 62% fill, which told the user a fraction that nothing measured;
+   the app's only real launch state is "auth is resolving", which has no
+   percentage to report. So this says "working" and claims nothing.
+
+   Transform and opacity only, one element, no layout touched per frame. The
+   shuttle starts and ends fully outside the clipped track, so the loop has no
+   visible seam to reset across, and the ease carries it out of one side and
+   into the other at the same speed. */
+@keyframes splash-sweep {
+  0%   { transform: translate3d(-118%, 0, 0) scaleX(0.52); }
+  55%  { transform: translate3d(42%, 0, 0) scaleX(1); }
+  100% { transform: translate3d(200%, 0, 0) scaleX(0.52); }
+}
+
+.splash-sweep {
+  /* The shuttle's size lives here rather than inline, because the
+     reduced-motion rule below has to be able to widen it — an inline width
+     would outrank the media query and leave a short dash stranded at the left
+     of the track. */
+  width: 56%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg,
+    rgba(11, 95, 239, 0), var(--accent) 32%, var(--accent) 68%, rgba(11, 95, 239, 0));
+  animation: splash-sweep 1.6s cubic-bezier(0.62, 0.04, 0.38, 1) infinite;
+  will-change: transform;
+}
+
+/* The logo settles in once rather than animating on a loop. */
+@keyframes splash-logo-in {
+  from { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+
+.splash-logo {
+  animation: splash-logo-in 620ms var(--ease-out) both;
+}
+
+@keyframes splash-breathe {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1; }
+}
+
+/* --- Accessibility fallbacks ---------------------------------------------
+   Reduced motion keeps the feedback but drops anything vestibular; more
+   contrast gives every surface a real border. */
+@media (prefers-reduced-motion: reduce) {
+  .phone-frame > *:not(.app-nav):not(.refresh-sheet):not(.app-overlay) { animation: none; }
+  .nav-item-label, .nav-item-icon, .pressable,
+  .overlay-scrim, .overlay-panel { transition-duration: 1ms; }
+  .pressable:active { transform: none; opacity: 0.65; }
+
+  /* Nothing moves: the shuttle fills its track and breathes, which still reads
+     as "busy" without any travel across the screen. */
+  .splash-sweep {
+    animation: splash-breathe 2.6s ease-in-out infinite;
+    transform: none;
+    width: 100%;
+  }
+  .splash-logo { animation: none; }
+}
+
+@media (prefers-contrast: more) {
+  .app-nav { border-top-color: rgba(var(--shadow-rgb), 0.4); box-shadow: none; }
+  .overlay-panel { border-right: 1px solid rgba(var(--shadow-rgb), 0.4); }
+}
+
+/* The nav floats over the content, so every scroller beneath it reserves
+   exactly its height — no more, or the last row strands above the bar. */
+:root { --nav-space: calc(73px + env(safe-area-inset-bottom, 12px)); }
+.nav-space { padding-bottom: var(--nav-space) !important; }
+.nav-space-scroll { scroll-padding-bottom: var(--nav-space); }

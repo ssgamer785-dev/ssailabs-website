@@ -3,10 +3,40 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
-    <title>S.S AI LABS - Technology, AI & Digital Growth Agency</title>
+
+    <!-- Restores a saved dark theme before the first paint. Without this the
+         page paints light from index.css, React mounts, and the theme flips a
+         frame later — a white flash on every reload for anyone using dark.
+         Inline and synchronous on purpose: a deferred module would be too late.
+         The key matches THEME_STORAGE_KEY in src/lib/theme.tsx. -->
+    <script>
+      try {
+        if (localStorage.getItem('tp-theme') === 'dark') {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      } catch (e) {}
+    </script>
+
+    <!-- Tab and home-screen branding. Nothing was declared here before, so the
+         browser fell back to requesting /favicon.ico, which the SPA catch-all
+         in server.ts answers with index.html — the tab kept whatever generic
+         icon the host had. These icons are cut from the mark in
+         src/assets/traders-planet-logo.jpg; the wordmark under it is
+         illegible below about 64px, so the tile reuses the mark alone on the
+         logo's own background. Files live in public/, so Vite copies them to
+         the site root unhashed and /favicon.ico resolves for real. -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" content="#0C091E" />
+
+    <!-- Poppins is the app's typeface and is self-hosted: the @font-face in
+         src/index.css points at src/assets/fonts/Poppins-Regular.ttf, so the
+         font ships with the bundle instead of being fetched from a third
+         party that a network can block. -->
+    <title>The Traders Planet</title>
   </head>
   <body>
     <div id="root"></div>
