@@ -34,8 +34,14 @@ const ART_H = 1844;
  * screen is read rather than glimpsed, short enough not to feel like a wait.
  * Nothing is padded beyond it: once the app is ready and this has elapsed,
  * the splash leaves.
+ *
+ * It sits 200ms past the 2100ms splash-fill animation in index.css on
+ * purpose. The bar reaching 100% and the screen starting to leave in the same
+ * frame reads as a cut; a beat of the bar standing full is what makes the
+ * exit feel like a completion rather than an interruption. If auth is slower
+ * than this the splash simply stays — the hold is a floor, not a schedule.
  */
-const MIN_VISIBLE_MS = 2000;
+const MIN_VISIBLE_MS = 2300;
 
 /** Must stay in step with the splash-out animation in index.css. */
 const EXIT_MS = 460;
@@ -119,10 +125,17 @@ export function SplashScreen() {
                        'object-fit:cover;object-position:center;display:block')}
           />
 
-          {/* Sits on the loading bar that is painted into the artwork. Nothing
-              is drawn over it — see .splash-progress-glow in index.css. */}
+          {/* The loading bar the artwork paints, driven: a colour-exact replica
+              laid over it so it can actually fill. The artwork bakes the bar
+              in at ~65%, so extending from there would only ever animate the
+              last third — covering the whole track with its own colours is
+              what lets it run 0-100%. Geometry and timing: .splash-bar in
+              index.css. */}
           <div className="splash-stage" aria-hidden="true">
-            <div className="splash-progress-glow" />
+            <div className="splash-bar">
+              <div className="splash-bar-fill" />
+            </div>
+            <div className="splash-bar-glow" />
           </div>
 
           {/* The picture carries the word "LOADING" as pixels, which a screen

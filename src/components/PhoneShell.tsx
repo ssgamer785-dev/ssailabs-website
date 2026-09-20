@@ -203,6 +203,9 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
     };
 
     const onWheel = (e: WheelEvent) => {
+      // Ctrl/Cmd + wheel is a zoom gesture, not a scroll: without this it also
+      // drags the refresh sheet open while app-zoom.ts is cancelling the zoom.
+      if (e.ctrlKey || e.metaKey) return;
       if (state.busy || !refreshHandlers.size || !atTop(e.target) || e.deltaY >= 0) return;
       pull(state.target + Math.min(20, -e.deltaY * 0.6));
       clearTimeout(state.wheelTimer);

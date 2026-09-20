@@ -2,7 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- maximum-scale/user-scalable keep the shell at 1:1 on mobile. iOS Safari
+         ignores user-scalable for accessibility, which is why the gesture
+         handlers in src/lib/app-zoom.ts exist rather than relying on this. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no"
+    />
 
     <!-- Restores a saved dark theme before the first paint. Without this the
          page paints light from index.css, React mounts, and the theme flips a
