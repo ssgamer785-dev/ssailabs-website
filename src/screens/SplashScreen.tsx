@@ -1,94 +1,137 @@
-import { useEffect, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
-import { makeRand } from '../lib/rng';
 import { useAuth } from '../lib/auth-context';
 import { PhoneShell } from '../components/PhoneShell';
-import mark from '../assets/traders-planet-mark.png';
+import splashArt from '../assets/traders-planet-splash.webp';
 
-function SplashCandles() {
-  const rand = makeRand(991);
-  const n = 24;
-  const els: ReactNode[] = [];
-  let p = 12;
-  const slot = 100 / n, w = slot * 0.44;
-  for (let i = 0; i < n; i++) {
-    const open = p;
-    let close = open + 2.7 + (rand() - 0.44) * 13;
-    close = Math.max(4, Math.min(92, close));
-    const hi = Math.max(open, close) + rand() * 8;
-    const lo = Math.min(open, close) - rand() * 8;
-    p = close;
-    const left = i * slot + (slot - w) / 2;
-    els.push(<div key={'w' + i} style={{ position: 'absolute', left: `${left + w / 2 - 0.14}%`, width: '1.6px', bottom: `${Math.max(0, lo)}%`, height: `${hi - Math.max(0, lo)}%`, background: 'rgba(11,95,239,.13)', borderRadius: '2px' }} />);
-    els.push(<div key={'b' + i} style={{ position: 'absolute', left: `${left}%`, width: `${w}%`, bottom: `${Math.min(open, close)}%`, height: `${Math.max(2, Math.abs(close - open))}%`, background: 'rgba(11,95,239,.17)', borderRadius: '2.5px' }} />);
-  }
-  return <div style={css('position:absolute;left:6%;right:6%;bottom:96px;height:262px')}>{els}</div>;
-}
+/**
+ * The startup splash.
+ *
+ * This screen used to draw the brand in markup — a logo image, the wordmark,
+ * a tagline, twenty-four generated candlesticks and a sweeping progress bar.
+ * All of it is gone: the splash is now one piece of artwork that already
+ * contains the logo, the wordmark, the trader, the bull, the chart, the
+ * loading bar and its label, so redrawing any of that in HTML would only give
+ * the design a second, slightly wrong copy of itself.
+ *
+ * What is left here is the frame around the picture: how it fills the screen,
+ * how long it stays, and how it leaves.
+ */
+
+/**
+ * The artwork's natural size. It is drawn at 195:422 — the app frame's exact
+ * ratio — so at 390x844 it fits with nothing trimmed. The stage below still
+ * derives the rendered box from these, which is what keeps the loading-bar
+ * halo on the bar at frame ratios that differ from this one.
+ */
+const ART_W = 853;
+const ART_H = 1844;
+
+/**
+ * How long the splash is held at minimum. Auth usually resolves well inside
+ * this, so in practice it is what decides the duration — long enough that the
+ * screen is read rather than glimpsed, short enough not to feel like a wait.
+ * Nothing is padded beyond it: once the app is ready and this has elapsed,
+ * the splash leaves.
+ */
+const MIN_VISIBLE_MS = 2000;
+
+/** Must stay in step with the splash-out animation in index.css. */
+const EXIT_MS = 460;
 
 export function SplashScreen() {
   const navigate = useNavigate();
   const { session, loading } = useAuth();
 
-  useEffect(() => {
-    if (loading) return;
-    const t = setTimeout(() => navigate(session ? '/home' : '/login', { replace: true }), 2200);
-    return () => clearTimeout(t);
-  }, [navigate, session, loading]);
+  const [artReady, setArtReady] = useState(false);
+  const [leaving, setLeaving] = useState(false);
 
-  function goNext() {
-    if (loading) return;
-    navigate(session ? '/home' : '/login', { replace: true });
+  const mountedAt = useRef(Date.now());
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  // Where to go is decided once, by the time auth has settled. Held in a ref
+  // so a token refresh part-way through the exit cannot restart the timer.
+  const destination = useRef<string | null>(null);
+  if (!loading && destination.current === null) {
+    destination.current = session ? '/home' : '/login';
   }
+
+  // A cached image can finish before React attaches onLoad, in which case the
+  // event never fires and the splash would wait for something already done.
+  useEffect(() => {
+    if (imgRef.current?.complete) setArtReady(true);
+  }, []);
+
+  const ready = !loading && artReady;
+
+  // Hold until the app is ready *and* the minimum has elapsed, whichever is later.
+  useEffect(() => {
+    if (!ready || leaving) return;
+    const held = Date.now() - mountedAt.current;
+    const t = window.setTimeout(() => setLeaving(true), Math.max(0, MIN_VISIBLE_MS - held));
+    return () => window.clearTimeout(t);
+  }, [ready, leaving]);
+
+  // Navigate only once the fade has actually played, so the app appears behind
+  // a splash that is already gone rather than replacing one mid-frame.
+  useEffect(() => {
+    if (!leaving) return;
+    const t = window.setTimeout(
+      () => navigate(destination.current ?? '/login', { replace: true }),
+      EXIT_MS,
+    );
+    return () => window.clearTimeout(t);
+  }, [leaving, navigate]);
+
+  // Tapping through still plays the same exit rather than cutting.
+  const skip = useCallback(() => {
+    if (!loading) setLeaving(true);
+  }, [loading]);
 
   return (
     <div className="theme-light" style={{ display: 'contents' }}>
       <PhoneShell>
-      <div style={css('flex:1;position:relative;overflow:hidden;background:#FCFDFF;cursor:pointer')} onClick={goNext}>
-        <div style={css('position:absolute;right:-190px;top:-150px;width:520px;height:520px;border-radius:50%;background:radial-gradient(circle,rgba(11,95,239,.11),rgba(11,95,239,0) 68%)')} />
-        <div style={css('position:absolute;left:-150px;top:170px;width:520px;height:560px;border-radius:50%;background:radial-gradient(circle,rgba(11,95,239,.07),rgba(11,95,239,0) 66%)')} />
-        <div style={css('position:absolute;left:0;right:0;top:124px;display:flex;flex-direction:column;align-items:center;gap:24px')}>
-          {/* The mark used to sit in a 208x150 navy tile, because the only
-              asset was a JPEG with the brand's dark background baked in — a
-              dark rectangle parked on a white splash, with the actual gold
-              only about 92px across inside it. traders-planet-mark.png is the
-              same artwork keyed off that background, so it needs no tile and
-              can be nearly three times the size. The shadow follows the alpha
-              rather than a box, so there is no rectangle behind it. */}
+        <div
+          className={`splash-shell${leaving ? ' is-leaving' : ''}`}
+          onClick={skip}
+          style={css(
+            'position:absolute;inset:0;overflow:hidden;cursor:pointer;' +
+            // Sampled from the artwork's own top, middle and bottom edges, so
+            // the instant before it decodes is a plausible blur of the picture
+            // rather than a white flash.
+            'background:linear-gradient(180deg,#E7EFF9 0%,#889698 55%,#2F436B 100%)',
+          )}
+        >
           <img
-            src={mark}
-            alt=""
-            className="splash-logo"
-            width={716}
-            height={459}
+            ref={imgRef}
+            src={splashArt}
+            alt="The Traders Planet — where traders are built"
+            width={ART_W}
+            height={ART_H}
+            fetchPriority="high"
             decoding="async"
-            style={css('width:272px;height:auto;display:block;filter:drop-shadow(0 12px 20px rgba(15,23,42,.16))')}
+            onLoad={() => setArtReady(true)}
+            // cover, not contain: contain would letterbox, and the artwork is
+            // 9:16 while the frame is taller, so something has to give. Cover
+            // keeps the aspect ratio exactly and trims the sides instead.
+            style={css('position:absolute;inset:0;width:100%;height:100%;' +
+                       'object-fit:cover;object-position:center;display:block')}
           />
-          <div style={css('display:flex;flex-direction:column;align-items:center;gap:10px')}>
-            <div style={css('font-size:21px;font-weight:800;letter-spacing:-.4px;white-space:nowrap')}>
-              <span style={css('color:#0B5FEF')}>THE </span><span style={css('color:#0F172A')}>TRADERS PLANET</span>
-            </div>
-            <div style={css('font-size:12.5px;font-weight:500;color:#8794A8;letter-spacing:.1px;white-space:nowrap')}>
-              <span style={css('color:#0B5FEF;font-weight:600')}>Learn</span> • Analyze • Trade • Grow
-            </div>
+
+          {/* Sits on the loading bar that is painted into the artwork. Nothing
+              is drawn over it — see .splash-progress-glow in index.css. */}
+          <div className="splash-stage" aria-hidden="true">
+            <div className="splash-progress-glow" />
           </div>
+
+          {/* The picture carries the word "LOADING" as pixels, which a screen
+              reader cannot see; this is the same status in text. */}
+          <span role="status" aria-live="polite" className="splash-status">
+            {leaving ? 'Ready' : 'Loading The Traders Planet'}
+          </span>
         </div>
-        <SplashCandles />
-        <div style={css('position:absolute;left:0;right:0;bottom:48px;display:flex;justify-content:center')}>
-          {/* Indeterminate by design. This was a fixed 62% fill — a number
-              nothing measured. The app's real launch state is whether auth has
-              resolved, which has no percentage to report, so the indicator
-              says "working" and claims nothing. */}
-          <div
-            role="progressbar"
-            aria-label="Loading"
-            style={css('width:148px;height:5px;border-radius:999px;background:#DCE6F8;overflow:hidden')}
-          >
-            <div className="splash-sweep" />
-          </div>
-        </div>
-      </div>
-    </PhoneShell>
+      </PhoneShell>
     </div>
   );
 }

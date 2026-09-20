@@ -527,7 +527,7 @@ textarea {
    meant to read as one persistent surface across navigations rather than
    something that re-enters, and the two overlays, whose opacity is driven by
    a gesture or by open state — `both` would otherwise pin them at 1. */
-.phone-frame > *:not(.app-nav):not(.refresh-sheet):not(.app-overlay) {
+.phone-frame > *:not(.app-nav):not(.refresh-sheet):not(.app-overlay):not(.splash-shell) {
   animation: screen-enter var(--dur-enter) var(--ease-out) both;
 }
 
@@ -599,68 +599,113 @@ textarea {
 }
 .app-overlay.is-open .overlay-panel { transform: translate3d(0, 0, 0); }
 
-/* --- Splash launch indicator ---------------------------------------------
-   An indeterminate sweep, not a progress reading. The bar it replaces was a
-   hard-coded 62% fill, which told the user a fraction that nothing measured;
-   the app's only real launch state is "auth is resolving", which has no
-   percentage to report. So this says "working" and claims nothing.
+/* --- Startup splash ------------------------------------------------------
+   The splash is a single piece of artwork that already contains the logo, the
+   wordmark, the trader, the bull, the chart, the loading bar and its label.
+   Nothing here redraws any of that; these rules only size the picture, place
+   one halo on the loading bar, and run the screen's own enter and exit. */
 
-   Transform and opacity only, one element, no layout touched per frame. The
-   shuttle starts and ends fully outside the clipped track, so the loop has no
-   visible seam to reset across, and the ease carries it out of one side and
-   into the other at the same speed. */
-@keyframes splash-sweep {
-  0%   { transform: translate3d(-118%, 0, 0) scaleX(0.52); }
-  55%  { transform: translate3d(42%, 0, 0) scaleX(1); }
-  100% { transform: translate3d(200%, 0, 0) scaleX(0.52); }
+/* It owns its transitions rather than taking the generic screen-enter above:
+   that rule fills `both`, which would pin the splash at opacity 1 and swallow
+   the exit entirely. container-type gives .splash-stage a box to measure. */
+.splash-shell {
+  animation: splash-in 380ms var(--ease-out) both;
+  container-type: size;
 }
 
-.splash-sweep {
-  /* The shuttle's size lives here rather than inline, because the
-     reduced-motion rule below has to be able to widen it — an inline width
-     would outrank the media query and leave a short dash stranded at the left
-     of the track. */
-  width: 56%;
-  height: 100%;
+.splash-shell.is-leaving {
+  animation: splash-out 460ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes splash-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Lifts away rather than cutting: the scale is small enough to read as depth
+   rather than as movement, and the app fades up behind it. */
+@keyframes splash-out {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(1.035); }
+}
+
+/* The artwork's rendered rectangle, reproducing object-fit: cover in CSS.
+   The artwork is now drawn at the frame's own 195:422, so at 390x844 this is
+   an identity transform — it costs nothing there. It earns its keep on frames
+   whose ratio differs: under 480px the frame becomes 100vw x 100dvh, and on a
+   320x568 screen (0.563) cover crops ~62px off the top and bottom, taking the
+   loading bar with it. Percentages inside here follow the picture, so the halo
+   stays on the bar instead of floating ~35px above it. */
+.splash-stage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  width: max(100cqw, 100cqh * 853 / 1844);
+  aspect-ratio: 853 / 1844;
+  pointer-events: none;
+}
+
+/* The loading bar is painted into the artwork, so it cannot be driven
+   directly and nothing is laid over it. This is a soft halo on the same band,
+   breathing so the indicator reads as alive. The geometry is in image
+   percentages, measured off the asset: the fill runs 33.8%-55.0%, the grey
+   remainder carries the track on to 66.2%, and the whole bar sits between
+   77.8% and 78.7% down — centred at 50% x 78.25%. This sits just outside it. */
+.splash-progress-glow {
+  position: absolute;
+  left: 31%;
+  width: 38%;
+  top: 76.75%;
+  height: 3%;
   border-radius: 999px;
-  background: linear-gradient(90deg,
-    rgba(11, 95, 239, 0), var(--accent) 32%, var(--accent) 68%, rgba(11, 95, 239, 0));
-  animation: splash-sweep 1.6s cubic-bezier(0.62, 0.04, 0.38, 1) infinite;
-  will-change: transform;
+  background: radial-gradient(ellipse at center,
+    rgba(8, 113, 255, 0.75), rgba(8, 113, 255, 0) 70%);
+  filter: blur(5px);
+  animation: splash-glow 1.7s ease-in-out infinite;
+  will-change: opacity;
 }
 
-/* The logo settles in once rather than animating on a loop. */
-@keyframes splash-logo-in {
-  from { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.97); }
-  to   { opacity: 1; transform: none; }
+@keyframes splash-glow {
+  0%, 100% { opacity: 0.18; }
+  50%      { opacity: 0.55; }
 }
 
-.splash-logo {
-  animation: splash-logo-in 620ms var(--ease-out) both;
-}
-
-@keyframes splash-breathe {
-  0%, 100% { opacity: 0.4; }
-  50%      { opacity: 1; }
+/* The artwork says "LOADING" in pixels, which a screen reader cannot read. */
+.splash-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* --- Accessibility fallbacks ---------------------------------------------
    Reduced motion keeps the feedback but drops anything vestibular; more
    contrast gives every surface a real border. */
 @media (prefers-reduced-motion: reduce) {
-  .phone-frame > *:not(.app-nav):not(.refresh-sheet):not(.app-overlay) { animation: none; }
+  .phone-frame > *:not(.app-nav):not(.refresh-sheet):not(.app-overlay):not(.splash-shell) { animation: none; }
   .nav-item-label, .nav-item-icon, .pressable,
   .overlay-scrim, .overlay-panel { transition-duration: 1ms; }
   .pressable:active { transform: none; opacity: 0.65; }
 
-  /* Nothing moves: the shuttle fills its track and breathes, which still reads
-     as "busy" without any travel across the screen. */
-  .splash-sweep {
-    animation: splash-breathe 2.6s ease-in-out infinite;
-    transform: none;
-    width: 100%;
+  /* The splash still fades, and over the same 460ms the component waits on
+     before navigating — only the scale and the pulse go. */
+  .splash-shell.is-leaving {
+    animation: splash-out-fade 460ms linear both;
   }
-  .splash-logo { animation: none; }
+  @keyframes splash-out-fade {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+  }
+  .splash-progress-glow {
+    animation: none;
+    opacity: 0.38;
+  }
 }
 
 @media (prefers-contrast: more) {
