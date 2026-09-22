@@ -44,6 +44,12 @@ interface AuthState {
   /** Re-reads the profile — used after redeeming a code, to pick up activated_at. */
   refreshProfile: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<SignResult>;
+  /**
+   * Starts Google OAuth. Resolves only if the redirect could NOT be started —
+   * on success the browser has already left the page, so there is no success
+   * branch to write here.
+   */
+  signInWithGoogle: () => Promise<SignResult>;
   signUp: (email: string, password: string, fullName: string) => Promise<SignUpResult>;
   signOut: () => Promise<void>;
 }
@@ -122,6 +128,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /**
+   * Google sign-in, through the same Supabase Auth the email path uses.
+   *
+   * No second auth system and no gate to bypass: OAuth produces an ordinary
+   * Supabase session, handle_new_user() creates the profile exactly as it does
+   * for an email signup, and that profile arrives with activated_at NULL. A
+   * Google user therefore meets the activation gate on the same terms as
+   * everyone else — there is no code here that could exempt them.
+   *
+   * redirectTo is /login on purpose. RedirectIfAuthed already sits on that
+   * route and already sends an authenticated visitor to /home or /activate
+   * depending on activation, so the return leg reuses the app's own routing
+   * rather than introducing a second opinion about where OAuth users land.
+   *
+   * Nothing secret is involved. signInWithOAuth sends the user to Supabase,
+   * which holds the Google client ID and secret; the browser never sees either.
+   */
+  const signInWithGoogle = useCallback(async (): Promise<SignResult> => {
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: `${window.location.origin}/login` },
+      });
+      return { error: error?.message ?? null };
+    } catch (e) {
+      return { error: errorMessage(e) };
+    }
+  }, []);
+
   const signUp = useCallback(async (email: string, password: string, fullName: string): Promise<SignUpResult> => {
     try {
       const { data, error } = await supabase.auth.signUp({
@@ -164,6 +199,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isActivated: role === 'admin' || profile?.activated_at != null,
         refreshProfile,
         signIn,
+        signInWithGoogle,
         signUp,
         signOut,
       }}

@@ -4,6 +4,7 @@ import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { useAuth } from '../lib/auth-context';
 import { PhoneShell } from '../components/PhoneShell';
+import { AuthDivider, GoogleSignInButton } from '../components/ui/GoogleSignInButton';
 
 function EyeToggle({ show, onClick }: { show: boolean; onClick: () => void }) {
   return (
@@ -20,7 +21,7 @@ function EyeToggle({ show, onClick }: { show: boolean; onClick: () => void }) {
 const fieldLabel = css('font-size:13px;font-weight:700;letter-spacing:-.1px');
 const fieldBox = css('margin-top:9px;height:52px;border:1px solid #E6EAF1;border-radius:12px;display:flex;align-items:center;padding:0 16px');
 const fieldBoxWithTrailing = css('margin-top:9px;height:52px;border:1px solid #E6EAF1;border-radius:12px;display:flex;align-items:center;padding:0 16px;gap:10px');
-const fieldInput = css('flex:1;font-size:14.5px;height:100%');
+const fieldInput = css('flex:1;min-width:0;font-size:14.5px;height:100%');
 
 export function SignupScreen() {
   const navigate = useNavigate();
@@ -114,7 +115,12 @@ export function SignupScreen() {
           {submitting ? 'Creating Account…' : 'Create Account'}
         </Hoverable>
 
-        <div style={css('flex:1')} />
+        <AuthDivider label="or sign up with" />
+        <div style={css('margin-top:18px;flex:none')}>
+          <GoogleSignInButton onError={setError} />
+        </div>
+
+        <div style={css('flex:1;min-height:24px')} />
         <div style={css('padding-bottom:38px;display:flex;justify-content:center;gap:6px;font-size:13.5px')}>
           <div style={css('color:#64748B;white-space:nowrap')}>Already have an account?</div>
           <div onClick={() => navigate('/login')} style={css('color:#0B5FEF;font-weight:700;cursor:pointer;white-space:nowrap')}>Login</div>

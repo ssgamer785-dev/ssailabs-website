@@ -4,6 +4,7 @@ import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { useAuth } from '../lib/auth-context';
 import { PhoneShell } from '../components/PhoneShell';
+import { AuthDivider, GoogleSignInButton } from '../components/ui/GoogleSignInButton';
 
 export function LoginScreen() {
   const navigate = useNavigate();
@@ -42,11 +43,11 @@ export function LoginScreen() {
         <div style={css('height:32px;flex:none')} />
         <div style={css('font-size:13px;font-weight:700;letter-spacing:-.1px')}>Email</div>
         <div style={css('margin-top:9px;height:52px;border:1px solid #E6EAF1;border-radius:12px;display:flex;align-items:center;padding:0 16px')}>
-          <input placeholder="Enter your email" value={email} onChange={e => setEmail(e.target.value)} style={css('flex:1;font-size:14.5px;height:100%')} />
+          <input placeholder="Enter your email" value={email} onChange={e => setEmail(e.target.value)} style={css('flex:1;min-width:0;font-size:14.5px;height:100%')} />
         </div>
         <div style={css('margin-top:17px;font-size:13px;font-weight:700;letter-spacing:-.1px')}>Password</div>
         <div style={css('margin-top:9px;height:52px;border:1px solid #E6EAF1;border-radius:12px;display:flex;align-items:center;padding:0 16px;gap:10px')}>
-          <input type={pwShow ? 'text' : 'password'} placeholder="Enter your password" value={pw} onChange={e => setPw(e.target.value)} style={css('flex:1;font-size:14.5px;height:100%')} />
+          <input type={pwShow ? 'text' : 'password'} placeholder="Enter your password" value={pw} onChange={e => setPw(e.target.value)} style={css('flex:1;min-width:0;font-size:14.5px;height:100%')} />
           <div onClick={() => setPwShow(v => !v)} style={css('cursor:pointer;flex:none;display:flex')}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={pwShow ? '#0B5FEF' : '#94A3B8'} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={css('display:block')}>
               <path d="M2.4 12S6 5.9 12 5.9 21.6 12 21.6 12 18 18.1 12 18.1 2.4 12 2.4 12z" />
@@ -76,7 +77,12 @@ export function LoginScreen() {
           </div>
           <div style={css('font-size:13px;color:#475569;white-space:nowrap')}>Remember me</div>
         </div>
-        <div style={css('flex:1')} />
+        <AuthDivider />
+        <div style={css('margin-top:18px;flex:none')}>
+          <GoogleSignInButton onError={setError} />
+        </div>
+
+        <div style={css('flex:1;min-height:24px')} />
         <div style={css('padding-bottom:38px;display:flex;justify-content:center;gap:6px;font-size:13.5px')}>
           <div style={css('color:#64748B;white-space:nowrap')}>Don't have an account?</div>
           <div onClick={() => navigate('/signup')} style={css('color:#0B5FEF;font-weight:700;cursor:pointer;white-space:nowrap')}>Sign Up</div>
