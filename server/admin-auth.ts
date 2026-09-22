@@ -22,9 +22,17 @@
  *   - Nothing here ever holds a password at rest. The plaintext exists only
  *     for the length of this request, on its way to Supabase.
  *
- * What lives in the environment (server-only, never VITE_-prefixed, so it
- * cannot reach the browser bundle):
- *   ADMIN_USERNAME   the alias the admin types
+ * What this route needs from the environment:
+ *   ADMIN_USERNAME             the alias the admin types (server-only, never
+ *                              VITE_-prefixed, so it cannot reach the bundle)
+ *   SUPABASE_SERVICE_ROLE_KEY  to read which profile holds role='admin'
+ *   SUPABASE_URL / VITE_SUPABASE_URL
+ *   VITE_SUPABASE_ANON_KEY     to sign in through the ordinary auth path
+ *
+ * The last three are the project's existing Supabase configuration, not new
+ * settings — but the service-role key is easy to overlook here, because
+ * "discovered, not configured" above describes the admin's identity, not the
+ * credentials needed to discover it. All four are checked together below.
  *
  * The password is not here, not in .env, and not anywhere in this repository.
  * It is set in the Supabase dashboard.
@@ -58,10 +66,45 @@ function supabaseUrl(): string | undefined {
 export function adminAuthRouter(): Router {
   const router = Router();
 
+  /**
+   * Everything this route needs from the environment, checked in one place.
+   *
+   * SUPABASE_SERVICE_ROLE_KEY belongs here and was previously missing: the
+   * route needs it to look up which profile holds role='admin', but it was only
+   * discovered later, via getAdmin() returning null, which answered with the
+   * same opaque "not configured" sentence. A deployment with the other three
+   * set and this one absent therefore reported a problem it gave no way to
+   * find. Listing it here is the fix; the log line below is what makes any
+   * future omission self-diagnosing.
+   */
+  const REQUIRED = [
+    'ADMIN_USERNAME',
+    'SUPABASE_URL or VITE_SUPABASE_URL',
+    'VITE_SUPABASE_ANON_KEY',
+    'SUPABASE_SERVICE_ROLE_KEY',
+  ] as const;
+
+  const missing = () => {
+    const gaps: string[] = [];
+    if (!env('ADMIN_USERNAME')) gaps.push(REQUIRED[0]);
+    if (!supabaseUrl()) gaps.push(REQUIRED[1]);
+    if (!env('VITE_SUPABASE_ANON_KEY')) gaps.push(REQUIRED[2]);
+    if (!env('SUPABASE_SERVICE_ROLE_KEY')) gaps.push(REQUIRED[3]);
+    return gaps;
+  };
+
   const requireConfigured = (res: Response) => {
     // No defaults anywhere. An unconfigured deployment refuses to authenticate
     // rather than falling back to something guessable.
-    if (!env('ADMIN_USERNAME') || !supabaseUrl() || !env('VITE_SUPABASE_ANON_KEY')) {
+    const gaps = missing();
+    if (gaps.length) {
+      // Names only, never values — a service-role key must not reach a log.
+      // The response stays deliberately vague; the operator reads the server.
+      console.error(
+        `[admin-auth] refusing to authenticate: unset or empty in the server's ` +
+        `environment: ${gaps.join(', ')}. Note that a variable present but set ` +
+        `to an empty string counts as unset.`,
+      );
       res.status(503).json({ error: 'Admin sign-in is not configured on this server.' });
       return false;
     }
@@ -81,9 +124,14 @@ export function adminAuthRouter(): Router {
     }
 
     // Who is the admin? Asked, not assumed.
+    // Unreachable unless the environment changed under a running process:
+    // requireConfigured() has already established the URL and the service-role
+    // key. Kept as a guard, but no longer sharing the "not configured" sentence,
+    // so the two causes can never again be confused for each other.
     const db = getAdmin();
     if (!db) {
-      return res.status(503).json({ error: 'Admin sign-in is not configured on this server.' });
+      console.error('[admin-auth] service-role client unavailable despite a complete environment');
+      return res.status(503).json({ error: 'Admin sign-in is not available. Please contact support.' });
     }
 
     const { data: admins, error: lookupError } = await db

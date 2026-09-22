@@ -40,10 +40,16 @@ afterEach(() => {
   }
 });
 
+/**
+ * A fully-configured server. All four variables, because the route needs all
+ * four — this helper previously set three, which meant these tests passed
+ * while a real deployment missing SUPABASE_SERVICE_ROLE_KEY answered 503.
+ */
 function configure(over: Partial<Record<(typeof ENV_KEYS)[number], string>> = {}) {
   process.env.ADMIN_USERNAME = 'tp-admin';
   process.env.VITE_SUPABASE_URL = 'https://project.supabase.co';
   process.env.VITE_SUPABASE_ANON_KEY = 'anon-key';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-key';
   for (const [k, v] of Object.entries(over)) process.env[k] = v;
 }
 
@@ -100,6 +106,29 @@ describe('admin sign-in', () => {
       if (username.trim() === 'tp-admin') continue;
       expect(res.status).toBe(401);
     }
+  });
+
+  test('the service-role key is required, and its absence is named in the log', async () => {
+    // The regression this covers: the route needs this key to find the single
+    // role='admin' profile, but it used to be checked only later, by getAdmin()
+    // returning null — which answered with the same "not configured" sentence
+    // as a missing username. A deployment with the other three set reported a
+    // problem it gave no way to locate.
+    configure();
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const base = await serve();
+    const res = await post(base, { username: 'tp-admin', password: 'whatever' });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe('Admin sign-in is not configured on this server.');
+  });
+
+  test('a variable set to an empty string counts as unset', async () => {
+    // .env.example ships SUPABASE_SERVICE_ROLE_KEY="" — present but empty is
+    // the likeliest real-world shape of this mistake, so it must not read as
+    // configured.
+    configure({ SUPABASE_SERVICE_ROLE_KEY: '   ' });
+    const base = await serve();
+    expect((await post(base, { username: 'tp-admin', password: 'whatever' })).status).toBe(503);
   });
 
   test('missing or non-string fields are a 400, not a 500', async () => {
