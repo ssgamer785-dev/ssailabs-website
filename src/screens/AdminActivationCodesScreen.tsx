@@ -51,6 +51,10 @@ export function AdminActivationCodesScreen() {
   const navigate = useNavigate();
   const [codes, setCodes] = useState<AdminActivationCode[]>([]);
   const [loading, setLoading] = useState(true);
+  // Separate from `error`, which reports a failed creation. This one says the
+  // history could not be READ — without it a failed load renders "No codes
+  // yet", which is a different and untrue statement.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [creating, setCreating] = useState(false);
   const [fresh, setFresh] = useState<CreatedCode | null>(null);
   const [copied, setCopied] = useState(false);
@@ -59,7 +63,8 @@ export function AdminActivationCodesScreen() {
   const remaining = useCountdown(fresh?.expires_at);
 
   const refresh = useCallback(async () => {
-    setCodes(await listActivationCodes(50));
+    const rows = await listActivationCodes(50);
+    if (rows) { setCodes(rows); setLoadFailed(false); } else { setLoadFailed(true); }
     setLoading(false);
   }, []);
 
@@ -168,6 +173,21 @@ export function AdminActivationCodesScreen() {
 
         {loading ? (
           <div style={css('margin-top:18px;font-size:12.5px;color:var(--text-faint)')}>Loading…</div>
+        ) : loadFailed ? (
+          <div role="alert" style={css('margin-top:16px;padding:14px;border-radius:13px;background:var(--danger-soft);display:flex;flex-direction:column;gap:10px;align-items:flex-start')}>
+            <div style={css('font-size:12.5px;color:var(--danger-ink);line-height:1.5')}>
+              Couldn&rsquo;t load the code history. Any codes you have already
+              issued are unaffected.
+            </div>
+            <Hoverable
+              onClick={() => { setLoading(true); void refresh(); }}
+              className="pressable"
+              style={css('height:34px;padding:0 14px;border-radius:9px;border:1px solid var(--danger-border);display:flex;align-items:center;font-size:12px;font-weight:700;color:var(--danger-ink);cursor:pointer')}
+              hoverStyle={css('background:var(--danger-soft)')}
+            >
+              Try again
+            </Hoverable>
+          </div>
         ) : codes.length === 0 ? (
           <div style={css('margin-top:18px;font-size:12.5px;color:var(--text-faint);line-height:1.5')}>
             No codes yet. Create one above and send it to the member.

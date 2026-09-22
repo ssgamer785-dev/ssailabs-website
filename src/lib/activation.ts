@@ -80,21 +80,30 @@ export async function createActivationCode(): Promise<CreatedCode | null> {
   return data as unknown as CreatedCode;
 }
 
-/** Admin only — returns an empty list for anyone else, by construction. */
-export async function listActivationCodes(limit = 50): Promise<AdminActivationCode[]> {
+/**
+ * Admin only — an empty array for anyone else, by construction.
+ *
+ * null means the request FAILED; an empty array means it succeeded and there
+ * is nothing to show. These must stay distinguishable: collapsing a failure
+ * into [] made the screen say "No codes yet", which is a different and wrong
+ * statement about the world — and on the membership list it would have told
+ * an admin nobody had applied when the query had simply errored.
+ */
+export async function listActivationCodes(limit = 50): Promise<AdminActivationCode[] | null> {
   const { data, error } = await supabase.rpc('admin_activation_codes', { p_limit: limit });
   if (error) {
     console.error('[activation] list failed:', error);
-    return [];
+    return null;
   }
   return (data ?? []) as unknown as AdminActivationCode[];
 }
 
-export async function listMembershipRequests(limit = 100): Promise<MembershipRequest[]> {
+/** null means the request failed; [] means there are genuinely none. */
+export async function listMembershipRequests(limit = 100): Promise<MembershipRequest[] | null> {
   const { data, error } = await supabase.rpc('admin_membership_requests', { p_limit: limit });
   if (error) {
     console.error('[activation] membership list failed:', error);
-    return [];
+    return null;
   }
   return (data ?? []) as unknown as MembershipRequest[];
 }

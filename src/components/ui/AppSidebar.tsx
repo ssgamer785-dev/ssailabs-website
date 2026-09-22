@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { css } from '../../lib/css';
+import { useAuth } from '../../lib/auth-context';
 
 /**
  * Every destination here is a route that already exists in App.tsx and was
@@ -10,6 +11,11 @@ import { css } from '../../lib/css';
  * Admin Inbox is deliberately absent: it is an admin screen (it says so on the
  * page) but its route is not role-gated, so listing it for everyone would put
  * it in front of students for the first time. It stays where it already is.
+ *
+ * ADMIN_ITEMS below is the opposite case and is why it can be listed at all:
+ * both of those routes sit behind RequireAdmin, and every function they call
+ * re-checks is_admin() inside Postgres. Hiding them here is a courtesy to
+ * students, not the thing that keeps them out.
  */
 const ITEMS: { route: string; label: string; icon: ReactNode }[] = [
   {
@@ -42,6 +48,24 @@ const ITEMS: { route: string; label: string; icon: ReactNode }[] = [
   },
 ];
 
+/**
+ * Admin-only destinations.
+ *
+ * Kept separate from ITEMS rather than filtered out of it, so that reading this
+ * file makes the split obvious: nothing above this line is role-dependent, and
+ * everything below it is.
+ */
+const ADMIN_ITEMS: { route: string; label: string; icon: ReactNode }[] = [
+  {
+    route: '/admin/activation-codes', label: 'Activation Codes',
+    icon: <g><circle cx="8.4" cy="12" r="3.6" /><path d="M11.9 12h8.2M17.4 12v3M14.6 12v2.2" /></g>,
+  },
+  {
+    route: '/admin/membership-requests', label: 'Membership Requests',
+    icon: <g><rect x="5.4" y="3.8" width="13.2" height="16.4" rx="2.4" /><path d="M9 3.2h6v2.6H9z" /><path d="M9 11h6M9 14.8h4" /></g>,
+  },
+];
+
 const FOCUSABLE = 'button, a[href], [tabindex]:not([tabindex="-1"])';
 
 /**
@@ -64,6 +88,10 @@ export function AppSidebar({ open, onClose, unreadCount = 0 }: {
 }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  // Navigation visibility only. RequireAdmin gates the routes and the database
+  // gates the data; this decides whether a student is shown a door they could
+  // not open anyway.
+  const { isAdmin } = useAuth();
   const panelRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
@@ -98,6 +126,44 @@ export function AppSidebar({ open, onClose, unreadCount = 0 }: {
   const go = (route: string) => {
     onClose();
     if (route !== pathname) navigate(route);
+  };
+
+  /**
+   * One row. Shared by both lists rather than copied, so an admin entry cannot
+   * drift away from the look of the rest of the menu.
+   */
+  const item = ({ route, label, icon }: { route: string; label: string; icon: ReactNode }) => {
+    const on = pathname === route;
+    return (
+      <button
+        key={route}
+        type="button"
+        onClick={() => go(route)}
+        aria-current={on ? 'page' : undefined}
+        className="pressable"
+        style={{
+          ...css('height:46px;padding:0 12px;display:flex;align-items:center;gap:13px;border:0;cursor:pointer;border-radius:11px;text-align:left;width:100%'),
+          background: on ? 'var(--accent-soft-5)' : 'transparent',
+          color: on ? 'var(--accent-ink)' : 'var(--text-secondary)',
+        }}
+      >
+        <svg
+          width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"
+          style={css('flex:none;display:block')}
+        >
+          {icon}
+        </svg>
+        <span style={{ ...css('flex:1;font-size:14px;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'), fontWeight: on ? 600 : 500 }}>
+          {label}
+        </span>
+        {route === '/notifications' && unreadCount > 0 && (
+          <span style={css('flex:none;min-width:19px;height:19px;padding:0 6px;border-radius:999px;background:var(--danger);color:var(--on-accent);display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;line-height:1')}>
+            {unreadCount}
+          </span>
+        )}
+      </button>
+    );
   };
 
   return (
@@ -141,39 +207,24 @@ export function AppSidebar({ open, onClose, unreadCount = 0 }: {
         <div style={css('flex:none;height:1px;background:var(--surface-divider);margin:0 20px')} />
 
         <div style={css('flex:1;min-height:0;overflow-y:auto;padding:8px 12px calc(12px + env(safe-area-inset-bottom, 0px));display:flex;flex-direction:column;gap:2px')}>
-          {ITEMS.map(({ route, label, icon }) => {
-            const on = pathname === route;
-            return (
-              <button
-                key={route}
-                type="button"
-                onClick={() => go(route)}
-                aria-current={on ? 'page' : undefined}
-                className="pressable"
-                style={{
-                  ...css('height:46px;padding:0 12px;display:flex;align-items:center;gap:13px;border:0;cursor:pointer;border-radius:11px;text-align:left;width:100%'),
-                  background: on ? 'var(--accent-soft-5)' : 'transparent',
-                  color: on ? 'var(--accent-ink)' : 'var(--text-secondary)',
-                }}
+          {ITEMS.map(item)}
+
+          {/* Only the admin is shown these. The routes behind them are guarded
+              by RequireAdmin and every function they call re-checks is_admin()
+              in the database, so this is about not offering a student a door,
+              not about keeping one shut. */}
+          {isAdmin && (
+            <>
+              <div
+                role="separator"
+                style={css('margin:14px 12px 6px;padding-top:12px;border-top:1px solid var(--surface-divider);' +
+                           'font-size:10px;font-weight:700;letter-spacing:.14em;color:var(--text-faint)')}
               >
-                <svg
-                  width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                  strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"
-                  style={css('flex:none;display:block')}
-                >
-                  {icon}
-                </svg>
-                <span style={{ ...css('flex:1;font-size:14px;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'), fontWeight: on ? 600 : 500 }}>
-                  {label}
-                </span>
-                {route === '/notifications' && unreadCount > 0 && (
-                  <span style={css('flex:none;min-width:19px;height:19px;padding:0 6px;border-radius:999px;background:var(--danger);color:var(--on-accent);display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;line-height:1')}>
-                    {unreadCount}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+                ADMIN
+              </div>
+              {ADMIN_ITEMS.map(item)}
+            </>
+          )}
         </div>
       </nav>
     </div>

@@ -98,9 +98,14 @@ function Row({ request, onChange }: { request: MembershipRequest; onChange: (s: 
 export function AdminMembershipRequestsScreen() {
   const [requests, setRequests] = useState<MembershipRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  // A failed read must not render as "No requests yet": telling an admin that
+  // nobody has applied, when the query simply errored, is the one wrong answer
+  // this screen can give.
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const refresh = useCallback(async () => {
-    setRequests(await listMembershipRequests(100));
+    const rows = await listMembershipRequests(100);
+    if (rows) { setRequests(rows); setLoadFailed(false); } else { setLoadFailed(true); }
     setLoading(false);
   }, []);
 
@@ -130,6 +135,21 @@ export function AdminMembershipRequestsScreen() {
       <div className="nav-space" style={css('flex:1;min-height:0;overflow-y:auto;padding:0 20px;display:flex;flex-direction:column;overscroll-behavior:contain')}>
         {loading ? (
           <div style={css('margin-top:22px;font-size:12.5px;color:var(--text-faint)')}>Loading…</div>
+        ) : loadFailed ? (
+          <div role="alert" style={css('margin-top:16px;padding:14px;border-radius:13px;background:var(--danger-soft);display:flex;flex-direction:column;gap:10px;align-items:flex-start')}>
+            <div style={css('font-size:12.5px;color:var(--danger-ink);line-height:1.5')}>
+              Couldn&rsquo;t load membership requests. This is a loading problem,
+              not an empty inbox &mdash; don&rsquo;t read it as &ldquo;nobody applied&rdquo;.
+            </div>
+            <Hoverable
+              onClick={() => { setLoading(true); void refresh(); }}
+              className="pressable"
+              style={css('height:34px;padding:0 14px;border-radius:9px;border:1px solid var(--danger-border);display:flex;align-items:center;font-size:12px;font-weight:700;color:var(--danger-ink);cursor:pointer')}
+              hoverStyle={css('background:var(--danger-soft)')}
+            >
+              Try again
+            </Hoverable>
+          </div>
         ) : requests.length === 0 ? (
           <div style={css('flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 24px;text-align:center')}>
             <div style={css('width:62px;height:62px;border-radius:20px;background:var(--accent-tint);border:1px solid var(--accent-border);display:flex;align-items:center;justify-content:center;flex:none')}>
