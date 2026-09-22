@@ -38,6 +38,20 @@ export function getS3(): S3Client | null {
   return s3;
 }
 
+/**
+ * Drops the cached clients so the next call rebuilds them from the current
+ * environment.
+ *
+ * Only the tests need this. Both clients are module-level singletons built on
+ * first use, which is right in a server process — the environment does not
+ * change under it — but means a test that points SUPABASE_URL at a local
+ * stand-in gets whichever URL happened to be read first instead.
+ */
+export function resetClientsForTests(): void {
+  s3 = null;
+  admin = null;
+}
+
 /** Service-role client. Bypasses RLS, so only use it after verifying the caller. */
 export function getAdmin(): SupabaseClient | null {
   if (admin) return admin;

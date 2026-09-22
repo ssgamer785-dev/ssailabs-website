@@ -4,6 +4,7 @@
  * replacement once the project is linked and types can be generated for real.
  */
 
+export type MembershipRequestStatus = 'pending' | 'contacted' | 'approved' | 'rejected';
 export type UserRole = 'admin' | 'student';
 export type PostChannel = 'official' | 'students';
 export type AttachmentKind = 'none' | 'image' | 'video' | 'pdf' | 'poll' | 'chart';
@@ -25,6 +26,9 @@ export interface Database {
           avatar_url: string | null;
           created_at: string;
           updated_at: string;
+          /** Set only by redeem_activation_code(). NULL = held at the activation gate. */
+          activated_at: string | null;
+          activation_code_id: string | null;
         };
         Insert: {
           id: string;
@@ -41,6 +45,29 @@ export interface Database {
           reveal_identity?: boolean;
           avatar_url?: string | null;
         };
+        Relationships: [];
+      };
+      membership_requests: {
+        Row: {
+          id: string;
+          requested_by: string | null;
+          email: string;
+          name: string;
+          mobile: string;
+          trading_experience: string;
+          address: string;
+          status: MembershipRequestStatus;
+          created_at: string;
+        };
+        Insert: {
+          requested_by: string;
+          email: string;
+          name: string;
+          mobile: string;
+          trading_experience: string;
+          address: string;
+        };
+        Update: { status?: MembershipRequestStatus };
         Relationships: [];
       };
       posts: {
@@ -249,6 +276,44 @@ export interface Database {
       is_admin: {
         Args: { uid?: string };
         Returns: boolean;
+      };
+      is_activated: {
+        Args: { uid?: string };
+        Returns: boolean;
+      };
+      normalise_activation_code: {
+        Args: { p_code: string };
+        Returns: string;
+      };
+      /** Returns { ok, reason }. Never takes a user id — it acts on auth.uid(). */
+      redeem_activation_code: {
+        Args: { p_code: string };
+        Returns: { ok: boolean; reason: string };
+      };
+      /** Admin only. Returns the plaintext code once; nothing stores it. */
+      create_activation_code: {
+        Args: Record<string, never>;
+        Returns: { id: string; code: string; expires_at: string };
+      };
+      admin_activation_codes: {
+        Args: { p_limit?: number };
+        Returns: {
+          id: string;
+          code_hint: string;
+          created_at: string;
+          expires_at: string;
+          redeemed_at: string | null;
+          redeemed_by_name: string | null;
+          status: string;
+        }[];
+      };
+      admin_membership_requests: {
+        Args: { p_limit?: number };
+        Returns: Database['public']['Tables']['membership_requests']['Row'][];
+      };
+      admin_set_membership_status: {
+        Args: { p_id: string; p_status: MembershipRequestStatus };
+        Returns: void;
       };
       get_or_create_my_conversation: {
         Args: Record<string, never>;

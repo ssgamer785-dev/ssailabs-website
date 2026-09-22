@@ -2,8 +2,14 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppStateProvider } from './lib/app-state';
 import { AuthProvider } from './lib/auth-context';
 import { ThemeProvider } from './lib/theme';
-import { RequireAuth, RedirectIfAuthed } from './components/RequireAuth';
+import { RequireAuth, RequireActivated, RequireAdmin, RedirectIfAuthed } from './components/RequireAuth';
 import { SplashScreen } from './screens/SplashScreen';
+import { WelcomeScreen } from './screens/WelcomeScreen';
+import { ActivationScreen } from './screens/ActivationScreen';
+import { MembershipRequestScreen } from './screens/MembershipRequestScreen';
+import { AdminLoginScreen } from './screens/AdminLoginScreen';
+import { AdminActivationCodesScreen } from './screens/AdminActivationCodesScreen';
+import { AdminMembershipRequestsScreen } from './screens/AdminMembershipRequestsScreen';
 import { LoginScreen } from './screens/LoginScreen';
 import { SignupScreen } from './screens/SignupScreen';
 import { HomeScreen } from './screens/HomeScreen';
@@ -30,23 +36,32 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<SplashScreen />} />
+            {/* The entry point for anyone signed out. */}
+            <Route path="/welcome" element={<RedirectIfAuthed><WelcomeScreen /></RedirectIfAuthed>} />
+            {/* The gate. RequireAuth, not RequireActivated: reaching it is the
+                point, and RequireActivated would bounce the user back here. */}
+            <Route path="/activate" element={<RequireAuth><ActivationScreen /></RequireAuth>} />
+            <Route path="/become-a-member" element={<RequireAuth><MembershipRequestScreen /></RequireAuth>} />
+            <Route path="/admin-login" element={<AdminLoginScreen />} />
+            <Route path="/admin/activation-codes" element={<RequireAdmin><AdminActivationCodesScreen /></RequireAdmin>} />
+            <Route path="/admin/membership-requests" element={<RequireAdmin><AdminMembershipRequestsScreen /></RequireAdmin>} />
             <Route path="/login" element={<RedirectIfAuthed><LoginScreen /></RedirectIfAuthed>} />
             <Route path="/signup" element={<RedirectIfAuthed><SignupScreen /></RedirectIfAuthed>} />
-            <Route path="/home" element={<RequireAuth><HomeScreen /></RequireAuth>} />
-            <Route path="/community" element={<RequireAuth><CommunityPage /></RequireAuth>} />
-            <Route path="/create-post" element={<RequireAuth><CreatePostScreen /></RequireAuth>} />
-            <Route path="/calculator" element={<RequireAuth><RiskCalculatorScreen /></RequireAuth>} />
-            <Route path="/news" element={<RequireAuth><MarketNewsScreen /></RequireAuth>} />
-            <Route path="/chat" element={<RequireAuth><ChatListScreen /></RequireAuth>} />
-            <Route path="/chat/admin" element={<RequireAuth><AdminChatScreen /></RequireAuth>} />
-            <Route path="/profile" element={<RequireAuth><ProfileScreen /></RequireAuth>} />
-            <Route path="/profile/name-visibility" element={<RequireAuth><NameVisibilityScreen /></RequireAuth>} />
-            <Route path="/profile/privacy" element={<RequireAuth><PrivacyPolicyScreen /></RequireAuth>} />
-            <Route path="/profile/terms" element={<RequireAuth><TermsScreen /></RequireAuth>} />
-            <Route path="/profile/help" element={<RequireAuth><HelpSupportScreen /></RequireAuth>} />
-            <Route path="/analysis" element={<RequireAuth><AnalysisDetailScreen /></RequireAuth>} />
-            <Route path="/notifications" element={<RequireAuth><NotificationsScreen /></RequireAuth>} />
-            <Route path="/admin-inbox" element={<RequireAuth><AdminInboxScreen /></RequireAuth>} />
+            <Route path="/home" element={<RequireActivated><HomeScreen /></RequireActivated>} />
+            <Route path="/community" element={<RequireActivated><CommunityPage /></RequireActivated>} />
+            <Route path="/create-post" element={<RequireActivated><CreatePostScreen /></RequireActivated>} />
+            <Route path="/calculator" element={<RequireActivated><RiskCalculatorScreen /></RequireActivated>} />
+            <Route path="/news" element={<RequireActivated><MarketNewsScreen /></RequireActivated>} />
+            <Route path="/chat" element={<RequireActivated><ChatListScreen /></RequireActivated>} />
+            <Route path="/chat/admin" element={<RequireActivated><AdminChatScreen /></RequireActivated>} />
+            <Route path="/profile" element={<RequireActivated><ProfileScreen /></RequireActivated>} />
+            <Route path="/profile/name-visibility" element={<RequireActivated><NameVisibilityScreen /></RequireActivated>} />
+            <Route path="/profile/privacy" element={<RequireActivated><PrivacyPolicyScreen /></RequireActivated>} />
+            <Route path="/profile/terms" element={<RequireActivated><TermsScreen /></RequireActivated>} />
+            <Route path="/profile/help" element={<RequireActivated><HelpSupportScreen /></RequireActivated>} />
+            <Route path="/analysis" element={<RequireActivated><AnalysisDetailScreen /></RequireActivated>} />
+            <Route path="/notifications" element={<RequireActivated><NotificationsScreen /></RequireActivated>} />
+            <Route path="/admin-inbox" element={<RequireActivated><AdminInboxScreen /></RequireActivated>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>

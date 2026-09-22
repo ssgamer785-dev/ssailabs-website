@@ -16,16 +16,36 @@ set client_min_messages = warning;
 select case when count(*) = 0 then 'PASS' else 'FAIL: ' || string_agg(tablename, ', ') end as rls_enabled
 from pg_tables where schemaname = 'public' and not rowsecurity;
 
-\echo '--- 2. every table is actually policed (RLS on with no policy denies all)'
-select case when count(*) = 0 then 'PASS' else 'FAIL: no policies on ' || string_agg(tablename, ', ') end as policed
-from pg_tables t
-where t.schemaname = 'public'
-  and not exists (select 1 from pg_policies p where p.schemaname = 'public' and p.tablename = t.tablename);
+\echo '--- 2. every table an API role can reach is actually policed'
+-- The invariant is not "every table has a policy", it is "no table an API role
+-- can reach lacks a policy deciding its rows". A table with RLS on, no policy
+-- AND no privileges for anon/authenticated is sealed rather than misconfigured:
+-- the only way in is a SECURITY DEFINER function, which is stricter than a
+-- policy, not weaker. activation_codes is the deliberate case — check 2b below
+-- proves it is sealed rather than merely forgotten.
+-- Privileges are checked by OID, not by a name built with format(): the
+-- planner is free to evaluate a function qual before the schema qual, and
+-- 'public.' || 'users' resolves against auth.users and errors out.
+select case when count(*) = 0 then 'PASS' else 'FAIL: reachable but unpoliced: ' || string_agg(c.relname, ', ') end as policed
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public' and c.relkind = 'r'
+  and not exists (select 1 from pg_policies p where p.schemaname = 'public' and p.tablename = c.relname)
+  and (has_table_privilege('authenticated', c.oid, 'SELECT, INSERT, UPDATE, DELETE')
+    or has_table_privilege('anon',          c.oid, 'SELECT, INSERT, UPDATE, DELETE'));
+
+\echo '--- 2b. the sealed tables really are sealed (no API-role privilege at all)'
+with sealed(name) as (values ('public.activation_codes'))
+select case when count(*) = 0 then 'PASS' else 'FAIL: reachable: ' || string_agg(name, ', ') end as sealed_ok
+from sealed s
+where has_table_privilege('authenticated', s.name::regclass, 'SELECT, INSERT, UPDATE, DELETE')
+   or has_table_privilege('anon',          s.name::regclass, 'SELECT, INSERT, UPDATE, DELETE');
 
 \echo '--- 3. the tables the app expects all exist'
 with expected(name) as (values
   ('profiles'), ('posts'), ('comments'), ('likes'), ('bookmarks'),
-  ('conversations'), ('messages'), ('notifications'))
+  ('conversations'), ('messages'), ('notifications'),
+  ('activation_codes'), ('membership_requests'))
 select case when count(*) = 0 then 'PASS' else 'FAIL missing: ' || string_agg(name, ', ') end as tables_present
 from expected e
 where not exists (select 1 from pg_tables t where t.schemaname = 'public' and t.tablename = e.name);
@@ -36,6 +56,10 @@ with expected(name) as (values
   ('posts_feed'), ('post_comments'), ('my_unread_notification_count'), ('mark_all_notifications_read'),
   -- chat
   ('get_or_create_my_conversation'), ('mark_conversation_read'), ('my_chat_overview'),
+  -- activation gate
+  ('is_activated'), ('normalise_activation_code'), ('redeem_activation_code'),
+  ('create_activation_code'), ('admin_activation_codes'),
+  ('admin_membership_requests'), ('admin_set_membership_status'),
   -- chat media quota (server, service-role)
   ('select_chat_media_to_purge'), ('mark_chat_media_purged'), ('recalc_conversation_media_usage'),
   ('select_stale_pending_uploads'), ('delete_stale_pending_uploads'),

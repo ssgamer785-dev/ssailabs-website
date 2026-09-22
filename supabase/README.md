@@ -252,3 +252,64 @@ ship to the browser — every table it can reach is governed by the RLS
 policies above. Never put a `service_role` key in a `VITE_*` variable or any
 other file that ships to the client; a privileged server-side client can be
 added in a later phase if a feature genuinely needs one.
+
+## Retiring test accounts
+
+The activation gate migration (`20260920120000_activation_gate.sql`) deliberately
+does **not** delete anything. It cannot: which of the accounts in a live project
+are throwaway test users and which are real members is a judgement only you can
+make, and a migration that guesses is a migration that deletes a paying member.
+
+So the gate is applied without touching a single existing row. Every account
+that predates the migration has `activated_at IS NULL` and therefore meets the
+gate; the admin is exempt via `is_activated()` and keeps working. Nobody is
+deleted, and nobody who should not be in the app is in it.
+
+If you then want the test accounts actually gone, do it as a separate, reviewed
+operation — never inside a migration.
+
+**1. Look at what is there first.** Read-only; run it in the SQL editor.
+
+```sql
+select p.id,
+       u.email,
+       p.full_name,
+       p.role,
+       p.created_at,
+       p.activated_at,
+       (select count(*) from public.posts    where author_id = p.id) as posts,
+       (select count(*) from public.messages where sender_id = p.id) as messages
+  from public.profiles p
+  join auth.users u on u.id = p.id
+ order by p.created_at;
+```
+
+**2. Decide by hand.** An account with real posts or chat history is not a test
+account, whatever its email looks like. Write down the exact ids you intend to
+remove.
+
+**3. Delete only those ids, one explicit list, inside a transaction.**
+
+```sql
+begin;
+
+-- Paste the ids you chose in step 2. No LIKE, no NOT IN, no date range:
+-- a predicate that is slightly wrong deletes a member.
+with doomed(id) as (values
+  ('00000000-0000-0000-0000-000000000000'::uuid)   -- replace
+)
+delete from auth.users u using doomed d where u.id = d.id;
+
+-- Check the count before you commit. If it is not the number you expect:
+rollback;
+-- otherwise:
+-- commit;
+```
+
+`profiles`, `posts`, `comments`, `likes`, `bookmarks`, `conversations`,
+`messages` and `notifications` all cascade from `auth.users`, so this is the
+only statement needed — and the only one where a wrong predicate is
+irreversible. Take a backup first.
+
+Never use `supabase db reset`, `truncate`, or a `delete` without an explicit id
+list on this project.

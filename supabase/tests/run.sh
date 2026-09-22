@@ -44,6 +44,13 @@ for suite in "$HERE"/[0-9][0-9]-*.sql; do
   if echo "$output" | grep -qE 'FAIL|ERROR'; then failures=$((failures + 1)); fi
 done
 
+# The concurrency check needs several real connections at once, so it is a
+# script rather than a psql suite. Run last: it mints its own code and leaves
+# eight activated fixtures behind.
+echo
+echo "== 51-activation-race.sh"
+if "$HERE/51-activation-race.sh" "$HOST" "$PORT" "$DB"; then :; else failures=$((failures + 1)); fi
+
 echo
 if [ "$failures" -gt 0 ]; then
   echo "$failures suite(s) FAILED"

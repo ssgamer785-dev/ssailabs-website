@@ -14,6 +14,15 @@ insert into public.profiles (id, full_name, role) values
   ('33333333-3333-3333-3333-333333333333', 'Other Student', 'student')
 on conflict (id) do update set role = excluded.role;
 
+-- These fixtures stand for legitimate, activated members. Since the activation
+-- gate (20260920120000) the content-read policies require is_activated(), so
+-- without this every suite below would be testing a locked-out account rather
+-- than the rule it names.
+update public.profiles set activated_at = now()
+ where id in ('11111111-1111-1111-1111-111111111111',
+              '22222222-2222-2222-2222-222222222222',
+              '33333333-3333-3333-3333-333333333333');
+
 insert into public.conversations (id, student_id) values
   ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222');
 

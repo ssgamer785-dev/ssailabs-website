@@ -60,7 +60,10 @@ export function SplashScreen() {
   // so a token refresh part-way through the exit cannot restart the timer.
   const destination = useRef<string | null>(null);
   if (!loading && destination.current === null) {
-    destination.current = session ? '/home' : '/login';
+    // /welcome, not /login: the login form is no longer the first thing a
+    // signed-out visitor meets. An activated user goes straight to /home; an
+    // un-activated one is redirected on to /activate by RequireActivated.
+    destination.current = session ? '/home' : '/welcome';
   }
 
   // A cached image can finish before React attaches onLoad, in which case the

@@ -17,11 +17,32 @@ interface SignUpResult extends SignResult {
 interface AuthState {
   /** true until the initial session check (getSession) has resolved. */
   loading: boolean;
+  /**
+   * true while a signed-in user's profile row is still in flight.
+   *
+   * The activation guard needs this. `loading` only covers the session, and
+   * between the session arriving and the profile arriving `activated_at` is
+   * unknown — treating that as "not activated" would bounce every activated
+   * user through the gate for a frame on each reload.
+   */
+  profileLoading: boolean;
   session: Session | null;
   user: User | null;
   profile: Profile | null;
   role: Profile['role'] | null;
   isAdmin: boolean;
+  /**
+   * Whether this account has redeemed an activation code (admins are exempt).
+   *
+   * This is a routing convenience, NOT the authorization boundary. The boundary
+   * is in the database: profiles_guard_activation refuses any client write to
+   * activated_at, and the SELECT policies on posts, comments, messages and
+   * notifications all require is_activated(). Flipping this boolean in React
+   * devtools moves the user to a screen whose queries return nothing.
+   */
+  isActivated: boolean;
+  /** Re-reads the profile — used after redeeming a code, to pick up activated_at. */
+  refreshProfile: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<SignResult>;
   signUp: (email: string, password: string, fullName: string) => Promise<SignUpResult>;
   signOut: () => Promise<void>;
@@ -37,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
 
   /**
    * A cold load resolves the session twice — once from getSession(), once from
@@ -47,14 +69,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    */
   const inFlightProfile = useRef<{ userId: string; promise: Promise<void> } | null>(null);
 
+  /** Mirrors `session` for callbacks that must not re-create on every change. */
+  const sessionRef = useRef<Session | null>(null);
+  sessionRef.current = session;
+
   const loadProfile = useCallback(async (userId: string) => {
     const pending = inFlightProfile.current;
     if (pending?.userId === userId) return pending.promise;
 
+    setProfileLoading(true);
     const request = (async () => {
       const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
       setProfile(error ? null : data);
     })().finally(() => {
+      setProfileLoading(false);
       if (inFlightProfile.current?.userId === userId) inFlightProfile.current = null;
     });
 
@@ -76,7 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!active) return;
       setSession(newSession);
       if (newSession?.user) void loadProfile(newSession.user.id);
-      else setProfile(null);
+      else { setProfile(null); setProfileLoading(false); }
     });
 
     return () => {
@@ -111,17 +139,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
   }, []);
 
+  // Bypasses the in-flight collapse on purpose: it is called straight after a
+  // redemption, when the cached answer is the stale one we are trying to
+  // replace.
+  const refreshProfile = useCallback(async () => {
+    const userId = sessionRef.current?.user?.id;
+    if (!userId) return;
+    inFlightProfile.current = null;
+    await loadProfile(userId);
+  }, [loadProfile]);
+
   const role = profile?.role ?? null;
 
   return (
     <AuthContext.Provider
       value={{
         loading,
+        profileLoading,
         session,
         user: session?.user ?? null,
         profile,
         role,
         isAdmin: role === 'admin',
+        isActivated: role === 'admin' || profile?.activated_at != null,
+        refreshProfile,
         signIn,
         signUp,
         signOut,

@@ -29,7 +29,7 @@ export function LoginScreen() {
       setError(signInError);
       return;
     }
-    navigate('/home', { replace: true });
+    navigate('/activate', { replace: true });
   }
 
   return (
@@ -75,17 +75,6 @@ export function LoginScreen() {
             {remember && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7" /></svg>}
           </div>
           <div style={css('font-size:13px;color:#475569;white-space:nowrap')}>Remember me</div>
-        </div>
-        <div style={css('margin-top:20px;display:flex;align-items:center;gap:12px')}>
-          <div style={css('flex:1;height:1px;background:#EAEEF4')} />
-          <div style={css('font-size:12px;color:#94A3B8;white-space:nowrap')}>or continue with</div>
-          <div style={css('flex:1;height:1px;background:#EAEEF4')} />
-        </div>
-        <div style={css('margin-top:18px;display:flex;gap:14px')}>
-          <Hoverable style={css('flex:1;height:52px;border:1px solid #E6EAF1;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;background:#fff')} hoverStyle={css('border-color:#CBD5E1')}>
-            <div style={css("font:700 20px Arial,Helvetica,sans-serif;background:conic-gradient(from -50deg,#EA4335 0 25%,#FBBC05 0 50%,#34A853 0 75%,#4285F4 0);-webkit-background-clip:text;background-clip:text;color:transparent")}>G</div>
-            <div style={css('font-size:14.5px;font-weight:600;color:#334155;white-space:nowrap')}>Continue with Google</div>
-          </Hoverable>
         </div>
         <div style={css('flex:1')} />
         <div style={css('padding-bottom:38px;display:flex;justify-content:center;gap:6px;font-size:13.5px')}>

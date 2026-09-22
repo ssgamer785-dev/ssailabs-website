@@ -65,7 +65,7 @@ export function SignupScreen() {
       setInfo('Account created. Check your email to confirm it, then log in.');
       return;
     }
-    navigate('/home', { replace: true });
+    navigate('/activate', { replace: true });
   }
 
   return (
