@@ -8,7 +8,6 @@ import { requestPostUploadUrl, uploadPostMedia, type PostMediaKind, type PostUpl
 import { createPollPost } from '../lib/community/polls';
 import { probeVideo } from '../lib/media/video-poster';
 import type { AttachmentKind, PostChannel } from '../lib/database.types';
-import { CandleChart } from '../components/CandleChart';
 import { PhoneShell } from '../components/PhoneShell';
 import { AppBackButton } from '../components/ui/AppBackButton';
 
@@ -368,11 +367,25 @@ export function CreatePostScreen() {
         </div>
       )}
 
+      {/* Only ever shown once a file is actually picked. This used to be an
+          unconditional tile that rendered a fake candlestick chart whenever
+          there was nothing to preview — including for a plain text post,
+          where it sat there for the whole time someone was composing,
+          suggesting their post was somehow about a trading chart. A picked
+          PDF (or a video mid-poster-probe) still has no image to preview, so
+          that case now shows the real filename instead of invented imagery,
+          rather than the tile disappearing and losing its cancel button. */}
+      {file && (
       <div style={{ ...css('flex:none;padding:22px 20px 0'), display: pollMode ? 'none' : 'block' }}>
         <div style={css('position:relative;width:122px;height:156px;border-radius:14px;overflow:hidden;box-shadow:0 6px 18px rgba(var(--shadow-rgb),.14)')}>
-          {previewUrl
-            ? <img src={previewUrl} alt="Attachment preview" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
-            : <CandleChart seed={21} stamp="10:31 AM" />}
+          {previewUrl ? (
+            <img src={previewUrl} alt="Attachment preview" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
+          ) : (
+            <div style={css('width:100%;height:100%;background:var(--surface-sunken-2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:0 12px')}>
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--text-faint)" strokeWidth={1.7} strokeLinejoin="round"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg>
+              <div style={css('font-size:10.5px;color:var(--text-faint);text-align:center;line-height:1.4;word-break:break-word')}>{file.name}</div>
+            </div>
+          )}
           {progress !== null && (
             <div style={css('position:absolute;inset:0;background:rgba(var(--shadow-rgb),.4);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--on-accent)')}>
               {Math.round(progress * 100)}%
@@ -385,6 +398,7 @@ export function CreatePostScreen() {
           )}
         </div>
       </div>
+      )}
       <div style={css('flex:1')} />
     </PhoneShell>
   );

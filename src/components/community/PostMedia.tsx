@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { css } from '../../lib/css';
 import { getPostMediaUrl } from '../../lib/community/media-api';
 import { useLazyMediaUrl } from '../../lib/media/useLazyMediaUrl';
-import { CandleChart } from '../CandleChart';
 import type { FeedPost } from '../../lib/community/useFeed';
 
 function bytes(n: number): string {
@@ -85,9 +84,28 @@ function PostVideo({ post, height }: { post: FeedPost; height: number }) {
 }
 
 /**
- * The attachment area of a post card. Falls back to the generated candlestick
- * placeholder when a post carries no uploaded media, which is what the original
- * design showed.
+ * The honest answer when there is no real media to show: the attachment never
+ * arrived, or it was purged by the 6-month retention sweep. Matches PdfRow's
+ * own wording for the same situation, rather than inventing a second one.
+ *
+ * This is what used to be a generated candlestick chart — every purged photo
+ * or screen recording rendered as if the post had always been a trading
+ * chart. A post's real content going away is not a reason to replace it with
+ * placeholder trading imagery; it is a reason to say it is gone.
+ */
+function NoMedia({ height, purged }: { height: number; purged: boolean }) {
+  return (
+    <div style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: 'var(--surface-sunken-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={css('font-size:11.5px;color:var(--text-faint);text-align:center;padding:0 16px')}>
+        {purged ? 'Removed (6-month retention)' : 'Attachment unavailable'}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The attachment area of a post card: the real image, the real video, or the
+ * real document — never a stand-in for one that is not there.
  */
 export function PostMedia({ post, height }: { post: FeedPost; height: number }) {
   const isImage = post.attachment === 'image';
@@ -98,33 +116,36 @@ export function PostMedia({ post, height }: { post: FeedPost; height: number }) 
   );
 
   // A PDF and a generic document render the same card; only the icon differs,
-  // which PdfRow decides from the post's own attachment kind.
-  if ((post.attachment === 'pdf' || post.attachment === 'file') && post.storageKey) {
+  // which PdfRow decides from the post's own attachment kind. PdfRow already
+  // degrades gracefully with no storage key — same layout, just no download
+  // link — so a document is routed there unconditionally rather than ever
+  // falling through to the placeholder below.
+  if (post.attachment === 'pdf' || post.attachment === 'file') {
     return <PdfRow post={post} />;
   }
 
-  // No uploaded media: keep the design's chart placeholder.
-  if ((!isImage && !isVideo) || !post.storageKey || post.mediaPurged) {
+  if (isVideo && post.storageKey && !post.mediaPurged) {
+    return <PostVideo post={post} height={height} />;
+  }
+
+  if (isImage && post.storageKey && !post.mediaPurged) {
     return (
-      <div style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden' }}>
-        <CandleChart seed={post.chartSeed ?? 4} />
+      <div ref={image.ref} style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: 'var(--surface-sunken-2)' }}>
+        {image.failed || !image.url ? (
+          <div style={css('width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:var(--text-faint)')}>
+            {image.failed ? 'Could not load attachment' : 'Loading…'}
+          </div>
+        ) : (
+          <img src={image.url} alt={post.fileName ?? 'Attachment'} loading="lazy" decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
+        )}
       </div>
     );
   }
 
-  if (isVideo) return <PostVideo post={post} height={height} />;
-
-  return (
-    <div ref={image.ref} style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: 'var(--surface-sunken-2)' }}>
-      {image.failed || !image.url ? (
-        <div style={css('width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:var(--text-faint)')}>
-          {image.failed ? 'Could not load attachment' : 'Loading…'}
-        </div>
-      ) : (
-        <img src={image.url} alt={post.fileName ?? 'Attachment'} loading="lazy" decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
-      )}
-    </div>
-  );
+  // Nothing left to render for real: the attachment never arrived, its media
+  // was purged, or PostMedia was called for a post that carries none at all.
+  // Say so, rather than filling the space with a generated chart.
+  return <NoMedia height={height} purged={post.mediaPurged} />;
 }
 
 /** A document attachment — PDF or one of the office formats. */

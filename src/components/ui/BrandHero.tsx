@@ -9,11 +9,11 @@ import mark from '../../assets/traders-planet-mark.png';
  * given over to explaining that a feature did not exist yet. This says
  * something true instead: whose platform this is.
  *
- * Built entirely from existing theme tokens rather than new colours, so it
- * follows light and dark without a second definition to keep in step. The base
- * is --ink-chip-2 → --ink-chip, which is a deep navy in light mode and a
- * softer slate in dark; --on-accent is legible on both, and --gold is the one
- * accent that reads as premium against either.
+ * Built on the app's own accent gradient — --accent-grad-a / --accent-grad-b,
+ * the same #1C6EF6 → #0A4FDD blue the Market Overview card itself used to use
+ * — rather than a separate navy-and-gold palette invented for this one panel.
+ * Both tokens hold the identical hex value in light and dark, so the panel
+ * needs no per-theme override to look right in either: it is drawn once.
  *
  * Nothing here is data. There are no numbers, no chart, no ticker and nothing
  * fetched — the only image is the real Traders Planet mark, drawn at its own
@@ -24,22 +24,25 @@ export function BrandHero() {
     <div
       style={css(
         'flex:none;margin:0 20px;border-radius:20px;overflow:hidden;position:relative;' +
-        'background:linear-gradient(145deg,var(--ink-chip-2) 0%,var(--ink-chip) 100%);' +
-        'box-shadow:0 14px 30px rgba(var(--shadow-rgb),.22);' +
+        'background:linear-gradient(145deg,var(--accent-grad-a) 0%,var(--accent-grad-b) 100%);' +
+        // A blue-tinted shadow, not a generic dark one — the same rgb the FAB
+        // and the original Market Overview card used under their own accent
+        // surfaces, so a premium blue card here casts a shadow the rest of
+        // the app already casts under blue.
+        'box-shadow:0 14px 30px rgba(11,95,239,.30);' +
         'padding:20px 20px 18px;color:var(--on-accent);' +
         // isolation keeps the decorative layers below from blending with
         // whatever sits behind the card on the page.
         'isolation:isolate',
       )}
     >
-      {/* Two soft lights, one warm and one accent, placed off-centre so the
-          panel has depth without anything on it looking like a reading. */}
+      {/* A single soft white sheen, off to the top-right, for gloss and depth
+          on the gradient without introducing a second hue. */}
       <div
         aria-hidden="true"
         style={css(
           'position:absolute;inset:0;pointer-events:none;' +
-          'background:radial-gradient(120% 90% at 88% -10%,rgba(217,166,63,.28) 0%,rgba(217,166,63,0) 58%),' +
-          'radial-gradient(90% 80% at -5% 110%,rgba(28,110,246,.34) 0%,rgba(28,110,246,0) 62%)',
+          'background:radial-gradient(120% 90% at 88% -10%,rgba(255,255,255,.22) 0%,rgba(255,255,255,0) 58%)',
         )}
       />
 
@@ -66,8 +69,8 @@ export function BrandHero() {
         <div
           style={css(
             'flex:none;width:62px;height:62px;border-radius:18px;display:flex;align-items:center;justify-content:center;' +
-            'background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.16);' +
-            'box-shadow:0 6px 16px rgba(0,0,0,.22)',
+            'background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);' +
+            'box-shadow:0 6px 16px rgba(0,0,0,.18)',
           )}
         >
           <img
@@ -79,23 +82,23 @@ export function BrandHero() {
         </div>
 
         <div style={css('flex:1;min-width:0;display:flex;flex-direction:column;gap:5px')}>
-          <div style={css('font-size:10px;font-weight:700;letter-spacing:.18em;color:var(--gold);white-space:nowrap')}>
+          <div style={css('font-size:10px;font-weight:700;letter-spacing:.18em;color:var(--on-accent);white-space:nowrap')}>
             THE TRADERS PLANET
           </div>
           <div style={css('font-size:19px;font-weight:800;letter-spacing:-.5px;line-height:1.18;text-wrap:balance')}>
             Trade with structure.
           </div>
-          <div style={css('font-size:11.5px;line-height:1.45;color:rgba(255,255,255,.72);text-wrap:pretty')}>
+          <div style={css('font-size:11.5px;line-height:1.45;color:rgba(255,255,255,.78);text-wrap:pretty')}>
             Official analysis, a community that shows its work, and the tools to size it properly.
           </div>
         </div>
       </div>
 
-      {/* A gold hairline rather than a row of statistics. Anything with a
+      {/* A white hairline rather than a row of statistics. Anything with a
           number in it here would have to be invented. */}
       <div
         aria-hidden="true"
-        style={css('position:relative;margin-top:16px;height:2px;border-radius:2px;background:linear-gradient(90deg,var(--gold) 0%,rgba(217,166,63,.35) 38%,rgba(217,166,63,0) 100%)')}
+        style={css('position:relative;margin-top:16px;height:2px;border-radius:2px;background:linear-gradient(90deg,rgba(255,255,255,.55) 0%,rgba(255,255,255,.16) 45%,rgba(255,255,255,0) 100%)')}
       />
     </div>
   );
