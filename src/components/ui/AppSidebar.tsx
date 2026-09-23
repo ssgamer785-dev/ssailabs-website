@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
+import logo from '../../assets/traders-planet-logo.jpg';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { css } from '../../lib/css';
 import { useAuth } from '../../lib/auth-context';
@@ -31,8 +32,8 @@ const ITEMS: { route: string; label: string; icon: ReactNode }[] = [
     icon: <g><rect x="4.2" y="4.2" width="15.6" height="15.6" rx="3.4" /><path d="M4.4 10h15.2M10 4.4v15.2" /></g>,
   },
   {
-    route: '/news', label: 'Market News',
-    icon: <g><path d="M6.6 3.6h6.3L18 8.5v11.9H6.6z" /><path d="M12.8 3.7v4.8H17.9" /><path d="M9.4 12.6h5.2M9.4 16h3.6" /></g>,
+    route: '/economic-calendar', label: 'Economic Calendar',
+    icon: <g><rect x="3.8" y="5.4" width="16.4" height="14.4" rx="3" /><path d="M8 3.4v3.6M16 3.4v3.6M3.8 10h16.4" /><path d="M7.8 13.6h2.4M13.8 13.6h2.4M7.8 16.8h2.4" /></g>,
   },
   {
     route: '/chat', label: 'Chat',
@@ -190,7 +191,25 @@ export function AppSidebar({ open, onClose, unreadCount = 0 }: {
           'box-shadow:2px 0 24px rgba(var(--shadow-rgb),.16);display:flex;flex-direction:column',
         )}
       >
-        <div style={css('flex:none;padding:calc(14px + env(safe-area-inset-top, 0px)) 14px 10px 20px;display:flex;align-items:center;gap:10px')}>
+        <div style={css('flex:none;padding:calc(14px + env(safe-area-inset-top, 0px)) 14px 10px 16px;display:flex;align-items:center;gap:11px')}>
+          {/* The real mark, in a circle. object-fit:contain inside a fixed
+              square is what keeps a 1280x1024 asset from being stretched to
+              round; the ring and tinted plate are what stop a light-cornered
+              logo dissolving into the surface in light mode. */}
+          <div
+            style={css(
+              'flex:none;width:38px;height:38px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;' +
+              'background:var(--ink-chip-2);border:1px solid var(--border-3);box-shadow:0 2px 8px rgba(var(--shadow-rgb),.12)',
+            )}
+          >
+            <img
+              src={logo}
+              alt=""
+              aria-hidden="true"
+              decoding="async"
+              style={css('width:32px;height:32px;object-fit:contain;display:block')}
+            />
+          </div>
           <div style={css('flex:1;font-size:15.5px;font-weight:800;letter-spacing:-.35px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis')}>
             The Traders Planet
           </div>

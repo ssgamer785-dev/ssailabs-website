@@ -16,7 +16,7 @@ import { HomeScreen } from './screens/HomeScreen';
 import { CommunityPage } from './screens/CommunityPage';
 import { CreatePostScreen } from './screens/CreatePostScreen';
 import { RiskCalculatorScreen } from './screens/RiskCalculatorScreen';
-import { MarketNewsScreen } from './screens/MarketNewsScreen';
+import { EconomicCalendarScreen } from './screens/EconomicCalendarScreen';
 import { ChatListScreen } from './screens/ChatListScreen';
 import { AdminChatScreen } from './screens/AdminChatScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
@@ -52,7 +52,11 @@ export default function App() {
             <Route path="/community" element={<RequireActivated><CommunityPage /></RequireActivated>} />
             <Route path="/create-post" element={<RequireActivated><CreatePostScreen /></RequireActivated>} />
             <Route path="/calculator" element={<RequireActivated><RiskCalculatorScreen /></RequireActivated>} />
-            <Route path="/news" element={<RequireActivated><MarketNewsScreen /></RequireActivated>} />
+            {/* /news is kept as an alias: the News tab is gone, but a bookmark
+                or a back-button entry pointing at the old path should still land
+                on the feature that survived it. */}
+            <Route path="/economic-calendar" element={<RequireActivated><EconomicCalendarScreen /></RequireActivated>} />
+            <Route path="/news" element={<Navigate to="/economic-calendar" replace />} />
             <Route path="/chat" element={<RequireActivated><ChatListScreen /></RequireActivated>} />
             <Route path="/chat/admin" element={<RequireActivated><AdminChatScreen /></RequireActivated>} />
             <Route path="/profile" element={<RequireActivated><ProfileScreen /></RequireActivated>} />

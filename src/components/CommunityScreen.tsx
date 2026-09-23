@@ -2,7 +2,6 @@ import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
-import { makeRand } from '../lib/rng';
 import { useAuth } from '../lib/auth-context';
 import { useFeed, type FeedPost } from '../lib/community/useFeed';
 import { useRefreshHandler } from './PhoneShell';
@@ -11,16 +10,6 @@ import { PostMedia, timeAgo } from './community/PostMedia';
 import { PollCard } from './community/PollCard';
 import logo from '../assets/traders-planet-logo.jpg';
 import { AuthenticatedBottomNav } from './ui/AuthenticatedBottomNav';
-
-function Wave({ bars, color, height, gap, seed }: { bars: number; color: string; height: number; gap: number; seed: number }) {
-  const rand = makeRand(seed);
-  const els: ReactNode[] = [];
-  for (let i = 0; i < bars; i++) {
-    const h = Math.max(3, Math.round((0.28 + rand() * 0.72) * height));
-    els.push(<div key={i} style={{ width: 2, height: h, borderRadius: 2, background: color, flex: 'none' }} />);
-  }
-  return <div style={{ display: 'flex', alignItems: 'center', gap, height, flex: 1, overflow: 'hidden' }}>{els}</div>;
-}
 
 function MaskAvatar({ size, online }: { size: number; online: boolean }) {
   return (
@@ -143,6 +132,119 @@ function DeleteBar({ onDelete, onCancel }: { onDelete: () => void; onCancel: () 
 /** A real drop shadow rather than a coloured glow. */
 const FAB_SHADOW = 'box-shadow:0 1px 2px rgba(var(--shadow-rgb),.14),0 8px 18px rgba(11,95,239,.24)';
 
+
+/**
+ * The two channels, and what distinguishes them.
+ *
+ * Kept as data rather than branches so the header, the switcher and the empty
+ * state all read from one place — the previous screen decided "is this
+ * Official?" in eight separate conditionals and drifted between them.
+ */
+const CHANNELS = {
+  official: {
+    name: 'Official Updates',
+    tab: 'Official',
+    blurb: 'Analysis and signals from the team',
+    empty: 'No official updates yet. Analysis and signals from the team will appear here.',
+  },
+  students: {
+    name: 'Students Community',
+    tab: 'Students',
+    blurb: 'Ideas and questions from members',
+    empty: 'No student posts yet. Be the first to share an idea with the group.',
+  },
+} as const;
+
+/**
+ * The channel identity bar.
+ *
+ * A channel needs a face, a name and a line saying what it carries, in that
+ * order — it is how a reader knows, without reading a post, which room they
+ * are in. The Official channel gets the real Traders Planet logo; Students
+ * gets a members glyph, because a student channel has no single author to put
+ * a face to.
+ */
+function ChannelHeader({ channel, badge }: { channel: keyof typeof CHANNELS; badge: ReactNode }) {
+  const meta = CHANNELS[channel];
+  const official = channel === 'official';
+
+  return (
+    <div style={css('flex:none;display:flex;align-items:center;gap:11px;padding:8px 18px 10px;min-width:0')}>
+      <div
+        style={css(
+          'flex:none;width:42px;height:42px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;' +
+          (official
+            ? 'background:var(--ink-chip-2);border:1px solid var(--border-3)'
+            : 'background:var(--accent-soft);border:1px solid var(--accent-border-2)'),
+        )}
+      >
+        {official ? (
+          <img src={logo} alt="" aria-hidden="true" decoding="async" style={css('width:36px;height:36px;object-fit:contain;display:block')} />
+        ) : (
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="9" cy="8.2" r="3.1" /><path d="M3.4 19.6c0-3.1 2.5-5.5 5.6-5.5s5.6 2.4 5.6 5.5" />
+            <path d="M16.3 5.8a3 3 0 0 1 0 5.9" /><path d="M16.8 14.4c2.3.5 4 2.5 4 5.2" />
+          </svg>
+        )}
+      </div>
+
+      <div style={css('flex:1;min-width:0;display:flex;flex-direction:column;gap:2px')}>
+        <div style={css('display:flex;align-items:center;gap:5px;min-width:0')}>
+          <h1 style={css('margin:0;font-size:16px;font-weight:800;letter-spacing:-.4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
+            {meta.name}
+          </h1>
+          {official && VERIFIED}
+        </div>
+        <div style={css('font-size:11.5px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
+          {meta.blurb}
+        </div>
+      </div>
+
+      {badge}
+    </div>
+  );
+}
+
+/** The channel switcher: two segments, compact, under the identity bar. */
+function ChannelSwitch({ value, onChange }: {
+  value: keyof typeof CHANNELS;
+  onChange: (next: keyof typeof CHANNELS) => void;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Community channel"
+      style={css('flex:none;margin:0 18px 10px;padding:3px;background:var(--surface-track);border-radius:999px;display:flex;gap:3px')}
+    >
+      {(Object.keys(CHANNELS) as (keyof typeof CHANNELS)[]).map(key => {
+        const active = key === value;
+        return (
+          <Hoverable
+            key={key}
+            as="button"
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => !active && onChange(key)}
+            className="row-focus"
+            style={{
+              ...css('flex:1;min-width:0;height:36px;border-radius:999px;display:flex;align-items:center;justify-content:center;' +
+                     'font-size:13.5px;cursor:pointer;white-space:nowrap;border:0'),
+              background: active ? 'var(--accent)' : 'transparent',
+              color: active ? 'var(--on-accent)' : 'var(--text-tertiary)',
+              fontWeight: active ? 600 : 500,
+              boxShadow: active ? '0 2px 8px rgba(11,95,239,.24)' : 'none',
+            }}
+            hoverStyle={active ? {} : css('background:var(--surface-hover)')}
+          >
+            {CHANNELS[key].tab}
+          </Hoverable>
+        );
+      })}
+    </div>
+  );
+}
+
 export function CommunityScreen({ initialTab = 'official', adminView = false, asOthers = false, reveal: revealProp, userName, onToggleReveal }: {
   initialTab?: 'official' | 'students';
   adminView?: boolean;
@@ -174,6 +276,10 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
 
   const isOfficial = tab === 'official';
   const isStudents = tab === 'students';
+  // Students may post to their own channel; only an admin may post Official.
+  // Unchanged from before — the database enforces it either way, and this is
+  // what keeps the button from appearing where the write would be refused.
+  const canCompose = isStudents || admin;
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -181,56 +287,63 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
     if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) void feed.loadMore();
   }, [feed]);
 
+  const viewBadge = (admin || others) ? (
+    <div style={{
+      ...css('height:22px;padding:0 9px;border-radius:7px;flex:none;display:flex;align-items:center;gap:5px'),
+      background: admin ? 'var(--ink-chip)' : 'var(--accent-soft)',
+      border: admin ? 'none' : '1px solid var(--accent-border-2)',
+    }}>
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={admin ? 'var(--on-accent)' : 'var(--accent-ink)'} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+        {admin
+          ? <path d="M12 3.8 5.6 6.2v5.3c0 4 2.6 7.4 6.4 8.7 3.8-1.3 6.4-4.7 6.4-8.7V6.2z" />
+          : <g><circle cx={12} cy={8.4} r={3.3} /><path d="M5.6 19.6c0-3.4 2.9-5.8 6.4-5.8s6.4 2.4 6.4 5.8" /></g>}
+      </svg>
+      <div style={{
+        ...css('font-size:9.5px;font-weight:700;letter-spacing:.05em;white-space:nowrap'),
+        color: admin ? 'var(--on-accent)' : 'var(--accent-ink)',
+      }}>
+        {admin ? 'ADMIN VIEW' : 'USER VIEW'}
+      </div>
+    </div>
+  ) : null;
+
   return (
-    <div style={css("position:relative;width:100%;height:100%;display:flex;flex-direction:column;background:var(--surface);overflow:hidden;color:var(--text-primary)")}>
-      <div style={css('flex:none;height:50px;display:flex;align-items:center;justify-content:center;gap:8px;padding:0 18px')}>
-        <div style={css('font-size:17px;font-weight:700;letter-spacing:-.35px;white-space:nowrap')}>{isOfficial ? 'Community' : 'Students Community'}</div>
-        {(admin || others) && (
-          <div style={{ height: 22, padding: '0 9px', borderRadius: 7, flex: 'none', display: 'flex', alignItems: 'center', gap: 5, background: admin ? 'var(--ink-chip)' : 'var(--accent-soft)', border: admin ? 'none' : '1px solid var(--accent-border-2)' }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={admin ? 'var(--on-accent)' : 'var(--accent-ink)'} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-              {admin
-                ? <path d="M12 3.8 5.6 6.2v5.3c0 4 2.6 7.4 6.4 8.7 3.8-1.3 6.4-4.7 6.4-8.7V6.2z" />
-                : <g><circle cx={12} cy={8.4} r={3.3} /><path d="M5.6 19.6c0-3.4 2.9-5.8 6.4-5.8s6.4 2.4 6.4 5.8" /></g>}
-            </svg>
-            <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.05em', whiteSpace: 'nowrap', color: admin ? 'var(--on-accent)' : 'var(--accent-ink)' }}>{admin ? 'ADMIN VIEW' : 'USER VIEW'}</div>
-          </div>
-        )}
-      </div>
+    <div style={css('position:relative;width:100%;height:100%;display:flex;flex-direction:column;background:var(--surface);overflow:hidden;color:var(--text-primary)')}>
+      <ChannelHeader channel={tab} badge={viewBadge} />
+      <ChannelSwitch value={tab} onChange={setTab} />
 
-      <div style={css('flex:none;margin:4px 20px 14px;padding:4px;background:var(--surface-track);border-radius:999px;display:flex;gap:4px')}>
-        {isOfficial && <div style={css('flex:1;height:40px;border-radius:999px;background:var(--accent);box-shadow:0 3px 10px rgba(11,95,239,.28);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:var(--on-accent);cursor:pointer;white-space:nowrap')}>Official</div>}
-        {isStudents && <Hoverable onClick={() => setTab('official')} style={css('flex:1;height:40px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500;color:var(--text-tertiary);cursor:pointer;white-space:nowrap')} hoverStyle={css('background:rgba(255,255,255,.7)')}>Official</Hoverable>}
-        {isStudents && <div style={css('flex:1;height:40px;border-radius:999px;background:var(--accent);box-shadow:0 3px 10px rgba(11,95,239,.28);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:var(--on-accent);cursor:pointer;white-space:nowrap')}>Students</div>}
-        {isOfficial && <Hoverable onClick={() => setTab('students')} style={css('flex:1;height:40px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500;color:var(--text-tertiary);cursor:pointer;white-space:nowrap')} hoverStyle={css('background:rgba(255,255,255,.7)')}>Students</Hoverable>}
-      </div>
-
-      <div style={css('flex:1;min-height:0;background:var(--surface-sunken);display:flex;flex-direction:column;gap:8px;overflow:hidden;border-top:1px solid var(--border-3)')}>
-        <div ref={scrollRef} onScroll={onScroll} className="nav-space" style={css('flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch')}>
-
+      <div style={css('flex:1;min-height:0;background:var(--surface-sunken);display:flex;flex-direction:column;overflow:hidden;border-top:1px solid var(--border-3)')}>
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          className="nav-space"
+          /* overscroll-behavior:contain stops a flick at the end of the feed
+             dragging the page behind it; -webkit-overflow-scrolling keeps the
+             momentum curve on iOS. */
+          style={css('flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;overscroll-behavior:contain;-webkit-overflow-scrolling:touch')}
+        >
           {isStudents && others && (
-            <div style={css('background:var(--accent-tint-2);border-top:1px solid var(--accent-border-2);border-bottom:1px solid var(--accent-border-2);padding:10px 18px;display:flex;gap:10px;align-items:flex-start')}>
+            <div style={css('background:var(--accent-tint-2);border-bottom:1px solid var(--accent-border-2);padding:10px 18px;display:flex;gap:10px;align-items:flex-start')}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" style={css('flex:none;margin-top:1px')}><path d="M2.4 12S6 5.9 12 5.9 21.6 12 21.6 12 18 18.1 12 18.1 2.4 12 2.4 12z" /><circle cx="12" cy="12" r="2.9" /></svg>
               <div style={css('flex:1;font-size:11.5px;color:var(--text-secondary);line-height:1.45;text-wrap:pretty')}>Member view — this is exactly what other students see. Names stay <strong style={css('font-weight:700')}>Unknown User</strong> unless a member shares them.</div>
             </div>
           )}
           {isStudents && admin && (
-            <div style={css('background:var(--warning-soft);border-top:1px solid var(--warning-border);border-bottom:1px solid var(--warning-border);padding:10px 18px;display:flex;gap:10px;align-items:flex-start')}>
+            <div style={css('background:var(--warning-soft);border-bottom:1px solid var(--warning-border);padding:10px 18px;display:flex;gap:10px;align-items:flex-start')}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--warning-ink)" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" style={css('flex:none;margin-top:1px')}><path d="M12 3.8 5.6 6.2v5.3c0 4 2.6 7.4 6.4 8.7 3.8-1.3 6.4-4.7 6.4-8.7V6.2z" /></svg>
               <div style={css('flex:1;font-size:11.5px;color:var(--warning-ink-3);line-height:1.45;text-wrap:pretty')}>Admin view — real names are always visible to you, even when a member posts as Unknown User.</div>
             </div>
           )}
 
           {feed.error && (
-            <div style={css('background:var(--surface);padding:14px 20px;font-size:12px;color:var(--danger-ink);line-height:1.4')}>{feed.error}</div>
+            <div role="alert" style={css('background:var(--surface);padding:14px 18px;font-size:12px;color:var(--danger-ink);line-height:1.4')}>{feed.error}</div>
           )}
 
           {feed.loading ? (
             <div style={css('flex:1;display:flex;align-items:center;justify-content:center;font-size:12.5px;color:var(--text-faint)')}>Loading posts…</div>
           ) : feed.posts.length === 0 ? (
-            <div style={css('flex:1;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12.5px;color:var(--text-faint);line-height:1.5;padding:0 34px')}>
-              {isOfficial
-                ? 'No official updates yet. Analysis and signals from the team will appear here.'
-                : 'No student posts yet. Be the first to share an idea with the group.'}
+            <div style={css('flex:1;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12.5px;color:var(--text-faint);line-height:1.5;padding:0 34px;text-wrap:pretty')}>
+              {CHANNELS[tab].empty}
             </div>
           ) : (
             feed.posts.map(post => (
@@ -251,29 +364,19 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
           )}
 
           {feed.loadingMore && (
-            <div style={css('padding:10px 0 16px;text-align:center;font-size:11.5px;color:var(--text-faint)')}>Loading more…</div>
+            <div style={css('padding:12px 0 16px;text-align:center;font-size:11.5px;color:var(--text-faint)')}>Loading more…</div>
           )}
         </div>
       </div>
 
-      {isStudents && (
+      {canCompose && (
         <Hoverable
-          as="div"
+          as="button"
+          type="button"
           className="pressable"
-          onClick={() => navigate('/create-post')}
-          style={css('position:absolute;right:20px;bottom:calc(18px + var(--nav-space));width:54px;height:54px;border-radius:50%;background:var(--accent);' + FAB_SHADOW + ';display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:20')}
-          hoverStyle={css('background:var(--accent-hover)')}
-        >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--on-accent)" strokeWidth={2.2} strokeLinecap="round"><path d="M12 5.5v13M5.5 12h13" /></svg>
-        </Hoverable>
-      )}
-
-      {isOfficial && admin && (
-        <Hoverable
-          as="div"
-          className="pressable"
-          onClick={() => navigate('/create-post?channel=official')}
-          style={css('position:absolute;right:20px;bottom:calc(18px + var(--nav-space));width:54px;height:54px;border-radius:50%;background:var(--accent);' + FAB_SHADOW + ';display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:20')}
+          aria-label={isOfficial ? 'Post an official update' : 'Create a post'}
+          onClick={() => navigate(isOfficial ? '/create-post?channel=official' : '/create-post')}
+          style={css('position:absolute;right:18px;bottom:calc(18px + var(--nav-space));width:54px;height:54px;border-radius:50%;background:var(--accent);border:0;' + FAB_SHADOW + ';display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:20')}
           hoverStyle={css('background:var(--accent-hover)')}
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--on-accent)" strokeWidth={2.2} strokeLinecap="round"><path d="M12 5.5v13M5.5 12h13" /></svg>
@@ -285,6 +388,26 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
   );
 }
 
+/**
+ * One post in a channel.
+ *
+ * This replaces two divergent card renderers — one for Official, one for
+ * Students — that had drifted into different paddings, different action rows
+ * and, in the Official case, a pair of PDF/Video buttons with nothing behind
+ * them. One component means the two channels cannot drift again, and the
+ * difference between them is now only what it should be: who the author is.
+ *
+ * Laid out as a channel row rather than a card. No rounded box, no shadow, no
+ * gap between posts — just a flat row on the sunken background with a hairline
+ * under it, which is what lets a long feed read as one continuous surface
+ * instead of a stack of floating objects. Media runs the full width of the row
+ * for the same reason: the attachment is usually the point of the post, and a
+ * card inset shrinks it for nothing.
+ *
+ * Every behaviour from before is preserved: tap to open the real post, tap the
+ * heart to like, long-press (or right-click) your own post to delete, the
+ * name-visibility switch on your own student post, and the inline reply.
+ */
 function PostCard({ post, official, admin, others, reveal, userName, onToggleReveal, onOpen, onToggleLike, onDelete }: {
   post: FeedPost;
   official: boolean;
@@ -298,7 +421,6 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
   onDelete: () => void;
 }) {
   const press = useLongPressDelete(post.isMine || admin);
-  const initials = post.authorName.split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
 
   const pressHandlers = {
     onPointerDown: press.start,
@@ -309,135 +431,160 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
     },
   };
 
-  if (official) {
-    return (
-      <div style={css('background:var(--surface);padding:16px 20px 14px;display:flex;flex-direction:column;gap:12px')} {...pressHandlers}>
-        <div style={css('display:flex;align-items:center;gap:10px')}>
-          <div style={css('width:34px;height:34px;border-radius:50%;background:var(--ink-chip-2);display:flex;align-items:center;justify-content:center;overflow:hidden;flex:none')}>
-            <img src={logo} alt="The Traders Planet" style={css('width:30px;height:30px;object-fit:contain')} />
-          </div>
-          <div style={css('flex:1;display:flex;flex-direction:column;gap:1px')}>
-            <div style={css('display:flex;align-items:center;gap:5px')}>
-              <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap')}>The Traders Planet</div>
-              {VERIFIED}
-            </div>
-            <div style={css('font-size:11.5px;color:var(--text-faint)')}>Admin</div>
-          </div>
-          <div style={css('font-size:11.5px;color:var(--text-faint);flex:none;white-space:nowrap')}>{timeAgo(post.createdAt)}</div>
-        </div>
+  // Who the reader is told wrote this. Unchanged rules: an admin always sees
+  // the real name; you always see your own; everyone else sees the snapshot.
+  const showRealName = official || admin || (post.isMine && reveal) || !post.isAnonymous;
+  const shownName = official ? 'The Traders Planet' : showRealName ? post.authorName : 'Unknown User';
+  const initials = post.authorName.split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
 
-        <div style={css('display:flex;flex-direction:column;gap:5px')} onClick={onOpen}>
-          {post.title && <div style={css('font-size:16px;font-weight:700;letter-spacing:-.35px')}>{post.title}</div>}
-          {post.body && <div style={css('font-size:13.5px;line-height:1.5;color:var(--text-secondary);white-space:pre-wrap')}>{post.body}</div>}
-          {post.entryPrice != null && (
-            <div style={css('font-size:13.5px;line-height:1.5;color:var(--text-secondary)')}>
-              SL {post.stopLoss ?? '—'} | TP {post.takeProfit ?? '—'}
-            </div>
-          )}
-        </div>
+  const role = official
+    ? 'Admin'
+    : post.isMine
+      ? (admin
+          ? (reveal ? 'You · name shared' : 'You · appears as Unknown User')
+          : others ? 'Student' : (reveal ? 'You · name visible' : 'You · posting anonymously'))
+      : (admin && post.isAnonymous ? 'Student · appears as Unknown User' : 'Student');
 
-        {/* A poll is interactive, so it must NOT sit inside the onOpen wrapper:
-            a tap is a vote, not a navigation. Documents likewise own their own
-            download control. */}
-        {post.attachment === 'poll' ? (
-          <PollCard postId={post.id} />
-        ) : post.attachment === 'pdf' || post.attachment === 'file' ? (
-          <PostMedia post={post} height={152} />
-        ) : (
-          <div onClick={onOpen}><PostMedia post={post} height={152} /></div>
-        )}
-
-        {/* A pair of PDF and Video buttons used to sit here. They had no
-            handlers and appeared on every Official post regardless of what was
-            actually attached, so they have gone: the attachment rendered above
-            is the real one, and it opens itself. */}
-
-        <div style={css('display:flex;align-items:center;gap:18px;padding-top:2px')}>
-          <div onClick={onToggleLike} style={css('display:flex;align-items:center;gap:7px;cursor:pointer')}>
-            <Heart on={post.likedByMe} size={20} />
-            <div style={css('font-size:13px;font-weight:600;color:var(--text-secondary)')}>{post.likeCount}</div>
-          </div>
-          <div onClick={onOpen} style={css('display:flex;align-items:center;gap:7px;cursor:pointer')}>
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d="M20.4 11.8c0 3.8-3.8 6.9-8.4 6.9-1 0-2-.1-2.9-.4L4.4 20.2l1.5-3.5c-1.6-1.3-2.5-3-2.5-4.9 0-3.8 3.8-6.9 8.4-6.9s8.6 3.1 8.6 6.9z" /></svg>
-            <div style={css('font-size:13px;font-weight:600;color:var(--text-secondary)')}>{post.commentCount}</div>
-          </div>
-          <div style={css('flex:1')} />
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth={1.7} strokeLinejoin="round" style={css('cursor:pointer')}><path d="M7 4.4h10v16l-5-3.5-5 3.5z" /></svg>
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth={1.7} strokeLinecap="round" style={css('cursor:pointer')}><circle cx="18" cy="5.6" r="2.4" /><circle cx="6.4" cy="12" r="2.4" /><circle cx="18" cy="18.4" r="2.4" /><path d="M8.6 10.8 15.8 6.9M8.6 13.2l7.2 3.9" /></svg>
-        </div>
-
-        {press.confirming && <DeleteBar onDelete={() => { press.setConfirming(false); onDelete(); }} onCancel={() => press.setConfirming(false)} />}
-      </div>
-    );
-  }
-
-  // ---- students card ----
-  const showRealName = admin || (post.isMine && reveal) || !post.isAnonymous;
-  const shownName = showRealName ? post.authorName : 'Unknown User';
-  const role = post.isMine
-    ? (admin
-        ? (reveal ? 'You · name shared' : 'You · appears as Unknown User')
-        : others ? 'Student' : (reveal ? 'You · name visible' : 'You · posting anonymously'))
-    : (admin && post.isAnonymous ? 'Student · appears as Unknown User' : 'Student');
+  const hasAttachment = post.attachment !== 'none';
+  const isPoll = post.attachment === 'poll';
+  const isDocument = post.attachment === 'pdf' || post.attachment === 'file';
 
   return (
-    <div style={css('background:var(--surface);padding:14px 18px 12px;display:flex;flex-direction:column;gap:11px')} {...pressHandlers}>
-      <div style={css('display:flex;align-items:center;gap:10px')}>
-        {/* online={false}: this used to be `!post.isMine`, which lit a green
-            presence dot on every post by anybody else whether they were in the
-            app or not. A feed has no presence channel to read, so it shows no
-            presence. */}
-        {showRealName
-          ? <InitialAvatar text={initials} size={34} bg="var(--avatar-bg)" color="var(--avatar-ink)" online={false} />
-          : <MaskAvatar size={34} online={false} />}
-        <div style={css('flex:1;display:flex;flex-direction:column;gap:1px;min-width:0')}>
-          <div style={css('display:flex;align-items:center;gap:5px')}>
-            <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap')}>{shownName}</div>
-            {post.isMine && reveal ? <SharedTag /> : post.isAnonymous ? <LockMark /> : null}
+    <article
+      style={css('background:var(--surface);border-bottom:1px solid var(--surface-divider);padding:13px 0 9px;display:flex;flex-direction:column;gap:9px')}
+      {...pressHandlers}
+    >
+      {/* ---- author ---- */}
+      <header style={css('display:flex;align-items:center;gap:10px;padding:0 18px;min-width:0')}>
+        {official ? (
+          <div style={css('flex:none;width:36px;height:36px;border-radius:50%;background:var(--ink-chip-2);display:flex;align-items:center;justify-content:center;overflow:hidden')}>
+            <img src={logo} alt="" aria-hidden="true" decoding="async" style={css('width:31px;height:31px;object-fit:contain;display:block')} />
           </div>
-          <div style={css('font-size:11.5px;color:var(--text-faint);flex:none;white-space:nowrap')}>{role}</div>
+        ) : showRealName ? (
+          <InitialAvatar text={initials} size={36} bg="var(--avatar-bg)" color="var(--avatar-ink)" online={false} />
+        ) : (
+          <MaskAvatar size={36} online={false} />
+        )}
+
+        <div style={css('flex:1;min-width:0;display:flex;flex-direction:column;gap:1px')}>
+          <div style={css('display:flex;align-items:center;gap:5px;min-width:0')}>
+            <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
+              {shownName}
+            </div>
+            {official ? VERIFIED : post.isMine && reveal ? <SharedTag /> : post.isAnonymous ? <LockMark /> : null}
+          </div>
+          <div style={css('font-size:11px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>{role}</div>
         </div>
-        <div style={css('font-size:11.5px;color:var(--text-faint);flex:none;white-space:nowrap')}>{timeAgo(post.createdAt)}</div>
-      </div>
 
-      {post.body && <div style={css('font-size:14px;color:var(--text-primary);line-height:1.45;white-space:pre-wrap')} onClick={onOpen}>{post.body}</div>}
+        <time style={css('flex:none;font-size:11px;color:var(--text-faint);white-space:nowrap')}>{timeAgo(post.createdAt)}</time>
+      </header>
 
-      {post.attachment === 'poll' ? (
-        <PollCard postId={post.id} />
-      ) : post.attachment === 'pdf' || post.attachment === 'file' ? (
-        <PostMedia post={post} height={148} />
-      ) : post.attachment !== 'none' ? (
-        <div onClick={onOpen}><PostMedia post={post} height={148} /></div>
-      ) : null}
+      {/* ---- body ---- */}
+      {(post.title || post.body) && (
+        <div onClick={onOpen} style={css('padding:0 18px;display:flex;flex-direction:column;gap:4px;cursor:pointer')}>
+          {post.title && (
+            <div style={css('font-size:15px;font-weight:700;letter-spacing:-.3px;line-height:1.3;text-wrap:pretty')}>{post.title}</div>
+          )}
+          {post.body && (
+            <div style={css('font-size:13.5px;line-height:1.5;color:var(--text-secondary);white-space:pre-wrap;word-break:break-word')}>{post.body}</div>
+          )}
+        </div>
+      )}
 
-      {post.isMine && !admin && !others && (
-        <div style={css('background:var(--accent-tint-2);border:1px solid var(--accent-border-2);border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:11px')}>
-          <div style={css('flex:1;display:flex;flex-direction:column;gap:2px;min-width:0')}>
+      {post.entryPrice != null && (
+        <div onClick={onOpen} style={css('padding:0 18px;font-size:12.5px;color:var(--text-muted);cursor:pointer;font-variant-numeric:tabular-nums')}>
+          SL {post.stopLoss ?? '—'} · TP {post.takeProfit ?? '—'}
+        </div>
+      )}
+
+      {/* ---- attachment ----
+          A poll and a document own their own taps (voting, downloading), so
+          neither sits inside the onOpen wrapper. Image and video do: tapping
+          the picture opens the post, which is what a reader expects, and the
+          video component stops its own click before it reaches here. */}
+      {hasAttachment && (
+        isPoll ? (
+          <div style={css('padding:2px 18px 3px')}><PollCard postId={post.id} /></div>
+        ) : isDocument ? (
+          <div style={css('padding:0 18px')}><PostMedia post={post} height={150} /></div>
+        ) : (
+          // Full-bleed. The media is the post; an 18px inset on both sides
+          // costs it 36px of width for nothing but a card outline.
+          <div onClick={onOpen} style={css('cursor:pointer')}><PostMedia post={post} height={202} /></div>
+        )
+      )}
+
+      {/* ---- your own name visibility, on your own student post ---- */}
+      {post.isMine && !official && !admin && !others && (
+        <div style={css('margin:0 18px;background:var(--accent-tint-2);border:1px solid var(--accent-border-2);border-radius:12px;padding:9px 11px;display:flex;align-items:center;gap:11px')}>
+          <div style={css('flex:1;min-width:0;display:flex;flex-direction:column;gap:2px')}>
             <div style={css('font-size:12px;font-weight:700;letter-spacing:-.15px;white-space:nowrap')}>Show my real name on this post</div>
-            <div style={css('font-size:11px;color:var(--text-muted);line-height:1.4')}>{reveal ? `Others now see ${userName}` : 'Others see you as Unknown User'}</div>
+            <div style={css('font-size:11px;color:var(--text-muted);line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
+              {reveal ? `Others now see ${userName}` : 'Others see you as Unknown User'}
+            </div>
           </div>
           <SwitchEl on={reveal} onClick={onToggleReveal} />
         </div>
       )}
 
-      <div style={css('display:flex;align-items:center;gap:18px;padding-top:1px')}>
-        <div onClick={onToggleLike} style={css('display:flex;align-items:center;gap:7px;cursor:pointer')}>
+      {/* ---- actions ---- */}
+      <div style={css('padding:0 18px;display:flex;align-items:center;gap:20px')}>
+        <Hoverable
+          as="button"
+          type="button"
+          onClick={onToggleLike}
+          aria-pressed={post.likedByMe}
+          aria-label={`${post.likeCount} like${post.likeCount === 1 ? '' : 's'}`}
+          className="row-focus"
+          style={css('display:flex;align-items:center;gap:7px;cursor:pointer;border:0;background:transparent;padding:5px 0')}
+          hoverStyle={css('opacity:.72')}
+        >
           <Heart on={post.likedByMe} size={19} />
-          <div style={css('font-size:13px;font-weight:600;color:var(--text-secondary)')}>{post.likeCount}</div>
-        </div>
-        <div onClick={onOpen} style={css('display:flex;align-items:center;gap:7px;cursor:pointer')}>
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d="M20.4 11.8c0 3.8-3.8 6.9-8.4 6.9-1 0-2-.1-2.9-.4L4.4 20.2l1.5-3.5c-1.6-1.3-2.5-3-2.5-4.9 0-3.8 3.8-6.9 8.4-6.9s8.6 3.1 8.6 6.9z" /></svg>
-          <div style={css('font-size:13px;font-weight:600;color:var(--text-secondary)')}>{post.commentCount}</div>
-        </div>
+          <span style={css('font-size:12.5px;font-weight:600;color:var(--text-secondary);font-variant-numeric:tabular-nums')}>{post.likeCount}</span>
+        </Hoverable>
+
+        <Hoverable
+          as="button"
+          type="button"
+          onClick={onOpen}
+          aria-label={`${post.commentCount} comment${post.commentCount === 1 ? '' : 's'}`}
+          className="row-focus"
+          style={css('display:flex;align-items:center;gap:7px;cursor:pointer;border:0;background:transparent;padding:5px 0')}
+          hoverStyle={css('opacity:.72')}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d="M20.4 11.8c0 3.8-3.8 6.9-8.4 6.9-1 0-2-.1-2.9-.4L4.4 20.2l1.5-3.5c-1.6-1.3-2.5-3-2.5-4.9 0-3.8 3.8-6.9 8.4-6.9s8.6 3.1 8.6 6.9z" /></svg>
+          <span style={css('font-size:12.5px;font-weight:600;color:var(--text-secondary);font-variant-numeric:tabular-nums')}>{post.commentCount}</span>
+        </Hoverable>
+
         <div style={css('flex:1')} />
-        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth={1.7} strokeLinejoin="round" style={css('cursor:pointer')}><path d="M7 4.4h10v16l-5-3.5-5 3.5z" /></svg>
+
+        <Hoverable
+          as="button"
+          type="button"
+          onClick={onOpen}
+          aria-label="Open post"
+          className="row-focus"
+          style={css('display:flex;align-items:center;gap:5px;cursor:pointer;border:0;background:transparent;padding:5px 0;font-size:11.5px;font-weight:600;color:var(--accent-ink);white-space:nowrap')}
+          hoverStyle={css('opacity:.72')}
+        >
+          Open
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={2.3} strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+        </Hoverable>
       </div>
 
-      <ReplyRow postId={post.id} anonymous={!reveal} />
+      {/* Inline reply, on student posts only — an Official update is a
+          broadcast, and its replies belong on the post itself. */}
+      {!official && (
+        <div style={css('padding:0 18px 2px')}>
+          <ReplyRow postId={post.id} anonymous={!reveal} />
+        </div>
+      )}
 
-      {press.confirming && <DeleteBar onDelete={() => { press.setConfirming(false); onDelete(); }} onCancel={() => press.setConfirming(false)} />}
-    </div>
+      {press.confirming && (
+        <div style={css('padding:0 18px 4px')}>
+          <DeleteBar onDelete={() => { press.setConfirming(false); onDelete(); }} onCancel={() => press.setConfirming(false)} />
+        </div>
+      )}
+    </article>
   );
 }
-
-export { Wave };

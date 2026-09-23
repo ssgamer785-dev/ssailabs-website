@@ -2,13 +2,13 @@ import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { css } from '../../lib/css';
 
-export type NavTab = 'home' | 'community' | 'calculator' | 'news' | 'chat';
+export type NavTab = 'home' | 'community' | 'calculator' | 'calendar' | 'chat';
 
 const TABS: { tab: NavTab; route: string; label: string }[] = [
   { tab: 'home', route: '/home', label: 'Home' },
   { tab: 'community', route: '/community', label: 'Community' },
   { tab: 'calculator', route: '/calculator', label: 'Calculator' },
-  { tab: 'news', route: '/news', label: 'News' },
+  { tab: 'calendar', route: '/economic-calendar', label: 'Calendar' },
   { tab: 'chat', route: '/chat', label: 'Chat' },
 ];
 
@@ -21,7 +21,7 @@ function activeTabFor(pathname: string): NavTab | null {
   if (pathname.startsWith('/home')) return 'home';
   if (pathname.startsWith('/community') || pathname.startsWith('/create-post')) return 'community';
   if (pathname.startsWith('/calculator')) return 'calculator';
-  if (pathname.startsWith('/news')) return 'news';
+  if (pathname.startsWith('/economic-calendar') || pathname.startsWith('/news')) return 'calendar';
   if (pathname.startsWith('/chat') || pathname.startsWith('/admin-inbox')) return 'chat';
   // Profile, notifications and analysis sit outside the tab set: the bar still
   // shows, but nothing is lit, because none of these *is* a tab.
@@ -53,10 +53,13 @@ function icons(tab: NavTab, active: boolean): ReactNode {
       return active
         ? <svg {...common}><rect x="4.2" y="4.2" width="15.6" height="15.6" rx="3.4" fill={ACTIVE} /><path d="M4.4 10h15.2M10 4.4v15.2" stroke="var(--on-accent)" strokeWidth="1.6" /></svg>
         : <svg {...common} fill="none" stroke={stroke} strokeWidth="1.7" strokeLinejoin="round"><rect x="4.2" y="4.2" width="15.6" height="15.6" rx="3.4" /><path d="M4.4 10h15.2M10 4.4v15.2" /></svg>;
-    case 'news':
+    case 'calendar':
+      // A calendar, not the newspaper page this used to be: the tab no longer
+      // leads to a news feed, and a glyph that disagrees with its label is the
+      // thing a person notices first.
       return active
-        ? <svg {...common}><path d="M6.6 3.6h6.3L18 8.5v11.9H6.6z" fill={ACTIVE} /><path d="M9.4 12.4h5.6M9.4 15.9h3.9" stroke="var(--on-accent)" strokeWidth="1.5" strokeLinecap="round" /></svg>
-        : <svg {...common} fill="none" stroke={stroke} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6.6 3.6h6.3L18 8.5v11.9H6.6z" /><path d="M12.8 3.7v4.8H17.9" /><path d="M9.4 12.6h5.2M9.4 16h3.6" /></svg>;
+        ? <svg {...common}><rect x="3.8" y="5.4" width="16.4" height="14.4" rx="3" fill={ACTIVE} /><path d="M8 3.4v3.6M16 3.4v3.6" stroke={ACTIVE} strokeWidth="1.9" strokeLinecap="round" /><path d="M7.6 11.6h8.8M7.6 15.4h5.6" stroke="var(--on-accent)" strokeWidth="1.5" strokeLinecap="round" /></svg>
+        : <svg {...common} fill="none" stroke={stroke} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="3.8" y="5.4" width="16.4" height="14.4" rx="3" /><path d="M8 3.4v3.6M16 3.4v3.6M3.8 10h16.4" /><path d="M7.8 13.6h2.4M13.8 13.6h2.4M7.8 16.8h2.4" /></svg>;
     case 'chat':
       return active
         ? <svg {...common}><path d="M20.2 12.2c0 3.7-3.7 6.8-8.2 6.8-.9 0-1.8-.1-2.6-.4l-4.6 1.8 1.4-3.4c-1.5-1.3-2.4-3-2.4-4.8 0-3.7 3.7-6.8 8.2-6.8s8.2 3.1 8.2 6.8z" fill={ACTIVE} /><path d="M8.4 12.2h7.2" stroke="var(--on-accent)" strokeWidth="1.6" strokeLinecap="round" /></svg>

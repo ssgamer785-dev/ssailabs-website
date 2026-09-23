@@ -123,10 +123,18 @@ export function RiskCalculatorScreen() {
   // Prefilled with the worked example so the screen is usable on arrival.
   const [instrumentSymbol, setInstrumentSymbol] = useState('XAUUSD');
   const [depositCurrency, setDepositCurrency] = useState<CurrencyCode>('USD');
-  const [openPrice, setOpenPrice] = useState('4163.91000');
-  const [stopLossPrice, setStopLossPrice] = useState('4080.63180');
-  const [accountBalance, setAccountBalance] = useState('100000');
-  const [risk, setRisk] = useState('2');
+  // Every money, price and rate field starts empty.
+  //
+  // These were seeded with 4163.91000 / 4080.63180 / 100000 / 2 — a gold entry,
+  // a gold stop, a six-figure balance and a risk percentage, all invented. On a
+  // trading app that is not a convenience: it is a filled-in trade plan the
+  // person did not write, and pressing Calculate on it returns a position size
+  // for a position nobody intended. The instrument and currency dropdowns keep
+  // their defaults because those are a choice from a fixed list, not a number.
+  const [openPrice, setOpenPrice] = useState('');
+  const [stopLossPrice, setStopLossPrice] = useState('');
+  const [accountBalance, setAccountBalance] = useState('');
+  const [risk, setRisk] = useState('');
   const [riskUnit, setRiskUnit] = useState<RiskUnit>('percent');
 
   // Results deliberately only move when Calculate is pressed.
