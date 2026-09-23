@@ -17,6 +17,7 @@ import {
   type CalculatorResult,
   type RiskUnit,
 } from '../lib/calculator/position-size';
+import { fetchUsdRates } from '../lib/calculator/fx';
 import { PhoneShell } from '../components/PhoneShell';
 import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 
@@ -141,12 +142,29 @@ export function RiskCalculatorScreen() {
   const [result, setResult] = useState<CalculatorResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  // True only while a cross-currency press is waiting on the server's (cached)
+  // FX rates — a same-currency calculation never sets this, since it never
+  // touches the network at all.
+  const [converting, setConverting] = useState(false);
 
   // Chart links follow the dropdown, not the last calculation, so the labels
   // stay truthful the moment the instrument changes.
   const selected = INSTRUMENTS.find(i => i.symbol === instrumentSymbol) ?? INSTRUMENTS[0];
 
-  function calculate() {
+  async function calculate() {
+    if (converting) return;
+
+    // Only a cross-currency calculation needs a rate at all — same currency
+    // is exact by construction and must work even if the FX fetch is broken,
+    // so it never touches the network. This is also what keeps the common
+    // USD/USD case instant, exactly as it was before FX support existed.
+    let usdRates: Record<string, number> | null = null;
+    if (selected.quoteCurrency !== depositCurrency) {
+      setConverting(true);
+      usdRates = await fetchUsdRates();
+      setConverting(false);
+    }
+
     const outcome = calculatePositionSize({
       instrumentSymbol,
       depositCurrency,
@@ -155,7 +173,7 @@ export function RiskCalculatorScreen() {
       accountBalance,
       risk,
       riskUnit,
-    });
+    }, usdRates);
     if (outcome.status === 'ok') {
       setResult(outcome.result);
       setError(null);
@@ -266,11 +284,16 @@ export function RiskCalculatorScreen() {
 
         <div style={css('margin-top:22px;border-top:1px solid var(--border-2);padding:24px 20px 0;display:flex;justify-content:center')}>
           <Hoverable
-            onClick={calculate}
-            style={css('width:230px;height:56px;border-radius:999px;background:var(--accent);box-shadow:0 10px 22px rgba(11,95,239,.28);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:600;color:var(--on-accent);cursor:pointer;letter-spacing:-.2px')}
+            onClick={() => void calculate()}
+            aria-disabled={converting}
+            style={{
+              ...css('width:230px;height:56px;border-radius:999px;background:var(--accent);box-shadow:0 10px 22px rgba(11,95,239,.28);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:600;color:var(--on-accent);cursor:pointer;letter-spacing:-.2px'),
+              opacity: converting ? 0.6 : 1,
+              pointerEvents: converting ? 'none' : 'auto',
+            }}
             hoverStyle={css('background:var(--accent-hover)')}
           >
-            Calculate
+            {converting ? 'Getting rate…' : 'Calculate'}
           </Hoverable>
         </div>
 

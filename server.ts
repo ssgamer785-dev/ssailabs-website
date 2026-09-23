@@ -9,6 +9,7 @@ import { SUPPORT_EMAIL } from "./src/lib/support";
 import { postMediaRouter } from "./server/post-media";
 import { adminAuthRouter } from "./server/admin-auth";
 import { profileMediaRouter } from "./server/profile-media";
+import { fxRouter } from "./server/fx";
 
 dotenv.config();
 
@@ -25,6 +26,8 @@ app.use("/api/posts", postMediaRouter());
 app.use("/api/admin", adminAuthRouter());
 // R2-backed profile pictures. Writes are keyed to the caller's own id.
 app.use("/api/profile", profileMediaRouter());
+// Cached USD-based FX rates for the Risk Calculator. No auth: public rate data.
+app.use("/api/fx", fxRouter());
 
 // In-memory leads storage for backup / immediate access
 const leads: Array<{

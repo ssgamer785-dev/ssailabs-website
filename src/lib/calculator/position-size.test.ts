@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { calculatePositionSize, formatMoney, formatSize, type CalculatorInput } from './position-size';
+import { calculatePositionSize, formatMoney, formatSize, quoteToDepositRate, type CalculatorInput } from './position-size';
 import { INSTRUMENTS, findInstrument, historicalChartUrl, liveChartUrl } from './instruments';
 
 /** The reference screenshot's inputs; individual tests override what they vary. */
@@ -13,8 +13,8 @@ const BASE: CalculatorInput = {
   riskUnit: 'percent',
 };
 
-function run(overrides: Partial<CalculatorInput> = {}) {
-  return calculatePositionSize({ ...BASE, ...overrides });
+function run(overrides: Partial<CalculatorInput> = {}, usdRates?: Record<string, number> | null) {
+  return calculatePositionSize({ ...BASE, ...overrides }, usdRates);
 }
 
 function expectOk(outcome: ReturnType<typeof run>) {
@@ -306,15 +306,82 @@ describe('10. instrument switching', () => {
   });
 });
 
-describe('deposit currency guard', () => {
+describe('deposit currency guard: same currency never needs a rate', () => {
   it('calculates when the account currency matches the quote currency', () => {
     expect(expectOk(run({ depositCurrency: 'USD' })).units).toBeGreaterThan(0);
   });
 
-  it('refuses rather than guessing an FX rate', () => {
+  it('still calculates USD/USD even when no rate map is supplied at all', () => {
+    expect(expectOk(run({ depositCurrency: 'USD' }, undefined)).units).toBeGreaterThan(0);
+  });
+
+  it('refuses a cross-currency calculation rather than guessing a rate', () => {
     const message = expectError(run({ depositCurrency: 'INR' }));
     expect(message).toContain('USD/INR');
-    expect(message).toContain("isn't configured");
+    expect(message).toContain("Couldn't get a live");
+  });
+
+  it('refuses when a rate map is supplied but is missing the needed currency', () => {
+    const message = expectError(run({ depositCurrency: 'INR' }, { EUR: 0.9 }));
+    expect(message).toContain('USD/INR');
+  });
+
+  it('refuses on a malformed rate (non-finite / zero / negative)', () => {
+    expect(expectError(run({ depositCurrency: 'GBP' }, { GBP: Number.NaN }))).toContain('USD/GBP');
+    expect(expectError(run({ depositCurrency: 'GBP' }, { GBP: 0 }))).toContain('USD/GBP');
+    expect(expectError(run({ depositCurrency: 'GBP' }, { GBP: -0.79 }))).toContain('USD/GBP');
+  });
+});
+
+describe('deposit currency guard: real cross-currency conversion', () => {
+  // A fixed, clearly-labelled example rate map — not the live rate, and not
+  // asserted against any external source. Shaped exactly like
+  // open.er-api.com's own `rates` object: USD-based, USD itself absent.
+  const RATES = { EUR: 0.9, GBP: 0.78, INR: 83.5, JPY: 149.2 };
+
+  it('USD quote -> GBP deposit converts in the correct direction', () => {
+    // rate = RATES.GBP / 1 (quote is USD) = 0.78: cheaper in GBP than in USD,
+    // so risking the same money buys MORE units, not fewer.
+    const usd = expectOk(run({ depositCurrency: 'USD', risk: '500', riskUnit: 'currency' }));
+    const gbp = expectOk(run({ depositCurrency: 'GBP', risk: '500', riskUnit: 'currency' }, RATES));
+    expect(gbp.units).toBeGreaterThan(usd.units);
+    expect(gbp.units / usd.units).toBeCloseTo(1 / RATES.GBP, 6);
+  });
+
+  it('USD quote -> EUR deposit converts in the correct direction', () => {
+    const usd = expectOk(run({ depositCurrency: 'USD', risk: '500', riskUnit: 'currency' }));
+    const eur = expectOk(run({ depositCurrency: 'EUR', risk: '500', riskUnit: 'currency' }, RATES));
+    expect(eur.units / usd.units).toBeCloseTo(1 / RATES.EUR, 6);
+  });
+
+  it('USD quote -> INR deposit converts in the correct direction', () => {
+    // "Risk 500" means 500 of the SELECTED deposit currency. 500 INR is worth
+    // far less than 500 USD (1 USD = 83.5 INR here), so it must buy a much
+    // SMALLER position, not a larger one — this is the direction most likely
+    // to be silently inverted by a rate/1-rate mistake, so it is checked
+    // explicitly rather than only asserted via the ratio below.
+    const usd = expectOk(run({ depositCurrency: 'USD', risk: '500', riskUnit: 'currency' }));
+    const inr = expectOk(run({ depositCurrency: 'INR', risk: '500', riskUnit: 'currency' }, RATES));
+    expect(inr.units).toBeLessThan(usd.units / 10);
+    expect(inr.units / usd.units).toBeCloseTo(1 / RATES.INR, 6);
+  });
+
+  it('the rate itself matches quoteToDepositRate for the same inputs', () => {
+    const rate = quoteToDepositRate('USD', 'GBP', RATES);
+    expect(rate).toBeCloseTo(RATES.GBP, 10);
+    const outcome = run({ depositCurrency: 'GBP' }, RATES);
+    if (outcome.status !== 'ok') throw new Error('expected ok');
+    // units = riskAmount / (stopDistance * rate); recompute independently.
+    const stopDistance = Math.abs(4163.91 - 4080.6318);
+    const riskAmount = 100000 * 0.02;
+    expect(outcome.result.units).toBeCloseTo(riskAmount / (stopDistance * rate!), 4);
+  });
+
+  it('a cross-rate (neither side USD) composes correctly through the USD base', () => {
+    // Not reachable through today's instruments (every quote is USD), but the
+    // function itself must still be correct for a future non-USD-quoted one.
+    const rate = quoteToDepositRate('EUR', 'GBP', RATES);
+    expect(rate).toBeCloseTo(RATES.GBP / RATES.EUR, 10);
   });
 });
 

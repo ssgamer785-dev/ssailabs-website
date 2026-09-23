@@ -60,19 +60,49 @@ function parseNumber(raw: string): number | null {
 /**
  * How much one unit of the quote currency is worth in the deposit currency.
  *
- * Every instrument in the spec list is USD-quoted, so a USD account is 1:1 and
- * exact. Any other deposit currency needs a live FX rate the app does not have,
- * and inventing one would silently produce wrong position sizes — so this
- * returns null and the caller surfaces that instead of calculating.
+ * Same currency is always exact and never touches `usdRates` — that keeps the
+ * common USD/USD case (and any other matching pair) working even if the FX
+ * fetch failed or was never attempted, which is the one case this must never
+ * depend on a network call for.
+ *
+ * Otherwise `usdRates` is the provider's own map of "1 USD buys this many
+ * units of CODE" (open.er-api.com's shape — USD itself is implicit 1 and
+ * never a key in it). Converting quote -> deposit is a cross-rate through
+ * that common USD base: how many deposit-currency units one USD buys, divided
+ * by how many quote-currency units one USD buys. When either side IS USD, its
+ * factor is exactly 1 rather than a lookup, which is also what keeps this
+ * exact for every instrument today (all USD-quoted) instead of compounding
+ * two roundings for no reason.
+ *
+ * Returns null — never an invented number — when no rate map was supplied, or
+ * when it does not carry the currency this calculation needs.
  */
 export function quoteToDepositRate(
   quote: CurrencyCode,
   deposit: CurrencyCode,
+  usdRates?: Record<string, number> | null,
 ): number | null {
-  return quote === deposit ? 1 : null;
+  if (quote === deposit) return 1;
+  if (!usdRates) return null;
+
+  const quoteFactor = quote === 'USD' ? 1 : usdRates[quote];
+  const depositFactor = deposit === 'USD' ? 1 : usdRates[deposit];
+  // Both factors are divisor and dividend of the cross-rate below, so either
+  // one being non-finite or non-positive makes the result meaningless — a
+  // currency's own USD rate is never legitimately zero or negative.
+  if (!Number.isFinite(quoteFactor) || quoteFactor <= 0
+      || !Number.isFinite(depositFactor) || depositFactor <= 0) {
+    return null;
+  }
+
+  return depositFactor / quoteFactor;
 }
 
-export function calculatePositionSize(input: CalculatorInput): CalculationOutcome {
+export function calculatePositionSize(
+  input: CalculatorInput,
+  /** Already-fetched USD-based rates; omit or pass null when unavailable. */
+  usdRates?: Record<string, number> | null,
+): CalculationOutcome {
   const instrument = findInstrument(input.instrumentSymbol);
   if (!instrument) return { status: 'error', error: 'Choose an instrument.' };
 
@@ -108,11 +138,11 @@ export function calculatePositionSize(input: CalculatorInput): CalculationOutcom
     return { status: 'error', error: 'Risk amount cannot be more than the account balance.' };
   }
 
-  const rate = quoteToDepositRate(instrument.quoteCurrency, input.depositCurrency);
+  const rate = quoteToDepositRate(instrument.quoteCurrency, input.depositCurrency, usdRates);
   if (rate === null) {
     return {
       status: 'error',
-      error: `${instrument.label} settles in ${instrument.quoteCurrency}. Sizing a ${input.depositCurrency} account needs a live ${instrument.quoteCurrency}/${input.depositCurrency} rate, which isn't configured — switch the deposit currency to US Dollar.`,
+      error: `Couldn't get a live ${instrument.quoteCurrency}/${input.depositCurrency} exchange rate. Please try again.`,
     };
   }
 
