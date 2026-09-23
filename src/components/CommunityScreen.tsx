@@ -8,6 +8,8 @@ import { useRefreshHandler } from './PhoneShell';
 import { useComments } from '../lib/community/useComments';
 import { PostMedia, timeAgo } from './community/PostMedia';
 import { PollCard } from './community/PollCard';
+import { resolveAuthorName } from '../lib/community/author-name';
+import { initialsOf } from './ui/Avatar';
 import logo from '../assets/traders-planet-logo.jpg';
 import { AuthenticatedBottomNav } from './ui/AuthenticatedBottomNav';
 
@@ -431,11 +433,16 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
     },
   };
 
-  // Who the reader is told wrote this. Unchanged rules: an admin always sees
-  // the real name; you always see your own; everyone else sees the snapshot.
+  // Who the reader is told wrote this — one shared decision (resolveAuthorName)
+  // rather than logic duplicated per screen, which is exactly how this used
+  // to show "Unknown User" on your own revealed post: this screen and Post
+  // Detail each re-implemented the rule and each got the same detail wrong.
   const showRealName = official || admin || (post.isMine && reveal) || !post.isAnonymous;
-  const shownName = official ? 'The Traders Planet' : showRealName ? post.authorName : 'Unknown User';
-  const initials = post.authorName.split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+  const shownName = resolveAuthorName({
+    official, isAdminViewer: admin, isMine: post.isMine, reveal,
+    isAnonymous: post.isAnonymous, authorName: post.authorName, myName: userName,
+  });
+  const initials = initialsOf(shownName);
 
   const role = official
     ? 'Admin'

@@ -12,6 +12,7 @@ import { PollCard } from '../components/community/PollCard';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 import { Avatar } from '../components/ui/Avatar';
+import { resolveAuthorName } from '../lib/community/author-name';
 import logo from '../assets/traders-planet-logo.jpg';
 
 /**
@@ -46,9 +47,9 @@ export function PostDetailScreen() {
   const [params] = useSearchParams();
   const postId = params.get('post');
   const { isAdmin } = useAuth();
-  const { reveal } = useAppState();
+  const { reveal, userName } = useAppState();
 
-  const { post, loading, notFound, error, toggleLike, toggleBookmark } = usePost(postId);
+  const { post, loading, notFound, error, toggleLike, toggleBookmark, refresh } = usePost(postId);
   const comments = useComments(postId);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -76,6 +77,33 @@ export function PostDetailScreen() {
     );
   }
 
+  if (error) {
+    return (
+      <PhoneShell>
+        <div style={css('flex:none;height:56px;display:flex;align-items:center;padding:0 20px;gap:12px')}>
+          <AppBackButton fallback="/community" />
+          <div style={css('flex:1;font-size:17px;font-weight:700;letter-spacing:-.35px')}>Post</div>
+        </div>
+        <div style={css('flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:0 32px;text-align:center')}>
+          <div style={css('font-size:13px;color:var(--text-muted);line-height:1.55;text-wrap:pretty')}>
+            Couldn&rsquo;t load this post. This is a loading problem, not a deleted post — try again.
+          </div>
+          <Hoverable
+            as="button"
+            type="button"
+            onClick={() => void refresh()}
+            className="pressable row-focus"
+            style={css('height:38px;padding:0 16px;border-radius:10px;border:1px solid var(--border-strong);display:flex;align-items:center;font-size:13px;font-weight:700;color:var(--text-primary);cursor:pointer;background:var(--surface)')}
+            hoverStyle={css('background:var(--surface-hover)')}
+          >
+            Try again
+          </Hoverable>
+        </div>
+        <AuthenticatedBottomNav />
+      </PhoneShell>
+    );
+  }
+
   if (notFound || !post) {
     return (
       <PhoneShell>
@@ -96,6 +124,13 @@ export function PostDetailScreen() {
   const official = post.channel === 'official';
   const heading = official ? 'Official Update' : 'Community Post';
 
+  // One shared decision (resolveAuthorName) rather than logic re-implemented
+  // per screen — see its own doc comment for why that duplication was the bug.
+  const authorDisplayName = resolveAuthorName({
+    official, isAdminViewer: isAdmin, isMine: post.isMine, reveal,
+    isAnonymous: post.isAnonymous, authorName: post.authorName, myName: userName,
+  });
+
   return (
     <PhoneShell>
       <div style={css('flex:none;height:56px;display:flex;align-items:center;padding:0 20px;gap:12px')}>
@@ -114,12 +149,12 @@ export function PostDetailScreen() {
               <img src={logo} alt="The Traders Planet" style={css('width:30px;height:30px;object-fit:contain')} />
             </div>
           ) : (
-            <Avatar name={post.authorName} avatarKey={post.authorAvatarKey} size={34} />
+            <Avatar name={authorDisplayName} avatarKey={post.authorAvatarKey} size={34} />
           )}
           <div style={css('flex:1;display:flex;flex-direction:column;gap:1px;min-width:0')}>
             <div style={css('display:flex;align-items:center;gap:5px;min-width:0')}>
               <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
-                {post.authorName}
+                {authorDisplayName}
               </div>
               {post.authorRole === 'admin' && (
                 <svg width="14" height="14" viewBox="0 0 24 24" aria-label="Admin" style={css('display:block;flex:none')}>
