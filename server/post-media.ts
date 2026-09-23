@@ -20,15 +20,54 @@ const MAX_BYTES: Record<string, number> = {
   image: 10 * 1024 * 1024,
   video: 50 * 1024 * 1024,
   pdf: 25 * 1024 * 1024,
+  file: 25 * 1024 * 1024,
 };
 
 const ALLOWED_MIME: Record<string, RegExp> = {
   image: /^image\/(jpeg|png|webp|gif|heic)$/i,
   video: /^video\/(mp4|quicktime|webm)$/i,
   pdf: /^application\/pdf$/i,
+  /**
+   * 'file' is the office-document kind, not "anything at all".
+   *
+   * An allowlist rather than a deny-list, and deliberately without
+   * application/octet-stream: that is the type a browser reports for anything
+   * it does not recognise, so allowing it would allow every extension there
+   * is, including the executable ones. A format that is not on this list is
+   * refused rather than quietly stored.
+   */
+  file: new RegExp(
+    '^(' +
+    'application/msword|' +
+    'application/vnd\\.openxmlformats-officedocument\\.(wordprocessingml\\.document|spreadsheetml\\.sheet|presentationml\\.presentation)|' +
+    'application/vnd\\.ms-(excel|powerpoint)|' +
+    'application/vnd\\.oasis\\.opendocument\\.(text|spreadsheet|presentation)|' +
+    'application/(zip|x-zip-compressed)|' +
+    'text/(plain|csv)' +
+    ')$', 'i',
+  ),
 };
 
-const EXTENSION: Record<string, string> = { image: 'bin', video: 'bin', pdf: 'pdf' };
+const EXTENSION: Record<string, string> = { image: 'bin', video: 'bin', pdf: 'pdf', file: 'bin' };
+
+/** Whether `kind` is an attachment kind this server accepts at all. */
+export function isAttachmentKind(kind: unknown): kind is keyof typeof MAX_BYTES {
+  return typeof kind === 'string' && Object.prototype.hasOwnProperty.call(ALLOWED_MIME, kind);
+}
+
+/**
+ * Whether a file of `mimeType` may be uploaded as `kind`.
+ *
+ * Extracted so the allowlist can be tested directly. The 'file' kind is the
+ * one that matters: it is the only kind whose name suggests "anything", and
+ * the only one where letting application/octet-stream through would turn the
+ * endpoint into general-purpose file hosting — octet-stream is what a browser
+ * reports for every extension it does not recognise, including executables.
+ */
+export function isAllowedAttachment(kind: unknown, mimeType: unknown): boolean {
+  if (!isAttachmentKind(kind) || typeof mimeType !== 'string') return false;
+  return ALLOWED_MIME[kind].test(mimeType);
+}
 
 /** A generated JPEG frame; anything larger is not a thumbnail. */
 const MAX_POSTER_BYTES = 2 * 1024 * 1024;
@@ -126,8 +165,8 @@ export function postMediaRouter(): Router {
     if (!kind || !mimeType || typeof sizeBytes !== 'number') {
       return res.status(400).json({ error: 'kind, mimeType and sizeBytes are required.' });
     }
-    if (!ALLOWED_MIME[kind]) return res.status(400).json({ error: `Unsupported attachment kind "${kind}".` });
-    if (!ALLOWED_MIME[kind].test(mimeType)) {
+    if (!isAttachmentKind(kind)) return res.status(400).json({ error: `Unsupported attachment kind "${kind}".` });
+    if (!isAllowedAttachment(kind, mimeType)) {
       return res.status(400).json({ error: `${mimeType} is not an allowed ${kind} type.` });
     }
     if (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > MAX_BYTES[kind]) {

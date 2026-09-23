@@ -97,7 +97,9 @@ export function PostMedia({ post, height }: { post: FeedPost; height: number }) 
     getPostMediaUrl,
   );
 
-  if (post.attachment === 'pdf' && post.storageKey) {
+  // A PDF and a generic document render the same card; only the icon differs,
+  // which PdfRow decides from the post's own attachment kind.
+  if ((post.attachment === 'pdf' || post.attachment === 'file') && post.storageKey) {
     return <PdfRow post={post} />;
   }
 
@@ -125,21 +127,25 @@ export function PostMedia({ post, height }: { post: FeedPost; height: number }) 
   );
 }
 
-/** PDF attachment, styled like the chat screen's document card. */
+/** A document attachment — PDF or one of the office formats. */
 export function PdfRow({ post }: { post: FeedPost }) {
   const { ref, url } = useLazyMediaUrl(
     post.mediaPurged ? null : post.storageKey,
     getPostMediaUrl,
   );
+  const isPdf = post.attachment === 'pdf';
 
   return (
     <div ref={ref} style={css('background:var(--surface);border:1px solid var(--border-2);border-radius:12px;padding:11px 12px;display:flex;align-items:center;gap:11px')}>
-      <div style={css('width:34px;height:38px;border-radius:8px;background:var(--danger-soft);display:flex;align-items:center;justify-content:center;flex:none')}>
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--danger-ink)" strokeWidth={1.8} strokeLinejoin="round"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg>
+      <div style={{
+        ...css('width:34px;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex:none'),
+        background: isPdf ? 'var(--danger-soft)' : 'var(--accent-tint)',
+      }}>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke={isPdf ? 'var(--danger-ink)' : 'var(--accent-ink)'} strokeWidth={1.8} strokeLinejoin="round"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg>
       </div>
       <div style={css('flex:1;display:flex;flex-direction:column;gap:3px;min-width:0')}>
         <div style={css('font-size:12.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
-          {post.fileName ?? 'Document.pdf'}
+          {post.fileName ?? (isPdf ? 'Document.pdf' : 'Attachment')}
         </div>
         <div style={css('font-size:11px;color:var(--text-faint)')}>
           {post.mediaPurged ? 'Removed (6-month retention)' : bytes(post.sizeBytes ?? 0)}

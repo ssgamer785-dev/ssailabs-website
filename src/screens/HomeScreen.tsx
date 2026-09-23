@@ -328,7 +328,10 @@ export function HomeScreen() {
         </div>
 
         <div style={css('flex:none;padding:20px 18px 0;display:flex;justify-content:space-between')}>
-          <div style={quickAction} onClick={() => navigate('/analysis')}>
+          {/* Was '/analysis' with no post id, which now opens a post-detail
+              screen with nothing to detail. The Official feed is what this tile
+              has always meant. */}
+          <div style={quickAction} onClick={() => navigate('/community')}>
             <div style={quickIconWrap}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.7} strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3.4" /><circle cx="9" cy="10" r="1.7" /><path d="M4.6 17.4l4.5-4.3 3.3 3.1 2.6-2.4 4.4 4" /></svg>
             </div>
@@ -372,7 +375,7 @@ export function HomeScreen() {
         ) : highlights.official ? (
           <OfficialUpdateCard
             post={highlights.official}
-            onOpen={() => navigate(`/analysis?post=${highlights.official!.id}`)}
+            onOpen={() => navigate(`/post?post=${highlights.official!.id}`)}
           />
         ) : (
           <div style={officialCardNote}>
@@ -395,7 +398,7 @@ export function HomeScreen() {
               key={post.id}
               post={post}
               index={i}
-              onOpen={() => navigate(`/analysis?post=${post.id}`)}
+              onOpen={() => navigate(`/post?post=${post.id}`)}
             />
           ))
         )}

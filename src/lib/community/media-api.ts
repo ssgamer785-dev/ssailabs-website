@@ -6,7 +6,7 @@
 
 import { supabase } from '../supabase';
 
-export type PostMediaKind = 'image' | 'video' | 'pdf';
+export type PostMediaKind = 'image' | 'video' | 'pdf' | 'file';
 
 async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();

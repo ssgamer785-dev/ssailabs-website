@@ -20,10 +20,11 @@ import { MarketNewsScreen } from './screens/MarketNewsScreen';
 import { ChatListScreen } from './screens/ChatListScreen';
 import { AdminChatScreen } from './screens/AdminChatScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
-import { AnalysisDetailScreen } from './screens/AnalysisDetailScreen';
+import { PostDetailScreen } from './screens/PostDetailScreen';
 import { NotificationsScreen } from './screens/NotificationsScreen';
 import { AdminInboxScreen } from './screens/AdminInboxScreen';
 import { NameVisibilityScreen } from './screens/NameVisibilityScreen';
+import { PersonalInformationScreen } from './screens/PersonalInformationScreen';
 import { PrivacyPolicyScreen } from './screens/PrivacyPolicyScreen';
 import { TermsScreen } from './screens/TermsScreen';
 import { HelpSupportScreen } from './screens/HelpSupportScreen';
@@ -55,13 +56,17 @@ export default function App() {
             <Route path="/chat" element={<RequireActivated><ChatListScreen /></RequireActivated>} />
             <Route path="/chat/admin" element={<RequireActivated><AdminChatScreen /></RequireActivated>} />
             <Route path="/profile" element={<RequireActivated><ProfileScreen /></RequireActivated>} />
+            <Route path="/profile/personal" element={<RequireActivated><PersonalInformationScreen /></RequireActivated>} />
             <Route path="/profile/name-visibility" element={<RequireActivated><NameVisibilityScreen /></RequireActivated>} />
             <Route path="/profile/privacy" element={<RequireActivated><PrivacyPolicyScreen /></RequireActivated>} />
             <Route path="/profile/terms" element={<RequireActivated><TermsScreen /></RequireActivated>} />
             <Route path="/profile/help" element={<RequireActivated><HelpSupportScreen /></RequireActivated>} />
-            <Route path="/analysis" element={<RequireActivated><AnalysisDetailScreen /></RequireActivated>} />
+            {/* /analysis is kept as an alias so links already shared, and the
+                browser history of anyone mid-session, keep working. */}
+            <Route path="/post" element={<RequireActivated><PostDetailScreen /></RequireActivated>} />
+            <Route path="/analysis" element={<RequireActivated><PostDetailScreen /></RequireActivated>} />
             <Route path="/notifications" element={<RequireActivated><NotificationsScreen /></RequireActivated>} />
-            <Route path="/admin-inbox" element={<RequireActivated><AdminInboxScreen /></RequireActivated>} />
+            <Route path="/admin-inbox" element={<RequireAdmin><AdminInboxScreen /></RequireAdmin>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>

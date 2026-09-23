@@ -8,6 +8,7 @@ import { useFeed, type FeedPost } from '../lib/community/useFeed';
 import { useRefreshHandler } from './PhoneShell';
 import { useComments } from '../lib/community/useComments';
 import { PostMedia, timeAgo } from './community/PostMedia';
+import { PollCard } from './community/PollCard';
 import logo from '../assets/traders-planet-logo.jpg';
 import { AuthenticatedBottomNav } from './ui/AuthenticatedBottomNav';
 
@@ -80,7 +81,6 @@ function Heart({ on, size }: { on: boolean; size: number }) {
   );
 }
 
-const iconBtn = css('height:36px;padding:0 14px;border:1px solid var(--border-5);border-radius:10px;display:flex;align-items:center;gap:7px;cursor:pointer;background:var(--surface)');
 const VERIFIED = (
   <svg width="14" height="14" viewBox="0 0 24 24" style={css('display:block;flex:none')}>
     <circle cx="12" cy="12" r="9.5" fill="var(--accent-ink)" />
@@ -243,7 +243,7 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
                 reveal={reveal}
                 userName={userName}
                 onToggleReveal={handleToggleReveal}
-                onOpen={() => navigate(`/analysis?post=${post.id}`)}
+                onOpen={() => navigate(`/post?post=${post.id}`)}
                 onToggleLike={() => feed.toggleLike(post.id)}
                 onDelete={() => feed.deletePost(post)}
               />
@@ -336,19 +336,21 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
           )}
         </div>
 
-        {post.attachment !== 'pdf' && <div onClick={onOpen}><PostMedia post={post} height={152} /></div>}
-        {post.attachment === 'pdf' && <PostMedia post={post} height={152} />}
+        {/* A poll is interactive, so it must NOT sit inside the onOpen wrapper:
+            a tap is a vote, not a navigation. Documents likewise own their own
+            download control. */}
+        {post.attachment === 'poll' ? (
+          <PollCard postId={post.id} />
+        ) : post.attachment === 'pdf' || post.attachment === 'file' ? (
+          <PostMedia post={post} height={152} />
+        ) : (
+          <div onClick={onOpen}><PostMedia post={post} height={152} /></div>
+        )}
 
-        <div style={css('display:flex;gap:10px')}>
-          <Hoverable style={iconBtn} hoverStyle={css('border-color:var(--accent)')}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.8} strokeLinejoin="round"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg>
-            <div style={css('font-size:12.5px;font-weight:600')}>PDF</div>
-          </Hoverable>
-          <Hoverable style={iconBtn} hoverStyle={css('border-color:var(--accent)')}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.8} strokeLinejoin="round"><rect x="3.2" y="6.6" width="12" height="10.8" rx="2.6" /><path d="M15.2 11.2 20.4 8.2v7.6l-5.2-3z" /></svg>
-            <div style={css('font-size:12.5px;font-weight:600')}>Video</div>
-          </Hoverable>
-        </div>
+        {/* A pair of PDF and Video buttons used to sit here. They had no
+            handlers and appeared on every Official post regardless of what was
+            actually attached, so they have gone: the attachment rendered above
+            is the real one, and it opens itself. */}
 
         <div style={css('display:flex;align-items:center;gap:18px;padding-top:2px')}>
           <div onClick={onToggleLike} style={css('display:flex;align-items:center;gap:7px;cursor:pointer')}>
@@ -381,9 +383,13 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
   return (
     <div style={css('background:var(--surface);padding:14px 18px 12px;display:flex;flex-direction:column;gap:11px')} {...pressHandlers}>
       <div style={css('display:flex;align-items:center;gap:10px')}>
+        {/* online={false}: this used to be `!post.isMine`, which lit a green
+            presence dot on every post by anybody else whether they were in the
+            app or not. A feed has no presence channel to read, so it shows no
+            presence. */}
         {showRealName
-          ? <InitialAvatar text={initials} size={34} bg="var(--avatar-bg)" color="var(--avatar-ink)" online={!post.isMine} />
-          : <MaskAvatar size={34} online={!post.isMine} />}
+          ? <InitialAvatar text={initials} size={34} bg="var(--avatar-bg)" color="var(--avatar-ink)" online={false} />
+          : <MaskAvatar size={34} online={false} />}
         <div style={css('flex:1;display:flex;flex-direction:column;gap:1px;min-width:0')}>
           <div style={css('display:flex;align-items:center;gap:5px')}>
             <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap')}>{shownName}</div>
@@ -396,7 +402,13 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
 
       {post.body && <div style={css('font-size:14px;color:var(--text-primary);line-height:1.45;white-space:pre-wrap')} onClick={onOpen}>{post.body}</div>}
 
-      {post.attachment !== 'none' && <div onClick={onOpen}><PostMedia post={post} height={148} /></div>}
+      {post.attachment === 'poll' ? (
+        <PollCard postId={post.id} />
+      ) : post.attachment === 'pdf' || post.attachment === 'file' ? (
+        <PostMedia post={post} height={148} />
+      ) : post.attachment !== 'none' ? (
+        <div onClick={onOpen}><PostMedia post={post} height={148} /></div>
+      ) : null}
 
       {post.isMine && !admin && !others && (
         <div style={css('background:var(--accent-tint-2);border:1px solid var(--accent-border-2);border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:11px')}>

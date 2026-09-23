@@ -1,13 +1,18 @@
 import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
-import { SUPPORT_EMAIL, supportMailto } from '../lib/support';
+import { supportWhatsAppDisplay, supportWhatsAppUrl } from '../lib/support';
 import { B, DocumentScreen, P, Section } from '../components/ui/DocumentScreen';
 
 /**
  * Support that uses what the app already has rather than standing up anything
  * new: the admin conversation is the real support channel and already exists at
- * /chat/admin, and the owner address is the one server.ts already notifies.
+ * /chat/admin, and WhatsApp is the same number the membership hand-off opens.
+ *
+ * The two routes are ordered by what actually gets answered. In-app chat is
+ * first because it carries the member's identity, their thread history and
+ * their attachments; WhatsApp is second, for someone who cannot get into the
+ * app at all — which is exactly when an in-app support link is no use.
  *
  * The answers below are about this app specifically — name visibility, the
  * media allowance, why member-to-member chat is off — because a FAQ that could
@@ -96,6 +101,11 @@ function Faq({ q, children }: { q: string; children: ReactNode }) {
 
 export function HelpSupportScreen() {
   const navigate = useNavigate();
+  // null when the number is not configured — the card is dropped rather than
+  // rendered as a link that opens an empty chat with nobody.
+  const whatsapp = supportWhatsAppUrl(
+    'Hi — I need help with The Traders Planet app.',
+  );
 
   return (
     <DocumentScreen
@@ -114,17 +124,19 @@ export function HelpSupportScreen() {
             </svg>
           }
         />
-        <ActionCard
-          href={supportMailto('The Traders Planet — support request')}
-          title="Email support"
-          sub={SUPPORT_EMAIL}
-          icon={
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3.2" y="5.4" width="17.6" height="13.2" rx="2.6" />
-              <path d="M3.8 7 12 12.6 20.2 7" />
-            </svg>
-          }
-        />
+        {whatsapp && (
+          <ActionCard
+            href={whatsapp}
+            title="WhatsApp support"
+            sub={supportWhatsAppDisplay()}
+            icon={
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12.04 2.2a9.7 9.7 0 0 0-8.3 14.72L2.2 21.8l5-1.5a9.7 9.7 0 1 0 4.84-18.1zm0 1.78a7.92 7.92 0 1 1-4.04 14.73l-.29-.17-2.96.89.9-2.88-.19-.3A7.92 7.92 0 0 1 12.04 3.98z" />
+                <path d="M9.3 7.3c-.17-.4-.35-.4-.52-.41h-.44c-.15 0-.4.06-.6.29-.21.23-.8.77-.8 1.88s.82 2.18.93 2.33c.12.16 1.58 2.5 3.9 3.42 1.93.75 2.33.6 2.75.56.42-.04 1.35-.54 1.54-1.07.19-.53.19-.98.13-1.07-.05-.1-.2-.15-.43-.26-.23-.12-1.35-.66-1.56-.74-.2-.08-.36-.12-.51.11-.15.23-.58.74-.71.89-.13.15-.26.17-.49.06a6.3 6.3 0 0 1-1.84-1.13 6.9 6.9 0 0 1-1.27-1.58c-.13-.23-.01-.35.1-.46.1-.1.23-.27.34-.4.11-.14.15-.23.23-.39.08-.15.04-.29-.02-.4-.06-.12-.5-1.25-.7-1.7z" />
+              </svg>
+            }
+          />
+        )}
       </div>
 
       <Section title="Common questions">
@@ -193,7 +205,7 @@ export function HelpSupportScreen() {
         <P>
           Telling us what you were doing, what you expected and what happened instead gets you a
           useful answer first time. A screenshot helps — you can attach one straight to the admin
-          chat.
+          chat, or send it on WhatsApp if you cannot get into the app.
         </P>
       </Section>
     </DocumentScreen>

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { postObjectKey } from './post-media';
+import { isAllowedAttachment, postObjectKey } from './post-media';
 
 /**
  * Regression cover for the post-media traversal hole.
@@ -157,5 +157,78 @@ describe('the signer really does resolve traversal, which is why the guard exist
       expect(resolved).not.toBeNull();
       expect((await signedPath(resolved!)).startsWith('/posts/')).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The 'file' attachment kind.
+//
+// Added so an admin can post a spreadsheet or a document alongside images,
+// video and PDFs. It is the one kind whose NAME suggests "anything at all",
+// which is exactly why its allowlist is worth pinning down in a test.
+// ---------------------------------------------------------------------------
+
+describe('isAllowedAttachment: the document kind', () => {
+  const allowed = [
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/vnd.oasis.opendocument.text',
+    'application/zip',
+    'text/plain',
+    'text/csv',
+  ];
+
+  for (const mime of allowed) {
+    test(`accepts ${mime}`, () => {
+      expect(isAllowedAttachment('file', mime)).toBe(true);
+    });
+  }
+
+  const refused: [string, string][] = [
+    // The important one: what a browser reports for anything it cannot name,
+    // which is every unusual extension including the executable ones.
+    ['the browser fallback type', 'application/octet-stream'],
+    ['a windows executable', 'application/x-msdownload'],
+    ['a shell script', 'application/x-sh'],
+    ['an html page', 'text/html'],
+    ['javascript', 'text/javascript'],
+    ['an svg, which can carry script', 'image/svg+xml'],
+    ['an empty type', ''],
+    // Anchoring: the pattern must not match a type that merely CONTAINS an
+    // allowed one.
+    ['a type with an allowed one embedded', 'application/zip-evil'],
+    ['a type with an allowed one as a suffix', 'x-application/zip'],
+  ];
+
+  for (const [name, mime] of refused) {
+    test(`refuses ${name} (${mime || 'empty'})`, () => {
+      expect(isAllowedAttachment('file', mime)).toBe(false);
+    });
+  }
+});
+
+describe('isAllowedAttachment: the kinds are not interchangeable', () => {
+  test('a PDF is not accepted as an image', () => {
+    expect(isAllowedAttachment('image', 'application/pdf')).toBe(false);
+  });
+  test('a video is not accepted as a document', () => {
+    expect(isAllowedAttachment('file', 'video/mp4')).toBe(false);
+  });
+  test('an unknown kind is refused whatever the type', () => {
+    expect(isAllowedAttachment('poll', 'text/plain')).toBe(false);
+    expect(isAllowedAttachment('avatar', 'image/png')).toBe(false);
+  });
+  test('a non-string kind or type is refused', () => {
+    expect(isAllowedAttachment(null, 'text/plain')).toBe(false);
+    expect(isAllowedAttachment('file', null)).toBe(false);
+  });
+  test('a PDF is still accepted as a pdf, and an image as an image', () => {
+    expect(isAllowedAttachment('pdf', 'application/pdf')).toBe(true);
+    expect(isAllowedAttachment('image', 'image/png')).toBe(true);
+    expect(isAllowedAttachment('video', 'video/mp4')).toBe(true);
   });
 });

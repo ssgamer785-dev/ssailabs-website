@@ -7,7 +7,7 @@
 export type MembershipRequestStatus = 'pending' | 'contacted' | 'approved' | 'rejected';
 export type UserRole = 'admin' | 'student';
 export type PostChannel = 'official' | 'students';
-export type AttachmentKind = 'none' | 'image' | 'video' | 'pdf' | 'poll' | 'chart';
+export type AttachmentKind = 'none' | 'image' | 'video' | 'pdf' | 'file' | 'poll' | 'chart';
 export type MessageKind = 'text' | 'image' | 'pdf' | 'chart' | 'voice' | 'video';
 export type NotificationKind = 'signal' | 'chat' | 'like' | 'comment' | 'target' | 'session';
 /** Where a media row is in its upload: 'pending' until the bytes reach R2. */
@@ -24,6 +24,8 @@ export interface Database {
           role: UserRole;
           reveal_identity: boolean;
           avatar_url: string | null;
+          /** R2 key under avatars/<uid>/. Private — read through a signed GET. */
+          avatar_key: string | null;
           created_at: string;
           updated_at: string;
           /** Set only by redeem_activation_code(). NULL = held at the activation gate. */
@@ -44,7 +46,33 @@ export interface Database {
           role?: UserRole;
           reveal_identity?: boolean;
           avatar_url?: string | null;
+          avatar_key?: string | null;
         };
+        Relationships: [];
+      };
+      poll_options: {
+        Row: {
+          id: string;
+          post_id: string;
+          /** 0-based render order. Not called `position`: that is reserved in SQL. */
+          sort_order: number;
+          label: string;
+          created_at: string;
+        };
+        Insert: { post_id: string; sort_order: number; label: string };
+        Update: { label?: string; sort_order?: number };
+        Relationships: [];
+      };
+      poll_votes: {
+        Row: {
+          post_id: string;
+          option_id: string;
+          voter_id: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: { post_id: string; option_id: string; voter_id: string };
+        Update: { option_id?: string };
         Relationships: [];
       };
       membership_requests: {
@@ -382,6 +410,57 @@ export interface Database {
       my_unread_notification_count: {
         Args: Record<string, never>;
         Returns: number;
+      };
+      /** One post in the feed row shape, plus bookmark state. RLS still applies. */
+      post_by_id: {
+        Args: { p_post_id: string };
+        Returns: Record<string, unknown>[];
+      };
+      /** Aggregate counts without exposing who voted for what. */
+      poll_results: {
+        Args: { p_post_id: string };
+        Returns: {
+          option_id: string;
+          sort_order: number;
+          label: string;
+          vote_count: number;
+          is_my_vote: boolean;
+        }[];
+      };
+      /** Records or changes the caller's vote. Returns { ok, reason? }. */
+      cast_poll_vote: {
+        Args: { p_post_id: string; p_option_id: string };
+        Returns: { ok: boolean; reason?: string };
+      };
+      /** Post + options in one transaction. Returns the new post id. */
+      create_poll_post: {
+        Args: {
+          p_channel: PostChannel;
+          p_question: string;
+          p_options: string[];
+          p_is_anonymous?: boolean;
+        };
+        Returns: string;
+      };
+      /** Admin only — empty for anyone else, by construction. */
+      admin_conversations: {
+        Args: Record<string, never>;
+        Returns: {
+          student_id: string;
+          full_name: string;
+          avatar_key: string | null;
+          reveal_identity: boolean;
+          activated_at: string | null;
+          conversation_id: string | null;
+          unread_count: number;
+          last_message_at: string | null;
+          last_message_preview: string | null;
+        }[];
+      };
+      /** Admin only. Idempotent: returns the existing thread when there is one. */
+      admin_open_conversation: {
+        Args: { p_student_id: string };
+        Returns: string;
       };
       mark_all_notifications_read: {
         Args: Record<string, never>;

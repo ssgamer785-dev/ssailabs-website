@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { useAppState } from '../lib/app-state';
 import { useAuth } from '../lib/auth-context';
 import { requestPostUploadUrl, uploadPostMedia, type PostMediaKind, type PostUploadTicket } from '../lib/community/media-api';
+import { createPollPost } from '../lib/community/polls';
 import { probeVideo } from '../lib/media/video-poster';
 import type { AttachmentKind, PostChannel } from '../lib/database.types';
 import { CandleChart } from '../components/CandleChart';
@@ -15,13 +16,52 @@ const attachBtn = css('width:56px;height:56px;border-radius:15px;background:var(
 const attachCol = css('width:62px;display:flex;flex-direction:column;align-items:center;gap:9px;cursor:pointer');
 const attachLabel = css('font-size:11.5px;font-weight:500;color:var(--text-tertiary)');
 
-/** Maps a picked file to the attachment kind the backend accepts. */
+/**
+ * Maps a picked file to the attachment kind the backend accepts.
+ *
+ * 'file' is the catch-all for documents, and it is the LAST branch on purpose:
+ * a PDF is both `application/pdf` and a document, and the specific kind is the
+ * one that gets the right icon and the right size limit. The server holds the
+ * actual allowlist of document MIME types and refuses anything outside it, so
+ * returning 'file' here is a proposal rather than permission.
+ */
 function kindForFile(file: File): PostMediaKind | null {
   if (file.type.startsWith('image/')) return 'image';
   if (file.type.startsWith('video/')) return 'video';
   if (file.type === 'application/pdf') return 'pdf';
+  if (file.type) return 'file';
   return null;
 }
+
+/**
+ * What each attachment button offers the picker.
+ *
+ * All four used to open the same dialog accepting `image/*,video/*,application/pdf`,
+ * so "PDF" would happily take a video and the labels meant nothing. Each one
+ * now restricts the picker to what it says on it.
+ */
+const ACCEPT: Record<'image' | 'video' | 'pdf' | 'file', string> = {
+  image: 'image/*',
+  video: 'video/*',
+  pdf: 'application/pdf',
+  file: [
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/vnd.oasis.opendocument.text',
+    'application/vnd.oasis.opendocument.spreadsheet',
+    'application/vnd.oasis.opendocument.presentation',
+    'application/zip',
+    'text/plain',
+    'text/csv',
+  ].join(','),
+};
+
+const MAX_POLL_OPTIONS = 10;
+const MIN_POLL_OPTIONS = 2;
 
 export function CreatePostScreen() {
   const navigate = useNavigate();
@@ -46,6 +86,13 @@ export function CreatePostScreen() {
   const [ticket, setTicket] = useState<PostUploadTicket | null>(null);
   const [canRetry, setCanRetry] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  /** What the next picker press should accept. Set by whichever button opened it. */
+  const [accept, setAccept] = useState<string>(ACCEPT.image);
+
+  // Poll mode. Two blank options to start with, because two is the minimum a
+  // poll can have and starting with one implies one is enough.
+  const [pollMode, setPollMode] = useState(false);
+  const [pollOptions, setPollOptions] = useState<string[]>(['', '']);
 
   const myIdentity = reveal ? userName : 'Unknown User';
 
@@ -61,12 +108,24 @@ export function CreatePostScreen() {
 
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
 
+  /** Opens the file dialog restricted to one kind. */
+  function openPicker(kind: keyof typeof ACCEPT) {
+    // A poll and an uploaded file are different posts; choosing one leaves the
+    // other rather than trying to publish both.
+    setPollMode(false);
+    setAccept(ACCEPT[kind]);
+    // The accept attribute is state, so the input has to re-render with the new
+    // value before the dialog opens — otherwise the first press of a different
+    // button shows the previous filter.
+    window.setTimeout(() => fileInput.current?.click(), 0);
+  }
+
   async function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const picked = e.target.files?.[0];
     e.target.value = '';
     if (!picked) return;
     if (!kindForFile(picked)) {
-      setError('Only images, videos and PDFs can be attached.');
+      setError('That file type cannot be attached.');
       return;
     }
     setError(null);
@@ -89,6 +148,26 @@ export function CreatePostScreen() {
 
   async function submit() {
     if (busy || !user) return;
+
+    if (pollMode) {
+      const filled = pollOptions.map(o => o.trim()).filter(Boolean);
+      if (!postText.trim()) { setError('A poll needs a question.'); return; }
+      if (filled.length < MIN_POLL_OPTIONS) { setError(`A poll needs at least ${MIN_POLL_OPTIONS} options.`); return; }
+
+      setBusy(true);
+      setError(null);
+      const result = await createPollPost({
+        channel,
+        question: postText,
+        options: pollOptions,
+        isAnonymous: channel === 'students' ? !reveal : false,
+      });
+      setBusy(false);
+      if (!result.ok) { setError(result.message ?? 'Could not create the poll.'); return; }
+      navigate(channel === 'official' ? '/community' : '/community?tab=students', { replace: true });
+      return;
+    }
+
     if (!postText.trim() && !file) {
       setError('Write something or attach a file first.');
       return;
@@ -164,33 +243,101 @@ export function CreatePostScreen() {
         <AppBackButton fallback="/community" />
         <div style={css('flex:1;text-align:center;font-size:17px;font-weight:700;letter-spacing:-.35px')}>{editId ? 'Edit Post' : 'Create Post'}</div>
         <div onClick={submit} style={{ ...css('font-size:15px;font-weight:700;color:var(--accent-ink);cursor:pointer;flex:none'), opacity: busy ? 0.5 : 1 }}>
-          {busy ? 'Posting…' : editId ? 'Save' : 'Post'}
+          {busy ? 'Posting…' : editId ? 'Save' : pollMode ? 'Create poll' : 'Post'}
         </div>
       </div>
       <div style={css('flex:none;padding:14px 20px 0')}>
-        <textarea placeholder="What's on your mind?" value={postText} onChange={e => setPostText(e.target.value)} style={css('width:100%;height:196px;font-size:15px;line-height:1.55')} />
+        <textarea placeholder={pollMode ? 'Ask your question…' : "What's on your mind?"} value={postText} onChange={e => setPostText(e.target.value)} style={css('width:100%;height:196px;font-size:15px;line-height:1.55')} />
       </div>
 
-      <input ref={fileInput} type="file" accept="image/*,video/*,application/pdf" onChange={pickFile} style={{ display: 'none' }} />
+      <input ref={fileInput} type="file" accept={accept} onChange={pickFile} style={{ display: 'none' }} />
 
-      <div style={css('flex:none;padding:6px 20px 0;display:flex;justify-content:space-between')}>
-        <div style={attachCol} onClick={() => fileInput.current?.click()}>
-          <div style={attachBtn}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--success-ink)" strokeWidth={1.7} strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3.4" /><circle cx="9" cy="10" r="1.7" /><path d="M4.6 17.4l4.5-4.3 3.3 3.1 2.6-2.4 4.4 4" /></svg></div>
-          <div style={attachLabel}>Image</div>
-        </div>
-        <div style={attachCol} onClick={() => fileInput.current?.click()}>
-          <div style={attachBtn}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.7} strokeLinejoin="round"><rect x="3.2" y="6.6" width="12" height="10.8" rx="2.6" /><path d="M15.2 11.2 20.4 8.2v7.6l-5.2-3z" /></svg></div>
-          <div style={attachLabel}>Video</div>
-        </div>
-        <div style={attachCol} onClick={() => fileInput.current?.click()}>
-          <div style={attachBtn}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--danger-ink)" strokeWidth={1.7} strokeLinejoin="round"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg></div>
-          <div style={attachLabel}>PDF</div>
-        </div>
-        <div style={attachCol}>
-          <div style={attachBtn}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.9} strokeLinecap="round"><path d="M6 8h12M6 12.5h8.5M6 17h5.5" /></svg></div>
-          <div style={attachLabel}>Poll</div>
-        </div>
+      <div style={css('flex:none;padding:6px 20px 0;display:flex;justify-content:space-between;gap:4px')}>
+        <button type="button" onClick={() => openPicker('image')} aria-label="Attach an image" style={attachCol} className="row-focus">
+          <span style={attachBtn}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--success-ink)" strokeWidth={1.7} strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3.4" /><circle cx="9" cy="10" r="1.7" /><path d="M4.6 17.4l4.5-4.3 3.3 3.1 2.6-2.4 4.4 4" /></svg></span>
+          <span style={attachLabel}>Image</span>
+        </button>
+        <button type="button" onClick={() => openPicker('video')} aria-label="Attach a video" style={attachCol} className="row-focus">
+          <span style={attachBtn}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.7} strokeLinejoin="round"><rect x="3.2" y="6.6" width="12" height="10.8" rx="2.6" /><path d="M15.2 11.2 20.4 8.2v7.6l-5.2-3z" /></svg></span>
+          <span style={attachLabel}>Video</span>
+        </button>
+        <button type="button" onClick={() => openPicker('pdf')} aria-label="Attach a PDF" style={attachCol} className="row-focus">
+          <span style={attachBtn}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--danger-ink)" strokeWidth={1.7} strokeLinejoin="round"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg></span>
+          <span style={attachLabel}>PDF</span>
+        </button>
+        <button type="button" onClick={() => openPicker('file')} aria-label="Attach a document" style={attachCol} className="row-focus">
+          <span style={attachBtn}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth={1.7} strokeLinejoin="round"><path d="M5.6 4.4h8.2l4.6 4.6v10.6H5.6z" /><path d="M13.6 4.4V9h4.6" /></svg></span>
+          <span style={attachLabel}>File</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            // Entering poll mode drops any picked file for the same reason
+            // openPicker drops the poll: one post, one attachment.
+            setPollMode(v => !v);
+            setFile(null); setPreviewUrl(null); setPoster(null); setTicket(null); setCanRetry(false);
+            setError(null);
+          }}
+          aria-pressed={pollMode}
+          aria-label="Create a poll"
+          style={attachCol}
+          className="row-focus"
+        >
+          <span style={{
+            ...attachBtn,
+            borderColor: pollMode ? 'var(--accent)' : 'var(--border-4)',
+            background: pollMode ? 'var(--accent-tint)' : 'var(--surface)',
+          }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.9} strokeLinecap="round"><path d="M6 8h12M6 12.5h8.5M6 17h5.5" /></svg>
+          </span>
+          <span style={{ ...attachLabel, color: pollMode ? 'var(--accent-ink)' : 'var(--text-tertiary)', fontWeight: pollMode ? 700 : 500 }}>Poll</span>
+        </button>
       </div>
+
+      {pollMode && (
+        <div style={css('flex:none;margin:14px 20px 0;padding:14px;border-radius:14px;border:1px solid var(--accent-border);background:var(--accent-tint);display:flex;flex-direction:column;gap:9px')}>
+          <div style={css('font-size:11px;font-weight:700;letter-spacing:.1em;color:var(--accent-ink)')}>
+            POLL OPTIONS
+          </div>
+          <div style={css('font-size:11.5px;color:var(--text-muted);line-height:1.45;text-wrap:pretty')}>
+            The text above is the question. Blank options are ignored, so you can
+            leave the ones you do not need empty.
+          </div>
+          {pollOptions.map((value, i) => (
+            <div key={i} style={css('display:flex;align-items:center;gap:8px')}>
+              <input
+                value={value}
+                onChange={e => setPollOptions(prev => prev.map((v, j) => (j === i ? e.target.value : v)))}
+                placeholder={`Option ${i + 1}`}
+                aria-label={`Poll option ${i + 1}`}
+                maxLength={120}
+                style={css('flex:1;min-width:0;height:42px;border-radius:10px;border:1px solid var(--border-4);background:var(--surface);padding:0 12px;font-size:14px')}
+              />
+              {pollOptions.length > MIN_POLL_OPTIONS && (
+                <button
+                  type="button"
+                  onClick={() => setPollOptions(prev => prev.filter((_, j) => j !== i))}
+                  aria-label={`Remove option ${i + 1}`}
+                  className="pressable row-focus"
+                  style={css('flex:none;width:32px;height:32px;border-radius:50%;border:0;background:var(--surface);display:flex;align-items:center;justify-content:center;cursor:pointer')}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth={2.6} strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                </button>
+              )}
+            </div>
+          ))}
+          {pollOptions.length < MAX_POLL_OPTIONS && (
+            <button
+              type="button"
+              onClick={() => setPollOptions(prev => [...prev, ''])}
+              className="pressable row-focus"
+              style={css('align-self:flex-start;height:36px;padding:0 13px;border-radius:9px;border:1px dashed var(--accent-border);background:transparent;font-size:12.5px;font-weight:700;color:var(--accent-ink);cursor:pointer')}
+            >
+              + Add option
+            </button>
+          )}
+        </div>
+      )}
 
       <div style={css('flex:none;margin:20px 20px 0;height:52px;border:1px solid var(--border-4);border-radius:12px;display:flex;align-items:center;padding:0 14px;gap:10px;cursor:pointer;background:var(--surface)')}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-primary)" strokeWidth={1.6} strokeLinejoin="round" style={css('flex:none')}><circle cx="12" cy="12" r="8.4" /><path d="M3.6 12h16.8" /><path d="M12 3.6c2.2 2.3 3.3 5.2 3.3 8.4S14.2 18.1 12 20.4c-2.2-2.3-3.3-5.2-3.3-8.4S9.8 5.9 12 3.6z" /></svg>
@@ -221,7 +368,7 @@ export function CreatePostScreen() {
         </div>
       )}
 
-      <div style={css('flex:none;padding:22px 20px 0')}>
+      <div style={{ ...css('flex:none;padding:22px 20px 0'), display: pollMode ? 'none' : 'block' }}>
         <div style={css('position:relative;width:122px;height:156px;border-radius:14px;overflow:hidden;box-shadow:0 6px 18px rgba(var(--shadow-rgb),.14)')}>
           {previewUrl
             ? <img src={previewUrl} alt="Attachment preview" style={css('width:100%;height:100%;object-fit:cover;display:block')} />

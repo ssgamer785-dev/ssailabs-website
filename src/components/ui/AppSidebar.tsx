@@ -57,6 +57,10 @@ const ITEMS: { route: string; label: string; icon: ReactNode }[] = [
  */
 const ADMIN_ITEMS: { route: string; label: string; icon: ReactNode }[] = [
   {
+    route: '/admin-inbox', label: 'Member Inbox',
+    icon: <g><path d="M4 6.4h16v11.2H4z" /><path d="m4 7 8 5.6L20 7" /></g>,
+  },
+  {
     route: '/admin/activation-codes', label: 'Activation Codes',
     icon: <g><circle cx="8.4" cy="12" r="3.6" /><path d="M11.9 12h8.2M17.4 12v3M14.6 12v2.2" /></g>,
   },

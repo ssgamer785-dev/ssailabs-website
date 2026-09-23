@@ -2,12 +2,13 @@ import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
-import { useAppState, initials } from '../lib/app-state';
+import { useAppState } from '../lib/app-state';
 import { useAuth } from '../lib/auth-context';
 import { useTheme, type Theme } from '../lib/theme';
 import { PhoneShell } from '../components/PhoneShell';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
+import { Avatar } from '../components/ui/Avatar';
 
 function Row({ icon, label, trailing, onClick }: { icon: ReactNode; label: string; trailing?: string; onClick?: () => void }) {
   // Rows that navigate are real buttons: focusable, operable from the keyboard
@@ -108,7 +109,9 @@ export function ProfileScreen() {
         <div style={css('flex:1;text-align:center;font-size:17px;font-weight:700;letter-spacing:-.35px;padding-right:32px')}>Profile</div>
       </div>
       <div style={css('flex:none;padding:10px 24px 22px;display:flex;align-items:center;gap:18px')}>
-        <div style={css('width:86px;height:86px;border-radius:50%;background:var(--avatar-bg);color:var(--avatar-ink);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;flex:none;box-shadow:0 6px 18px rgba(var(--shadow-rgb),.10)')}>{initials(userName)}</div>
+        <div style={css('flex:none;border-radius:50%;box-shadow:0 6px 18px rgba(var(--shadow-rgb),.10)')}>
+          <Avatar name={userName} avatarKey={profile?.avatar_key} size={86} fontSize={26} />
+        </div>
         <div style={css('flex:1;display:flex;flex-direction:column;gap:5px;min-width:0')}>
           <div style={css('font-size:18px;font-weight:800;letter-spacing:-.45px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>{userName}</div>
           {email && <div style={css('font-size:12.5px;color:var(--text-muted-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>{email}</div>}
@@ -121,7 +124,10 @@ export function ProfileScreen() {
       <div style={css('flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column')}>
         <ThemeChoice />
         <div style={css('height:1px;background:var(--surface-divider);margin:14px 22px 0')} />
-        <Row icon={<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={rowIcon}><circle cx="12" cy="8" r="3.4" /><path d="M5.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6" /></svg>} label="Personal Information" />
+        <Row
+          icon={<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={rowIcon}><circle cx="12" cy="8" r="3.4" /><path d="M5.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6" /></svg>}
+          label="Personal Information" onClick={() => navigate('/profile/personal')}
+        />
         <div style={css('height:1px;background:var(--surface-divider);margin:0 22px')} />
         <Row
           icon={<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={rowIcon}><path d="M2.4 12S6 5.9 12 5.9 21.6 12 21.6 12 18 18.1 12 18.1 2.4 12 2.4 12z" /><circle cx="12" cy="12" r="2.9" /><path d="M4.5 19.5 19.5 4.5" /></svg>}

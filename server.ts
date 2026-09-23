@@ -8,6 +8,7 @@ import { chatMediaRouter } from "./server/chat-media";
 import { SUPPORT_EMAIL } from "./src/lib/support";
 import { postMediaRouter } from "./server/post-media";
 import { adminAuthRouter } from "./server/admin-auth";
+import { profileMediaRouter } from "./server/profile-media";
 
 dotenv.config();
 
@@ -22,6 +23,8 @@ app.use("/api/chat", chatMediaRouter());
 app.use("/api/posts", postMediaRouter());
 // The single admin's username/password sign-in. Credentials stay server-side.
 app.use("/api/admin", adminAuthRouter());
+// R2-backed profile pictures. Writes are keyed to the caller's own id.
+app.use("/api/profile", profileMediaRouter());
 
 // In-memory leads storage for backup / immediate access
 const leads: Array<{
