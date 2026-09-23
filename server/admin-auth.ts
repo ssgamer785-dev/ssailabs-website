@@ -120,6 +120,10 @@ export function adminAuthRouter(): Router {
     }
 
     if (!safeEqual(username.trim(), env('ADMIN_USERNAME')!)) {
+      // Never logs either value — just that this was the branch that failed,
+      // so a rejected login can be told apart from a Supabase-side rejection
+      // below without exposing the username or the configured alias.
+      console.error('[admin-auth] rejected: typed username did not match ADMIN_USERNAME');
       return res.status(401).json({ error: REJECTED });
     }
 
@@ -167,6 +171,11 @@ export function adminAuthRouter(): Router {
     });
 
     if (error || !data.session) {
+      // Supabase's own reason (e.g. "Invalid login credentials", "Email not
+      // confirmed", a rate limit) — never the password itself — so a wrong
+      // password can be told apart from an account-level block that no
+      // password would pass.
+      console.error('[admin-auth] rejected by Supabase sign-in:', error?.message ?? 'no session returned');
       return res.status(401).json({ error: REJECTED });
     }
 
