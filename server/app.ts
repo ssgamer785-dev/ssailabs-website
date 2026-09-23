@@ -1,0 +1,150 @@
+/**
+ * The Express API surface, with no port binding and no static-file serving.
+ *
+ * Split out of server.ts so the exact same route definitions can be reused
+ * as a Vercel serverless function (api/index.ts) as well as by the local
+ * long-lived server. Vercel serves dist/ itself via its own static hosting
+ * + rewrites (see vercel.json), so this app never needs to know about that.
+ */
+import express from "express";
+import nodemailer from "nodemailer";
+import dotenv from "dotenv";
+import { chatMediaRouter } from "./chat-media";
+import { SUPPORT_EMAIL } from "../src/lib/support";
+import { postMediaRouter } from "./post-media";
+import { adminAuthRouter } from "./admin-auth";
+import { profileMediaRouter } from "./profile-media";
+import { fxRouter } from "./fx";
+
+dotenv.config();
+
+const app = express();
+
+app.use(express.json());
+
+// Cloudflare R2-backed chat attachments (signed upload/read URLs, quota purge).
+app.use("/api/chat", chatMediaRouter());
+// R2-backed community post attachments + the 6-month retention sweep.
+app.use("/api/posts", postMediaRouter());
+// The single admin's username/password sign-in. Credentials stay server-side.
+app.use("/api/admin", adminAuthRouter());
+// R2-backed profile pictures. Writes are keyed to the caller's own id.
+app.use("/api/profile", profileMediaRouter());
+// Cached USD-based FX rates for the Risk Calculator. No auth: public rate data.
+app.use("/api/fx", fxRouter());
+
+// In-memory leads storage for backup / immediate access
+const leads: Array<{
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  services: string;
+  budget: string;
+  message: string;
+  createdAt: string;
+}> = [];
+
+// API Route for project inquiries / contact form
+app.post("/api/start-project", async (req, res) => {
+  try {
+    const { name, email, phone, company, services, budget, message } = req.body;
+
+    if (!name || !email || !phone) {
+      return res.status(400).json({ error: "Name, email, and phone number are required." });
+    }
+
+    const lead = {
+      id: Date.now().toString(),
+      name,
+      email,
+      phone,
+      company: company || "N/A",
+      services: Array.isArray(services) ? services.join(", ") : services || "Not specified",
+      budget: budget || "Not specified",
+      message: message || "No additional message",
+      createdAt: new Date().toISOString(),
+    };
+
+    leads.push(lead);
+    console.log("📬 NEW PROJECT INQUIRY RECEIVED:", lead);
+
+    const ownerEmail = process.env.OWNER_EMAIL || SUPPORT_EMAIL;
+
+    let emailSent = false;
+
+    // Check if SMTP credentials exist
+    if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+      try {
+        const transporter = nodemailer.createTransport({
+          host: process.env.SMTP_HOST,
+          port: parseInt(process.env.SMTP_PORT || "587"),
+          secure: process.env.SMTP_PORT === "465",
+          auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS,
+          },
+        });
+
+        await transporter.sendMail({
+          from: `"S.S AI LABS Website" <${process.env.SMTP_USER}>`,
+          to: ownerEmail,
+          replyTo: email,
+          subject: `🚀 New Project Request from ${name} (${company || "Individual"})`,
+          html: `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 24px; background: #0f1117; color: #e2e8f0; border-radius: 12px; max-width: 600px; margin: 0 auto;">
+              <div style="text-align: center; border-bottom: 2px solid #334155; padding-bottom: 16px; margin-bottom: 20px;">
+                <h1 style="color: #60a5fa; font-size: 22px; margin: 0;">S.S AI LABS</h1>
+                <p style="color: #94a3b8; font-size: 14px; margin-top: 4px;">New Project Details Inquiry</p>
+              </div>
+
+              <div style="background: #1e293b; padding: 18px; border-radius: 8px; margin-bottom: 16px;">
+                <h3 style="color: #f8fafc; font-size: 16px; margin-top: 0; border-bottom: 1px solid #334155; padding-bottom: 8px;">Client Information</h3>
+                <p style="margin: 8px 0; font-size: 14px;"><strong>Full Name:</strong> <span style="color: #38bdf8;">${name}</span></p>
+                <p style="margin: 8px 0; font-size: 14px;"><strong>Email:</strong> <a href="mailto:${email}" style="color: #60a5fa;">${email}</a></p>
+                <p style="margin: 8px 0; font-size: 14px;"><strong>Phone / WhatsApp:</strong> <a href="tel:${phone}" style="color: #60a5fa;">${phone}</a></p>
+                <p style="margin: 8px 0; font-size: 14px;"><strong>Company / Business:</strong> ${company || "N/A"}</p>
+              </div>
+
+              <div style="background: #1e293b; padding: 18px; border-radius: 8px; margin-bottom: 16px;">
+                <h3 style="color: #f8fafc; font-size: 16px; margin-top: 0; border-bottom: 1px solid #334155; padding-bottom: 8px;">Project Scope</h3>
+                <p style="margin: 8px 0; font-size: 14px;"><strong>Requested Services:</strong> <span style="color: #4ade80;">${lead.services}</span></p>
+                <p style="margin: 8px 0; font-size: 14px;"><strong>Estimated Budget:</strong> <span style="color: #fbbf24;">${lead.budget}</span></p>
+              </div>
+
+              <div style="background: #1e293b; padding: 18px; border-radius: 8px; border-left: 4px solid #60a5fa;">
+                <h3 style="color: #f8fafc; font-size: 16px; margin-top: 0;">Project Details & Message</h3>
+                <p style="color: #e2e8f0; font-size: 14px; white-space: pre-wrap; margin-bottom: 0;">${message || "No additional message provided."}</p>
+              </div>
+
+              <div style="margin-top: 24px; text-align: center; font-size: 12px; color: #64748b;">
+                Received on ${new Date().toLocaleString()} via S.S AI LABS Contact Form
+              </div>
+            </div>
+          `,
+        });
+        emailSent = true;
+      } catch (err: any) {
+        console.error("Failed to send SMTP email:", err);
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: "Project inquiry received successfully!",
+      emailSent,
+      lead,
+    });
+  } catch (error: any) {
+    console.error("Error processing project inquiry:", error);
+    return res.status(500).json({ error: "Server error handling project submission." });
+  }
+});
+
+// Endpoint to view leads (for owner reference)
+app.get("/api/leads", (_req, res) => {
+  res.json({ count: leads.length, leads });
+});
+
+export default app;
