@@ -10,13 +10,25 @@ import express from "express";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 import { chatMediaRouter } from "./chat-media";
-import { SUPPORT_EMAIL } from "../src/lib/support";
 import { postMediaRouter } from "./post-media";
 import { adminAuthRouter } from "./admin-auth";
 import { profileMediaRouter } from "./profile-media";
 import { fxRouter } from "./fx";
 
 dotenv.config();
+
+/**
+ * Deliberately duplicated from src/lib/support.ts's SUPPORT_EMAIL, not
+ * imported from it: that was this file's only relative import reaching
+ * outside server/, and Vercel's Node function bundler for api/index.ts (which
+ * imports this file) failed to trace it into the deployed function — every
+ * route in this file 500'd with ERR_MODULE_NOT_FOUND at cold start, not just
+ * the one that happens to use this constant. Keeping server/'s own module
+ * graph self-contained (only ./ imports and npm packages) removes that
+ * failure mode entirely. OWNER_EMAIL still overrides this at runtime, exactly
+ * as before — this is only ever the fallback when it's unset.
+ */
+const SUPPORT_EMAIL = "contact.ssailabs@gmail.com";
 
 const app = express();
 
@@ -33,8 +45,7 @@ app.use("/api/profile", profileMediaRouter());
 // Cached USD-based FX rates for the Risk Calculator. No auth: public rate data.
 app.use("/api/fx", fxRouter());
 
-// In-memory leads storage for backup / immediate access
-const leads: Array<{
+interface Lead {
   id: string;
   name: string;
   email: string;
@@ -44,7 +55,10 @@ const leads: Array<{
   budget: string;
   message: string;
   createdAt: string;
-}> = [];
+}
+
+// In-memory leads storage for backup / immediate access
+const leads: Lead[] = [];
 
 // API Route for project inquiries / contact form
 app.post("/api/start-project", async (req, res) => {
