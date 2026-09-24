@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:tes
 import express from 'express';
 import type { AddressInfo } from 'net';
 import type { Server } from 'http';
+import { fileURLToPath } from 'url';
 import { adminAuthRouter } from './admin-auth';
 import { resetClientsForTests } from './r2';
 
@@ -226,7 +227,7 @@ describe('what the repository knows', () => {
     // The design's central claim: the password exists only in Supabase Auth.
     // This asserts the two names that would carry one are absent from the
     // server source, so a future edit that adds them fails here.
-    const source = await Bun.file(new URL('./admin-auth.ts', import.meta.url).pathname).text();
+    const source = await Bun.file(fileURLToPath(new URL('./admin-auth.ts', import.meta.url))).text();
     expect(source).not.toMatch(/ADMIN_PASSWORD/);
     expect(source).not.toMatch(/password\s*[:=]\s*['"][^'"]{6,}['"]/);
   });

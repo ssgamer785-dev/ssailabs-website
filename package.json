@@ -9,7 +9,7 @@
     "start": "NODE_ENV=production node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit",
+    "lint": "tsc --noEmit && tsc --noEmit --project tsconfig.server.json",
     "test": "bun test"
   },
   "dependencies": {

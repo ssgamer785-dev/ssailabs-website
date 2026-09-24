@@ -2,6 +2,7 @@ import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import express from 'express';
 import type { AddressInfo } from 'net';
 import type { Server } from 'http';
+import { fileURLToPath } from 'url';
 import { adminAuthRouter } from './admin-auth';
 
 /**
@@ -100,10 +101,10 @@ describe('admin sign-in', () => {
     configure({ VITE_SUPABASE_URL: 'https://unreachable.invalid' });
     const base = await serve();
     for (const username of ['TP-ADMIN', 'tp-admin ', 'tp-admi', 'tp-adminx']) {
-      const res = await post(base, { username, password: 'whatever' });
       // 'tp-admin ' trims to the real username, which is intended; the rest
       // must all be refused.
       if (username.trim() === 'tp-admin') continue;
+      const res = await post(base, { username, password: 'whatever' });
       expect(res.status).toBe(401);
     }
   });
@@ -153,7 +154,7 @@ describe('the bundle', () => {
   test('admin credentials are never VITE_-prefixed', () => {
     // A VITE_ prefix is the one thing that would put these in the browser
     // bundle. This asserts the naming convention the whole design rests on.
-    const source = Bun.file(new URL('./admin-auth.ts', import.meta.url).pathname);
+    const source = Bun.file(fileURLToPath(new URL('./admin-auth.ts', import.meta.url)));
     return source.text().then(text => {
       expect(text).not.toMatch(/VITE_ADMIN/);
       expect(text).toContain("env('ADMIN_USERNAME')");
