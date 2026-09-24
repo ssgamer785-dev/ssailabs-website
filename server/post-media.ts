@@ -11,7 +11,7 @@ import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
 import { posix as posixPath } from 'path';
-import { asyncRoute, authenticate, bucket, deleteObjects, getAdmin, getS3 } from './r2';
+import { asyncRoute, authenticate, bucket, deleteObjects, getAdmin, getS3 } from './r2.js';
 
 const PUT_URL_TTL_SECONDS = 300;
 const GET_URL_TTL_SECONDS = 900;

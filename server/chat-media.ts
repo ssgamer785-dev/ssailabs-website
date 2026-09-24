@@ -16,7 +16,7 @@ import { Router, type Response } from 'express';
 import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
-import { asyncRoute, authenticate, bucket, deleteObjects, getAdmin, getS3, type Caller } from './r2';
+import { asyncRoute, authenticate, bucket, deleteObjects, getAdmin, getS3, type Caller } from './r2.js';
 
 /** Hard cap on stored chat media per user, enforced oldest-first. */
 export const MEDIA_QUOTA_BYTES = 100 * 1024 * 1024;

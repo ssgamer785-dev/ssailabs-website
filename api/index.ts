@@ -8,6 +8,6 @@
  * long-lived server) also uses — one set of route definitions, two entry
  * points.
  */
-import app from "../server/app";
+import app from "../server/app.js";
 
 export default app;

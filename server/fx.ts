@@ -11,7 +11,7 @@
  */
 
 import { Router, type Response } from 'express';
-import { asyncRoute } from './r2';
+import { asyncRoute } from './r2.js';
 
 const FX_SOURCE_URL = 'https://open.er-api.com/v6/latest/USD';
 

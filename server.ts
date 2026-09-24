@@ -2,7 +2,7 @@ import os from "os";
 import path from "path";
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import app from "./server/app";
+import app from "./server/app.js";
 
 const PORT = 3000;
 

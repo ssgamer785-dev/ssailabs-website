@@ -9,11 +9,11 @@
 import express from "express";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
-import { chatMediaRouter } from "./chat-media";
-import { postMediaRouter } from "./post-media";
-import { adminAuthRouter } from "./admin-auth";
-import { profileMediaRouter } from "./profile-media";
-import { fxRouter } from "./fx";
+import { chatMediaRouter } from "./chat-media.js";
+import { postMediaRouter } from "./post-media.js";
+import { adminAuthRouter } from "./admin-auth.js";
+import { profileMediaRouter } from "./profile-media.js";
+import { fxRouter } from "./fx.js";
 
 dotenv.config();
 

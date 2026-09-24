@@ -41,7 +41,7 @@
 import { Router, type Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { timingSafeEqual } from 'crypto';
-import { asyncRoute, env, getAdmin } from './r2';
+import { asyncRoute, env, getAdmin } from './r2.js';
 
 /** One message for every failure. Which half was wrong is not the caller's business. */
 const REJECTED = 'Incorrect username or password.';
