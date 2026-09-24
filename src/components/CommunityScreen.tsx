@@ -456,7 +456,7 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
 
   const hasAttachment = post.attachment !== 'none';
   const isPoll = post.attachment === 'poll';
-  const isDocument = post.attachment === 'pdf' || post.attachment === 'file';
+  const hasInteractiveMedia = post.attachment === 'pdf' || post.attachment === 'file' || post.attachment === 'voice';
 
   return (
     <article
@@ -508,14 +508,14 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
       )}
 
       {/* ---- attachment ----
-          A poll and a document own their own taps (voting, downloading), so
+          A poll, document, and voice player own their own taps, so
           neither sits inside the onOpen wrapper. Image and video do: tapping
           the picture opens the post, which is what a reader expects, and the
           video component stops its own click before it reaches here. */}
       {hasAttachment && (
         isPoll ? (
           <div style={css('padding:2px 18px 3px')}><PollCard postId={post.id} /></div>
-        ) : isDocument ? (
+        ) : hasInteractiveMedia ? (
           <div style={css('padding:0 18px')}><PostMedia post={post} height={150} /></div>
         ) : (
           // Full-bleed. The media is the post; an 18px inset on both sides
