@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect } from 'react';
 import moneySound from '../assets/money-sound-for-trader.m4a';
 
 /**
@@ -19,23 +19,45 @@ import moneySound from '../assets/money-sound-for-trader.m4a';
  * the refresh still runs — a missing sound effect is not worth an error.
  */
 export function useMoneySound() {
-  const elRef = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    const unlock = () => {
+      const el = moneyElement();
+      if (!el || unlocked) return;
+      const started = Date.now();
+      el.muted = true;
+      void el.play().then(() => {
+        if (lastPlayedAt <= started) { el.pause(); el.currentTime = 0; }
+        el.muted = false; unlocked = true;
+      }).catch(() => { el.muted = false; });
+    };
+    document.addEventListener('pointerdown', unlock, { once: true });
+    document.addEventListener('keydown', unlock, { once: true });
+    return () => { document.removeEventListener('pointerdown', unlock); document.removeEventListener('keydown', unlock); };
+  }, []);
 
   // Stable across renders. PhoneShell's gesture effect depends on this
   // callback, and a new identity each render would tear the effect down mid-
   // refresh and strand the indicator.
   return useCallback(function playMoney() {
     try {
-      let el = elRef.current;
-      if (!el) {
-        el = new Audio(moneySound);
-        el.preload = 'auto';
-        elRef.current = el;
-      }
+      const el = moneyElement();
+      if (!el || Date.now() - lastPlayedAt < 800) return;
+      lastPlayedAt = Date.now();
+      el.muted = false;
+      el.pause();
       el.currentTime = 0;
       void el.play().catch(() => { /* autoplay blocked; stay quiet */ });
     } catch {
       /* no audio support in this environment */
     }
   }, []);
+}
+
+let sharedElement: HTMLAudioElement | null = null;
+let unlocked = false;
+let lastPlayedAt = 0;
+function moneyElement(): HTMLAudioElement | null {
+  if (typeof Audio === 'undefined') return null;
+  if (!sharedElement) { sharedElement = new Audio(moneySound); sharedElement.preload = 'auto'; }
+  return sharedElement;
 }

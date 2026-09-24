@@ -14,13 +14,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  */
 export function useLazyMediaUrl(
   storageKey: string | null | undefined,
-  resolve: (key: string) => Promise<string>,
+  resolve: (key: string, force?: boolean) => Promise<string>,
   options?: { armed?: boolean; localUrl?: string | null; rootMargin?: string },
 ): {
   ref: (node: Element | null) => void;
   url: string | null;
   failed: boolean;
   loading: boolean;
+  retry: () => void;
 } {
   const armed = options?.armed ?? true;
   const localUrl = options?.localUrl ?? null;
@@ -34,6 +35,17 @@ export function useLazyMediaUrl(
   const observerRef = useRef<IntersectionObserver | null>(null);
   const resolveRef = useRef(resolve);
   resolveRef.current = resolve;
+  const lastRetry = useRef(0);
+
+  const retry = useCallback(() => {
+    if (!storageKey || Date.now() - lastRetry.current < 30000) return;
+    lastRetry.current = Date.now();
+    setLoading(true);
+    void resolveRef.current(storageKey, true)
+      .then(next => { setUrl(next); setFailed(false); })
+      .catch(() => setFailed(true))
+      .finally(() => setLoading(false));
+  }, [storageKey]);
 
   // A callback ref rather than useRef + useEffect: the node arrives on mount
   // and can be swapped out, and this observes it either way.
@@ -58,6 +70,8 @@ export function useLazyMediaUrl(
 
   useEffect(() => () => observerRef.current?.disconnect(), []);
 
+  useEffect(() => { setUrl(localUrl); setFailed(false); lastRetry.current = 0; }, [storageKey]);
+
   // A local object URL (an attachment still uploading) always wins: it is the
   // real bytes, already in memory, and needs no round trip.
   useEffect(() => {
@@ -81,5 +95,11 @@ export function useLazyMediaUrl(
     return () => { active = false; };
   }, [storageKey, armed, visible, localUrl]);
 
-  return { ref, url, failed, loading };
+  useEffect(() => {
+    if (!visible || !armed || !storageKey || localUrl) return;
+    const timer = window.setInterval(retry, 12 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [visible, armed, storageKey, localUrl, retry]);
+
+  return { ref, url, failed, loading, retry };
 }

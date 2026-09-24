@@ -122,10 +122,10 @@ function useLongPressDelete(enabled: boolean) {
   return { confirming, setConfirming, start, cancel };
 }
 
-function DeleteBar({ onDelete, onCancel }: { onDelete: () => void; onCancel: () => void }) {
+function DeleteBar({ onDelete, onCancel, busy }: { onDelete: () => void; onCancel: () => void; busy: boolean }) {
   return (
     <div style={css('display:flex;align-items:center;gap:10px;padding-top:2px')}>
-      <div onClick={onDelete} style={css('font-size:11.5px;font-weight:700;color:var(--danger-ink);cursor:pointer;white-space:nowrap')}>Delete post</div>
+      <button type="button" disabled={busy} onClick={onDelete} style={css('font-size:11.5px;font-weight:700;color:var(--danger-ink);cursor:pointer;white-space:nowrap')}>{busy ? 'Deleting…' : 'Delete post'}</button>
       <div onClick={onCancel} style={css('font-size:11.5px;font-weight:600;color:var(--text-faint);cursor:pointer;white-space:nowrap')}>Cancel</div>
     </div>
   );
@@ -420,9 +420,11 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
   onToggleReveal: () => void;
   onOpen: () => void;
   onToggleLike: () => void;
-  onDelete: () => void;
+  onDelete: () => Promise<void>;
 }) {
   const press = useLongPressDelete(post.isMine || admin);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const pressHandlers = {
     onPointerDown: press.start,
@@ -484,6 +486,7 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
         </div>
 
         <time style={css('flex:none;font-size:11px;color:var(--text-faint);white-space:nowrap')}>{timeAgo(post.createdAt)}</time>
+        {(post.isMine || admin) && <button type="button" aria-label="Post options" onClick={e => { e.stopPropagation(); press.setConfirming(true); }} style={css('font-size:19px;color:var(--text-muted);padding:2px 5px;line-height:1')}>⋯</button>}
       </header>
 
       {/* ---- body ---- */}
@@ -589,7 +592,14 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
 
       {press.confirming && (
         <div style={css('padding:0 18px 4px')}>
-          <DeleteBar onDelete={() => { press.setConfirming(false); onDelete(); }} onCancel={() => press.setConfirming(false)} />
+          <DeleteBar busy={deleting} onDelete={() => {
+            if (deleting) return;
+            setDeleting(true); setDeleteError(null);
+            void onDelete().then(() => press.setConfirming(false))
+              .catch(e => setDeleteError(e instanceof Error ? e.message : 'Could not delete this post.'))
+              .finally(() => setDeleting(false));
+          }} onCancel={() => press.setConfirming(false)} />
+          {deleteError && <div role="alert" style={css('font-size:11px;color:var(--danger-ink);padding-top:4px')}>{deleteError}</div>}
         </div>
       )}
     </article>

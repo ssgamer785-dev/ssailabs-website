@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { css } from '../../lib/css';
 import { Hoverable } from '../../lib/Hoverable';
 import { useAuth } from '../../lib/auth-context';
@@ -26,16 +26,19 @@ import { useAuth } from '../../lib/auth-context';
 export function GoogleSignInButton({ onError }: { onError: (message: string) => void }) {
   const { signInWithGoogle } = useAuth();
   const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
 
   const start = useCallback(async () => {
-    if (busy) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     const { error } = await signInWithGoogle();
     if (error) {
+      inFlight.current = false;
       setBusy(false);
       onError(error);
     }
-  }, [busy, onError, signInWithGoogle]);
+  }, [onError, signInWithGoogle]);
 
   return (
     <Hoverable

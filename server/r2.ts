@@ -129,6 +129,7 @@ export async function deleteObjects(
 export interface Caller {
   userId: string;
   isAdmin: boolean;
+  isActivated: boolean;
 }
 
 /** Verifies the bearer token with Supabase and resolves the caller's role. */
@@ -141,6 +142,7 @@ export async function authenticate(req: Request): Promise<Caller | null> {
   const { data, error } = await db.auth.getUser(header.slice(7));
   if (error || !data.user) return null;
 
-  const { data: profile } = await db.from('profiles').select('role').eq('id', data.user.id).single();
-  return { userId: data.user.id, isAdmin: profile?.role === 'admin' };
+  const { data: profile, error: profileError } = await db.from('profiles').select('role, activated_at').eq('id', data.user.id).single();
+  if (profileError && profileError.code !== 'PGRST116') throw profileError;
+  return { userId: data.user.id, isAdmin: profile?.role === 'admin', isActivated: profile?.role === 'admin' || !!profile?.activated_at };
 }

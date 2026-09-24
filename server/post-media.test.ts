@@ -15,6 +15,12 @@ import { isAllowedAttachment, postObjectKey } from './post-media';
 const UPLOADER = '3f1d9c22-8a4e-4a7b-9f30-1c5e6d2b7a04';
 const CONVERSATION = 'a41c9f65-2b7d-4e18-9c03-5d8f7e6a1b29';
 
+test('community voice accepts browser recording MIME types', () => {
+  expect(isAllowedAttachment('voice', 'audio/webm;codecs=opus')).toBe(true);
+  expect(isAllowedAttachment('voice', 'audio/mp4')).toBe(true);
+  expect(isAllowedAttachment('voice', 'application/octet-stream')).toBe(false);
+});
+
 describe('postObjectKey: legitimate keys still work', () => {
   test('a key in the shape the uploader mints is accepted unchanged', () => {
     const key = `posts/${UPLOADER}/1789553884039-c18af646-c080-4a08-a254-b873b71aafba.bin`;

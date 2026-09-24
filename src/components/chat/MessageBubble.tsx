@@ -7,6 +7,8 @@ import { formatBytes, formatDuration, type ChatMessage } from '../../lib/chat/ty
 import { useMediaUrl } from './useMediaUrl';
 import { CircularVideoBubble } from './CircularVideoBubble';
 import { FailedNote, MetaRow, UploadBar } from './bubble-parts';
+import logo from '../../assets/traders-planet-mark.png';
+import { MediaActions } from '../media/MediaActions';
 
 /** Static waveform, seeded off the message id so a clip always looks the same. */
 function Wave({ bars, color, height, gap, seed, progress = 0 }: {
@@ -34,7 +36,7 @@ const AVATAR = css('width:30px;height:30px;border-radius:50%;background:var(--av
 function VoiceBubble({ message, out, onRetry }: { message: ChatMessage; out: boolean; onRetry: () => void }) {
   const { playing, progress, elapsed, toggle, loading } = useAudioPlayer(
     message.id,
-    async () => message.localPreviewUrl ?? (message.storageKey ? getMediaUrl(message.storageKey) : null),
+    async () => message.localPreviewUrl ?? (message.storageKey ? getMediaUrl(message.storageKey, true) : null),
   );
   const total = message.durationSeconds ?? 0;
 
@@ -55,13 +57,14 @@ function VoiceBubble({ message, out, onRetry }: { message: ChatMessage; out: boo
       </div>
       <UploadBar message={message} />
       <FailedNote message={message} onRetry={onRetry} />
+      {!message.mediaPurged && message.status === 'sent' && <MediaActions storageKey={message.storageKey} fileName={message.fileName} getUrl={getMediaUrl} />}
       <MetaRow message={message} out={out} />
     </div>
   );
 }
 
 function ImageBubble({ message, out, onRetry }: { message: ChatMessage; out: boolean; onRetry: () => void }) {
-  const { ref, url, failed } = useMediaUrl(message);
+  const { ref, url, failed, retry } = useMediaUrl(message);
 
   return (
     <div style={{ maxWidth: 250, background: out ? 'var(--accent-soft-2)' : 'var(--surface-secondary-2)', borderRadius: out ? '16px 16px 5px 16px' : '16px 16px 16px 5px', padding: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -75,7 +78,7 @@ function ImageBubble({ message, out, onRetry }: { message: ChatMessage; out: boo
             {failed ? 'Could not load' : 'Loading…'}
           </div>
         ) : (
-          <img src={url} alt={message.fileName ?? 'Photo'} loading="lazy" decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
+          <img src={url} onError={retry} alt={message.fileName ?? 'Photo'} loading="lazy" decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
         )}
         {message.status === 'uploading' && (
           <div style={css('position:absolute;inset:0;background:rgba(var(--shadow-rgb),.35);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--on-accent)')}>
@@ -86,6 +89,7 @@ function ImageBubble({ message, out, onRetry }: { message: ChatMessage; out: boo
       <div style={css('padding:0 6px')}>
         <UploadBar message={message} />
         <FailedNote message={message} onRetry={onRetry} />
+        {!message.mediaPurged && message.status === 'sent' && <MediaActions storageKey={message.storageKey} fileName={message.fileName} getUrl={getMediaUrl} />}
         <MetaRow message={message} out={out} />
       </div>
     </div>
@@ -103,7 +107,7 @@ function PdfBubble({ message, out, onRetry }: { message: ChatMessage; out: boole
         </div>
         <div style={css('flex:1;display:flex;flex-direction:column;gap:3px;min-width:0')}>
           <div style={css('font-size:13px;font-weight:700;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
-            {message.fileName ?? 'Document.pdf'}
+            {message.fileName ?? (message.kind === 'pdf' ? 'Document.pdf' : 'Attachment')}
           </div>
           <div style={css('font-size:11px;color:var(--text-faint)')}>
             {message.mediaPurged ? 'Removed (storage limit)' : formatBytes(message.sizeBytes ?? 0)}
@@ -117,6 +121,7 @@ function PdfBubble({ message, out, onRetry }: { message: ChatMessage; out: boole
       </div>
       <UploadBar message={message} />
       <FailedNote message={message} onRetry={onRetry} />
+      {!message.mediaPurged && message.status === 'sent' && <MediaActions storageKey={message.storageKey} fileName={message.fileName} getUrl={getMediaUrl} />}
       <MetaRow message={message} out={out} />
     </div>
   );
@@ -135,17 +140,21 @@ function TextBubble({ message, out, onRetry }: { message: ChatMessage; out: bool
   );
 }
 
-export function MessageBubble({ message, out, onRetry, onDelete }: {
+export function MessageBubble({ message, out, incomingIsAdmin, onRetry, onDelete }: {
   message: ChatMessage;
   out: boolean;
+  incomingIsAdmin: boolean;
   onRetry: () => void;
-  onDelete: () => void;
+  onDelete: () => Promise<void>;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const deleted = !!message.deletedAt;
-  const canDelete = out && !deleted;
+  const cleanupPending = deleted && !!message.storageKey && !message.mediaPurged;
+  const canDelete = out && (!deleted || cleanupPending);
 
   // Long-press on touch, right-click on desktop — both open the same confirm.
   const startPress = () => {
@@ -162,7 +171,7 @@ export function MessageBubble({ message, out, onRetry, onDelete }: {
         ? <CircularVideoBubble message={message} out={out} onRetry={onRetry} />
         : message.kind === 'image'
           ? <ImageBubble message={message} out={out} onRetry={onRetry} />
-          : message.kind === 'pdf'
+          : message.kind === 'pdf' || message.kind === 'file'
             ? <PdfBubble message={message} out={out} onRetry={onRetry} />
             : <TextBubble message={message} out={out} onRetry={onRetry} />;
 
@@ -174,15 +183,24 @@ export function MessageBubble({ message, out, onRetry, onDelete }: {
       onPointerLeave={cancelPress}
       onContextMenu={e => { if (canDelete) { e.preventDefault(); setConfirming(true); } }}
     >
-      {!out && <div style={AVATAR}>A</div>}
+      {!out && (incomingIsAdmin
+        ? <div style={{...AVATAR,background:'var(--ink-chip)'}}><img src={logo} alt="Admin" style={css('width:24px;height:24px;object-fit:contain')} /></div>
+        : <div style={AVATAR}>S</div>)}
       <div style={css('display:flex;flex-direction:column;gap:5px;align-items:flex-end')}>
         {body}
+        {canDelete && !confirming && <button type="button" aria-label="Message options" onClick={() => setConfirming(true)} style={css('color:var(--text-faint);font-size:15px;padding:0 5px;line-height:1')}>⋯</button>}
         {confirming && (
           <div style={css('display:flex;align-items:center;gap:8px;padding:2px 4px')}>
-            <div onClick={() => { setConfirming(false); onDelete(); }} style={css('font-size:11px;font-weight:700;color:var(--danger-ink);cursor:pointer;white-space:nowrap')}>Delete</div>
-            <div onClick={() => setConfirming(false)} style={css('font-size:11px;font-weight:600;color:var(--text-faint);cursor:pointer;white-space:nowrap')}>Cancel</div>
+            <button type="button" disabled={deleting} onClick={() => {
+              setDeleting(true); setActionError(null);
+              void onDelete().then(() => setConfirming(false))
+                .catch(e => setActionError(e instanceof Error ? e.message : 'Could not delete this message.'))
+                .finally(() => setDeleting(false));
+            }} style={css('font-size:11px;font-weight:700;color:var(--danger-ink);cursor:pointer;white-space:nowrap')}>{deleting ? 'Working…' : cleanupPending ? 'Retry cleanup' : 'Delete'}</button>
+            <button type="button" disabled={deleting} onClick={() => { setConfirming(false); setActionError(null); }} style={css('font-size:11px;font-weight:600;color:var(--text-faint);cursor:pointer;white-space:nowrap')}>Cancel</button>
           </div>
         )}
+        {actionError && <span role="alert" style={css('max-width:210px;font-size:10.5px;color:var(--danger-ink);text-align:right')}>{actionError}</span>}
       </div>
     </div>
   );

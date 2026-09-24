@@ -21,6 +21,7 @@ const MAX_BYTES: Record<string, number> = {
   video: 50 * 1024 * 1024,
   pdf: 25 * 1024 * 1024,
   file: 25 * 1024 * 1024,
+  voice: 10 * 1024 * 1024,
 };
 
 const ALLOWED_MIME: Record<string, RegExp> = {
@@ -46,9 +47,10 @@ const ALLOWED_MIME: Record<string, RegExp> = {
     'text/(plain|csv)' +
     ')$', 'i',
   ),
+  voice: /^audio\/(webm|mp4|mpeg|ogg|aac|wav)(;.*)?$/i,
 };
 
-const EXTENSION: Record<string, string> = { image: 'bin', video: 'bin', pdf: 'pdf', file: 'bin' };
+const EXTENSION: Record<string, string> = { image: 'bin', video: 'bin', pdf: 'pdf', file: 'bin', voice: 'bin' };
 
 /** Whether `kind` is an attachment kind this server accepts at all. */
 export function isAttachmentKind(kind: unknown): kind is keyof typeof MAX_BYTES {
@@ -160,12 +162,14 @@ export function postMediaRouter(): Router {
     if (!requireConfigured(res)) return;
     const caller = await authenticate(req);
     if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
+    if (!caller.isActivated) return res.status(403).json({ error: 'Activate your account first.' });
 
     const { kind, mimeType, sizeBytes, posterBytes } = req.body ?? {};
     if (!kind || !mimeType || typeof sizeBytes !== 'number') {
       return res.status(400).json({ error: 'kind, mimeType and sizeBytes are required.' });
     }
     if (!isAttachmentKind(kind)) return res.status(400).json({ error: `Unsupported attachment kind "${kind}".` });
+    if (kind === 'voice' && !caller.isAdmin) return res.status(403).json({ error: 'Admins only.' });
     if (!isAllowedAttachment(kind, mimeType)) {
       return res.status(400).json({ error: `${mimeType} is not an allowed ${kind} type.` });
     }
@@ -188,17 +192,59 @@ export function postMediaRouter(): Router {
     res.json({ uploadUrl, storageKey, posterUploadUrl, posterKey });
   }));
 
+  /** Re-sign a failed upload for the caller's original key, avoiding orphans. */
+  router.post('/resume-upload', asyncRoute(async (req, res) => {
+    if (!requireConfigured(res)) return;
+    const caller = await authenticate(req);
+    if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
+    if (!caller.isActivated) return res.status(403).json({ error: 'Activate your account first.' });
+    const { storageKey, posterKey, kind, mimeType, sizeBytes, posterBytes } = req.body ?? {};
+    const key = postObjectKey(storageKey);
+    if (kind === 'voice' && !caller.isAdmin) return res.status(403).json({ error: 'Admins only.' });
+    if (!key?.startsWith(`posts/${caller.userId}/`) || !isAllowedAttachment(kind, mimeType)
+      || !Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > MAX_BYTES[kind]) {
+      return res.status(400).json({ error: 'Invalid upload.' });
+    }
+    const leaf = key.slice(`posts/${caller.userId}/`.length);
+    if (!/^\d{13}-[0-9a-f-]{36}\.(bin|pdf)$/i.test(leaf)) {
+      return res.status(400).json({ error: 'Invalid upload key.' });
+    }
+    if (!key.endsWith(kind === 'pdf' ? '.pdf' : '.bin')) {
+      return res.status(400).json({ error: 'Upload key does not match its attachment type.' });
+    }
+    const { data: published, error: publishedError } = await getAdmin()!.from('posts').select('id').eq('storage_key', key).maybeSingle();
+    if (publishedError) throw publishedError;
+    if (published) return res.status(409).json({ error: 'This attachment has already been published.' });
+    const poster = posterKey == null ? null : postObjectKey(posterKey);
+    if (posterKey != null && (poster !== `${key.replace(/\.bin$/, '')}-poster.jpg` || kind !== 'video'
+      || !Number.isFinite(posterBytes) || posterBytes <= 0 || posterBytes > MAX_POSTER_BYTES)) {
+      return res.status(400).json({ error: 'Invalid video thumbnail.' });
+    }
+    const uploadUrl = await signPut(key, mimeType, sizeBytes);
+    const posterUploadUrl = poster ? await signPut(poster, POSTER_MIME, posterBytes) : undefined;
+    res.json({ uploadUrl, storageKey: key, posterKey: poster ?? undefined, posterUploadUrl });
+  }));
+
   /** Signed GET. Any signed-in member may read post media. */
   router.get('/media-url', asyncRoute(async (req, res) => {
     if (!requireConfigured(res)) return;
     const caller = await authenticate(req);
     if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
+    if (!caller.isActivated) return res.status(403).json({ error: 'Activate your account first.' });
 
     // Resolved, not just prefixed: see postObjectKey().
     const storageKey = postObjectKey(req.query.key);
     if (!storageKey) {
       return res.status(400).json({ error: 'Invalid media key.' });
     }
+
+    const db = getAdmin()!;
+    const base = () => db.from('posts').select('id').eq('media_purged', false);
+    const { data: object, error: objectError } = await base().eq('storage_key', storageKey).maybeSingle();
+    if (objectError) throw objectError;
+    const { data: poster, error: posterError } = object ? { data: object, error: null } : await base().eq('poster_key', storageKey).maybeSingle();
+    if (posterError) throw posterError;
+    if (!object && !poster) return res.status(404).json({ error: 'Attachment unavailable.' });
 
     const url = await getSignedUrl(
       getS3()!,
@@ -213,13 +259,15 @@ export function postMediaRouter(): Router {
     if (!requireConfigured(res)) return;
     const caller = await authenticate(req);
     if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
+    if (!caller.isActivated) return res.status(403).json({ error: 'Activate your account first.' });
 
     const { postId } = req.body ?? {};
     if (!postId) return res.status(400).json({ error: 'postId is required.' });
 
     const db = getAdmin()!;
-    const { data: post } = await db.from('posts')
+    const { data: post, error: postError } = await db.from('posts')
       .select('id, author_id, storage_key, poster_key').eq('id', postId).single();
+    if (postError && postError.code !== 'PGRST116') throw postError;
     if (!post) return res.status(404).json({ error: 'Post not found.' });
     if (post.author_id !== caller.userId && !caller.isAdmin) {
       return res.status(403).json({ error: 'You can only delete your own posts.' });
@@ -233,7 +281,8 @@ export function postMediaRouter(): Router {
       // R2 first: a failure throws, so the row is never marked purged while
       // its object is still in the bucket.
       await deleteObjects(getS3()!, bucket()!, keys);
-      await db.rpc('mark_post_media_purged', { p_post_ids: [post.id] });
+      const { error: purgeError } = await db.rpc('mark_post_media_purged', { p_post_ids: [post.id] });
+      if (purgeError) throw purgeError;
     }
     res.json({ ok: true });
   }));

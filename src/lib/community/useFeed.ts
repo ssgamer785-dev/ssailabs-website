@@ -255,12 +255,20 @@ export function useFeed(channel: PostChannel): UseFeed {
     setPosts(prev => prev.filter(p => p.id !== post.id));
 
     // Clear the R2 object first: once the row is gone we lose the key.
-    if (post.storageKey) await deletePostMedia(post.id).catch(() => {});
+    if (post.storageKey) {
+      try { await deletePostMedia(post.id); }
+      catch (e) {
+        setPosts(previous);
+        setError(e instanceof Error ? e.message : 'Could not remove the attachment.');
+        throw e;
+      }
+    }
 
     const { error: delError } = await supabase.from('posts').delete().eq('id', post.id);
     if (delError) {
       setPosts(previous);
       setError(delError.message);
+      throw delError;
     }
   }, [posts]);
 

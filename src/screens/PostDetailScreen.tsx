@@ -53,6 +53,8 @@ export function PostDetailScreen() {
   const comments = useComments(postId);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [confirmCommentId, setConfirmCommentId] = useState<string | null>(null);
+  const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
 
   const send = useCallback(async () => {
     const text = draft.trim();
@@ -293,7 +295,7 @@ export function PostDetailScreen() {
           <div style={css('flex:none;margin-top:10px;font-size:12.5px;color:var(--text-faint)')}>Loading comments…</div>
         ) : comments.error ? (
           <div role="alert" style={css('flex:none;margin-top:10px;font-size:12.5px;color:var(--danger-ink);line-height:1.5')}>
-            Couldn&rsquo;t load the comments. This is a loading problem, not an empty thread.
+            {comments.error}
           </div>
         ) : comments.comments.length === 0 ? (
           <div style={css('flex:none;margin-top:10px;font-size:12.5px;color:var(--text-faint)')}>
@@ -302,7 +304,7 @@ export function PostDetailScreen() {
         ) : comments.comments.map(c => (
           <div
             key={c.id}
-            onContextMenu={e => { if (c.isMine) { e.preventDefault(); void comments.deleteComment(c.id); } }}
+            onContextMenu={e => { if (c.isMine || isAdmin) { e.preventDefault(); setConfirmCommentId(c.id); } }}
             style={{
               ...css('flex:none;margin-top:8px;background:var(--surface-inset);border-radius:12px;padding:11px 12px;display:flex;align-items:flex-start;gap:10px'),
               opacity: c.pending ? 0.6 : 1,
@@ -323,6 +325,16 @@ export function PostDetailScreen() {
             <div style={css('font-size:10.5px;color:var(--text-faint);flex:none;white-space:nowrap')}>
               {c.pending ? 'sending…' : timeAgo(c.createdAt)}
             </div>
+            {(c.isMine || isAdmin) && !c.pending && <div style={css('display:flex;flex-direction:column;align-items:flex-end;gap:5px')}>
+              <button type="button" aria-label="Comment options" onClick={() => setConfirmCommentId(c.id)} style={css('color:var(--text-muted);font-size:18px;line-height:1')}>⋯</button>
+              {confirmCommentId === c.id && <div style={css('display:flex;gap:8px;font-size:11px')}>
+                <button type="button" disabled={deletingCommentId === c.id} onClick={() => {
+                  setDeletingCommentId(c.id);
+                  void comments.deleteComment(c.id).finally(() => { setDeletingCommentId(null); setConfirmCommentId(null); });
+                }} style={css('color:var(--danger-ink);font-weight:700')}>{deletingCommentId === c.id ? 'Deleting…' : 'Delete'}</button>
+                <button type="button" onClick={() => setConfirmCommentId(null)} style={css('color:var(--text-muted)')}>Cancel</button>
+              </div>}
+            </div>}
           </div>
         ))}
 

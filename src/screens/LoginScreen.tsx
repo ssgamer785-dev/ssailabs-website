@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
@@ -15,22 +15,25 @@ export function LoginScreen() {
   const [remember, setRemember] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
 
   async function handleLogin() {
-    if (submitting) return;
+    if (inFlight.current) return;
     setError(null);
     if (!email.trim() || !pw) {
       setError('Enter your email and password.');
       return;
     }
+    inFlight.current = true;
     setSubmitting(true);
-    const { error: signInError } = await signIn(email.trim(), pw);
-    setSubmitting(false);
-    if (signInError) {
-      setError(signInError);
-      return;
+    try {
+      const { error: signInError } = await signIn(email.trim(), pw);
+      if (signInError) { setError(signInError); return; }
+      navigate('/activate', { replace: true });
+    } finally {
+      inFlight.current = false;
+      setSubmitting(false);
     }
-    navigate('/activate', { replace: true });
   }
 
   return (

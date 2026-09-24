@@ -44,6 +44,7 @@ interface FakeOptions {
   adminCount?: number;
   /** Whether the auth user behind the admin profile has an email. */
   withEmail?: boolean;
+  authStatus?: number;
 }
 
 /** Records what the route actually sent, so the assertions can look at it. */
@@ -54,7 +55,7 @@ interface Recorder {
 }
 
 async function fakeSupabase(opts: FakeOptions = {}): Promise<{ url: string; rec: Recorder }> {
-  const { adminCount = 1, withEmail = true } = opts;
+  const { adminCount = 1, withEmail = true, authStatus } = opts;
   const rec: Recorder = { passwordsSeen: [], emailsSeen: [], profileQueries: [] };
   const app = express();
   app.use(express.json());
@@ -77,6 +78,7 @@ async function fakeSupabase(opts: FakeOptions = {}): Promise<{ url: string; rec:
   app.post('/auth/v1/token', (req, res) => {
     rec.emailsSeen.push(req.body?.email);
     rec.passwordsSeen.push(req.body?.password);
+    if (authStatus) return res.status(authStatus).json({ error: 'server_error', error_description: 'Upstream unavailable' });
     if (req.body?.email !== ADMIN_EMAIL || req.body?.password !== CORRECT_PASSWORD) {
       return res.status(400).json({ error: 'invalid_grant', error_description: 'Invalid login credentials' });
     }
@@ -190,6 +192,15 @@ describe('admin sign-in, end to end', () => {
     const wrongUsername = await login(base, 'someone-else', 'not-it');
     expect(wrongPassword.status).toBe(401);
     expect(await wrongPassword.json()).toEqual(await wrongUsername.json());
+  });
+
+  test('an upstream auth failure is a service error, never a credential rejection', async () => {
+    const { url } = await fakeSupabase({ authStatus: 503 });
+    configure(url);
+    const base = await routeUnderTest();
+    const res = await login(base, 'Admin@123', CORRECT_PASSWORD);
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).not.toContain('Incorrect');
   });
 
   test('two admin profiles means the invariant is broken — refuse, do not pick one', async () => {

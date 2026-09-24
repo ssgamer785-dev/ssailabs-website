@@ -14,6 +14,7 @@ import { postMediaRouter } from "./post-media.js";
 import { adminAuthRouter } from "./admin-auth.js";
 import { profileMediaRouter } from "./profile-media.js";
 import { fxRouter } from "./fx.js";
+import { pushRouter } from "./push.js";
 
 dotenv.config();
 
@@ -44,6 +45,7 @@ app.use("/api/admin", adminAuthRouter());
 app.use("/api/profile", profileMediaRouter());
 // Cached USD-based FX rates for the Risk Calculator. No auth: public rate data.
 app.use("/api/fx", fxRouter());
+app.use("/api/push", pushRouter());
 
 interface Lead {
   id: string;

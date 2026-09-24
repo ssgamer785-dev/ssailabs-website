@@ -29,6 +29,7 @@ const MAX_BYTES: Record<string, number> = {
   image: 10 * 1024 * 1024,
   video: 50 * 1024 * 1024,
   pdf: 25 * 1024 * 1024,
+  file: 25 * 1024 * 1024,
   voice: 10 * 1024 * 1024,
 };
 
@@ -40,6 +41,7 @@ const ALLOWED_MIME: Record<string, RegExp> = {
   image: /^image\/(jpeg|png|webp|gif|heic)$/i,
   video: /^video\/(mp4|quicktime|webm)$/i,
   pdf: /^application\/pdf$/i,
+  file: /^(application\/(msword|vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet|presentationml\.presentation)|vnd\.ms-(excel|powerpoint)|vnd\.oasis\.opendocument\.(text|spreadsheet|presentation)|zip|x-zip-compressed)|text\/(plain|csv))$/i,
   voice: /^audio\/(webm|mp4|mpeg|ogg|aac|wav)(;.*)?$/i,
 };
 
@@ -47,11 +49,13 @@ const EXTENSION: Record<string, string> = {
   image: 'bin',
   video: 'bin',
   pdf: 'pdf',
+  file: 'bin',
   voice: 'webm',
 };
 
 /** True when the caller is the conversation's student, or any admin. */
 async function canAccessConversation(caller: Caller, conversationId: string): Promise<boolean> {
+  if (!caller.isActivated) return false;
   if (caller.isAdmin) return true;
   const db = getAdmin();
   if (!db) return false;
@@ -399,6 +403,15 @@ export function chatMediaRouter(): Router {
       return res.status(403).json({ error: 'You do not have access to this media.' });
     }
 
+    const db = getAdmin()!;
+    const base = () => db.from('messages').select('id')
+      .eq('conversation_id', conversationId).is('deleted_at', null).eq('media_purged', false);
+    const { data: object, error: objectError } = await base().eq('storage_key', storageKey).maybeSingle();
+    if (objectError) throw objectError;
+    const { data: poster, error: posterError } = object ? { data: object, error: null } : await base().eq('poster_key', storageKey).maybeSingle();
+    if (posterError) throw posterError;
+    if (!object && !poster) return res.status(404).json({ error: 'Attachment unavailable.' });
+
     const url = await getSignedUrl(
       getS3()!,
       new GetObjectCommand({ Bucket: bucket()!, Key: storageKey }),
@@ -420,11 +433,12 @@ export function chatMediaRouter(): Router {
     if (!messageId) return res.status(400).json({ error: 'messageId is required.' });
 
     const db = getAdmin()!;
-    const { data: message } = await db
+    const { data: message, error: messageError } = await db
       .from('messages')
       .select('id, conversation_id, sender_id, storage_key, poster_key, upload_status')
       .eq('id', messageId)
       .single();
+    if (messageError && messageError.code !== 'PGRST116') throw messageError;
     if (!message) return res.status(404).json({ error: 'Message not found.' });
     // Only the sender may destroy their own media, mirroring the DB's delete rule.
     if (message.sender_id !== caller.userId) {
@@ -438,9 +452,11 @@ export function chatMediaRouter(): Router {
     await deleteObjects(getS3()!, bucket()!, keys);
 
     if (message.upload_status === 'pending') {
-      await db.rpc('delete_stale_pending_uploads', { p_message_ids: [message.id] });
+      const { error } = await db.rpc('delete_stale_pending_uploads', { p_message_ids: [message.id] });
+      if (error) throw error;
     } else if (message.storage_key) {
-      await db.rpc('mark_chat_media_purged', { p_message_ids: [message.id] });
+      const { error } = await db.rpc('mark_chat_media_purged', { p_message_ids: [message.id] });
+      if (error) throw error;
     }
     res.json({ ok: true });
   }));

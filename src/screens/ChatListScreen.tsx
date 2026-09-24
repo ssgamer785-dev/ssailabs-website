@@ -6,7 +6,7 @@ import { useChatOverview } from '../lib/chat/useChatOverview';
 import { usePeerPresence } from '../lib/chat/usePeerPresence';
 import { formatTime } from '../lib/chat/types';
 import { PhoneShell, useRefreshHandler } from '../components/PhoneShell';
-import logo from '../assets/traders-planet-logo.jpg';
+import logo from '../assets/traders-planet-mark.png';
 import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 
 /**

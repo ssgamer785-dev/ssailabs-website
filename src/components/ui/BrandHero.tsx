@@ -66,11 +66,15 @@ export function BrandHero() {
       <div style={css('position:relative;display:flex;align-items:center;gap:16px')}>
         {/* The real mark, on a translucent plate so it reads on the gradient.
             object-fit:contain, so a non-square asset is never distorted. */}
-        <div
+        <a
+          href="https://share.google/8tinuVwbPEerqwAgZ"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Open The Traders Planet Google Business Profile"
           style={css(
             'flex:none;width:62px;height:62px;border-radius:18px;display:flex;align-items:center;justify-content:center;' +
             'background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);' +
-            'box-shadow:0 6px 16px rgba(0,0,0,.18)',
+            'box-shadow:0 6px 16px rgba(0,0,0,.18);cursor:pointer',
           )}
         >
           <img
@@ -79,17 +83,14 @@ export function BrandHero() {
             decoding="async"
             style={css('width:46px;height:46px;object-fit:contain;display:block')}
           />
-        </div>
+        </a>
 
         <div style={css('flex:1;min-width:0;display:flex;flex-direction:column;gap:5px')}>
           <div style={css('font-size:10px;font-weight:700;letter-spacing:.18em;color:var(--on-accent);white-space:nowrap')}>
             THE TRADERS PLANET
           </div>
           <div style={css('font-size:19px;font-weight:800;letter-spacing:-.5px;line-height:1.18;text-wrap:balance')}>
-            Trade with structure.
-          </div>
-          <div style={css('font-size:11.5px;line-height:1.45;color:rgba(255,255,255,.78);text-wrap:pretty')}>
-            Official analysis, a community that shows its work, and the tools to size it properly.
+            Where Traders Are Built
           </div>
         </div>
       </div>

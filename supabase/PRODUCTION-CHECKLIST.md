@@ -1,5 +1,34 @@
 # Going live: connecting the real Supabase project and R2 bucket
 
+## PWA push setup (manual dashboard steps)
+
+Apply the additive migrations created on 24 September 2026 in filename order.
+Do not reset production data. Set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+`VAPID_SUBJECT` and `PUSH_WEBHOOK_SECRET` on the Vercel server. Generate the
+VAPID pair once (`npx web-push generate-vapid-keys`) and retain it across
+deployments. Configure a Supabase Database Webhook for **INSERT** on
+`public.notifications` to `https://<app-origin>/api/push/dispatch`, with
+`x-push-webhook-secret: <PUSH_WEBHOOK_SECRET>`. The server validates this secret,
+then reads the notification row itself. The service worker at `/sw.js` handles
+background display and click routing. iOS requires the app to be added to the
+Home Screen before Web Push is offered. Browser permission is requested only
+after the user taps the in-app enable button; a denied browser permission is
+not requested again. Delivery is at most once per notification/device. If a
+push provider returns an uncertain transport failure, the app keeps the in-app
+notification and logs the push failure instead of retrying into duplicate
+device alerts.
+
+For direct R2 downloads, configure the private bucket's CORS rule to allow
+`GET` and `PUT` from the production app origin, with `Content-Type` in allowed
+headers. The browser downloads files from a freshly signed private R2 URL;
+without `GET` CORS, inline media may still render but the Download button
+cannot save a named local file.
+
+The icon files already contain the project's real gold mark at 192, 512, 180,
+32 and 16 pixels. The manifest uses the full square icons as `any`; the mark
+reaches outside the platform mask-safe zone, so it is not falsely advertised
+as maskable. Apple touch icon and favicon are declared in `index.html`.
+
 Everything in this repository has been verified against a throwaway Postgres 16
 and a local production build. What has **not** been done — because no
 credentials for them exist in the development environment — is any of the work

@@ -3,6 +3,7 @@ import { css } from '../../lib/css';
 import { getPostMediaUrl } from '../../lib/community/media-api';
 import { useLazyMediaUrl } from '../../lib/media/useLazyMediaUrl';
 import type { FeedPost } from '../../lib/community/useFeed';
+import { MediaActions } from '../media/MediaActions';
 
 function bytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -46,7 +47,7 @@ function PostVideo({ post, height }: { post: FeedPost; height: number }) {
       style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: 'var(--ink-chip)', cursor: showVideo ? 'default' : 'pointer' }}
     >
       {poster.url && !showVideo && (
-        <img src={poster.url} alt={post.fileName ?? 'Video'} decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
+        <img src={poster.url} onError={poster.retry} alt={post.fileName ?? 'Video'} decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
       )}
       {showVideo && (
         <video
@@ -58,6 +59,7 @@ function PostVideo({ post, height }: { post: FeedPost; height: number }) {
           preload="none"
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
+          onError={media.retry}
           style={css('width:100%;height:100%;object-fit:cover;display:block')}
         />
       )}
@@ -79,6 +81,9 @@ function PostVideo({ post, height }: { post: FeedPost; height: number }) {
       {!playing && !poster.url && !showVideo && (
         <div style={css('position:absolute;left:10px;bottom:10px;font-size:10.5px;color:rgba(255,255,255,.75)')}>Video</div>
       )}
+      <div style={css('position:absolute;right:8px;bottom:8px;z-index:2;background:var(--surface);padding:6px 8px;border-radius:8px')}>
+        <MediaActions storageKey={post.storageKey} fileName={post.fileName} getUrl={getPostMediaUrl} />
+      </div>
     </div>
   );
 }
@@ -115,6 +120,8 @@ export function PostMedia({ post, height }: { post: FeedPost; height: number }) 
     getPostMediaUrl,
   );
 
+  if (post.attachment === 'voice') return <VoicePost post={post} />;
+
   // A PDF and a generic document render the same card; only the icon differs,
   // which PdfRow decides from the post's own attachment kind. PdfRow already
   // degrades gracefully with no storage key — same layout, just no download
@@ -136,8 +143,11 @@ export function PostMedia({ post, height }: { post: FeedPost; height: number }) 
             {image.failed ? 'Could not load attachment' : 'Loading…'}
           </div>
         ) : (
-          <img src={image.url} alt={post.fileName ?? 'Attachment'} loading="lazy" decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
+          <img src={image.url} onError={image.retry} alt={post.fileName ?? 'Attachment'} loading="lazy" decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
         )}
+        <div style={css('position:absolute;right:8px;bottom:8px;background:var(--surface);padding:6px 8px;border-radius:8px')}>
+          <MediaActions storageKey={post.storageKey} fileName={post.fileName} getUrl={getPostMediaUrl} />
+        </div>
       </div>
     );
   }
@@ -148,9 +158,21 @@ export function PostMedia({ post, height }: { post: FeedPost; height: number }) 
   return <NoMedia height={height} purged={post.mediaPurged} />;
 }
 
+function VoicePost({ post }: { post: FeedPost }) {
+  const { ref, url, failed, retry } = useLazyMediaUrl(post.mediaPurged ? null : post.storageKey, getPostMediaUrl);
+  return <div ref={ref} style={css('background:var(--surface);border:1px solid var(--border-2);border-radius:12px;padding:13px;display:flex;flex-direction:column;gap:8px')}>
+    <div style={css('font-size:12px;font-weight:700;color:var(--text-primary)')}>Voice message</div>
+    {post.mediaPurged ? <span style={css('font-size:11px;color:var(--text-faint)')}>Removed (6-month retention)</span>
+      : failed ? <span style={css('font-size:11px;color:var(--danger-ink)')}>Could not load voice message</span>
+      : url ? <audio controls preload="metadata" src={url} onError={retry} style={css('width:100%;height:38px')} />
+      : <span style={css('font-size:11px;color:var(--text-faint)')}>Loading…</span>}
+    {!post.mediaPurged && <MediaActions storageKey={post.storageKey} fileName={post.fileName} getUrl={getPostMediaUrl} />}
+  </div>;
+}
+
 /** A document attachment — PDF or one of the office formats. */
 export function PdfRow({ post }: { post: FeedPost }) {
-  const { ref, url } = useLazyMediaUrl(
+  const { ref } = useLazyMediaUrl(
     post.mediaPurged ? null : post.storageKey,
     getPostMediaUrl,
   );
@@ -172,11 +194,7 @@ export function PdfRow({ post }: { post: FeedPost }) {
           {post.mediaPurged ? 'Removed (6-month retention)' : bytes(post.sizeBytes ?? 0)}
         </div>
       </div>
-      {url && !post.mediaPurged && (
-        <a href={url} target="_blank" rel="noreferrer" style={css('display:flex;flex:none')}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" style={css('cursor:pointer')}><path d="M12 4v11M7.6 11l4.4 4.4L16.4 11M5 19.6h14" /></svg>
-        </a>
-      )}
+      {!post.mediaPurged && <MediaActions storageKey={post.storageKey} fileName={post.fileName} getUrl={getPostMediaUrl} />}
     </div>
   );
 }

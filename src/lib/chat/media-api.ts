@@ -150,7 +150,8 @@ const urlCache = new Map<string, { url: string; expiresAt: number }>();
 /** Collapses the burst of requests a fast scroll makes for the same key. */
 const inFlight = new Map<string, Promise<string>>();
 
-export async function getMediaUrl(storageKey: string): Promise<string> {
+export async function getMediaUrl(storageKey: string, force = false): Promise<string> {
+  if (force) urlCache.delete(storageKey);
   const hit = urlCache.get(storageKey);
   if (hit && hit.expiresAt > Date.now()) return hit.url;
 

@@ -40,6 +40,11 @@ describe('server-side upload validation', () => {
     expect(validateUploadRequest({ kind: 'voice', mimeType: 'audio/mp4', sizeBytes: 40000 }).status).toBe('ok');
   });
 
+  test('allows supported documents but rejects executable files', () => {
+    expect(validateUploadRequest({ kind: 'file', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', sizeBytes: MB }).status).toBe('ok');
+    expect(validateUploadRequest({ kind: 'file', mimeType: 'application/x-msdownload', sizeBytes: MB }).status).toBe('rejected');
+  });
+
   test('poster bytes count toward the total', () => {
     const check = validateUploadRequest({ kind: 'video', mimeType: 'video/mp4', sizeBytes: 10 * MB, posterBytes: 50000 });
     expect(check.status).toBe('ok');

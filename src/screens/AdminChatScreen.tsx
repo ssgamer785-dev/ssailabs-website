@@ -11,6 +11,8 @@ import { formatDuration, type MediaKind } from '../lib/chat/types';
 import { PhoneShell } from '../components/PhoneShell';
 import { MessageBubble } from '../components/chat/MessageBubble';
 import { AppBackButton } from '../components/ui/AppBackButton';
+import logo from '../assets/traders-planet-mark.png';
+import { normalizePickedFile } from '../lib/media/file-types';
 
 function Wave({ bars, color, height, gap, seed }: { bars: number; color: string; height: number; gap: number; seed: number }) {
   const rand = makeRand(seed);
@@ -26,7 +28,7 @@ function Wave({ bars, color, height, gap, seed }: { bars: number; color: string;
 function TypingBubble() {
   return (
     <div style={css('display:flex;align-items:flex-end;gap:9px')}>
-      <div style={css('width:30px;height:30px;border-radius:50%;background:var(--avatar-bg);color:var(--avatar-ink);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:none')}>A</div>
+      <div style={css('width:30px;height:30px;border-radius:50%;background:var(--ink-chip);display:flex;align-items:center;justify-content:center;flex:none')}><img src={logo} alt="Admin" style={css('width:24px;height:24px;object-fit:contain')} /></div>
       <div style={css('background:var(--surface-secondary-2);border-radius:16px 16px 16px 5px;padding:13px 15px;display:flex;align-items:center;gap:4px')}>
         {[0, 1, 2].map(i => (
           <div key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--neutral-fill)', animation: `tp-blink 1.2s ${i * 0.18}s infinite ease-in-out` }} />
@@ -42,12 +44,13 @@ function kindForFile(file: File): MediaKind | null {
   if (file.type.startsWith('image/')) return 'image';
   if (file.type.startsWith('video/')) return 'video';
   if (file.type === 'application/pdf') return 'pdf';
+  if (/^(application\/(msword|vnd\.|zip|x-zip-compressed)|text\/(plain|csv))/.test(file.type)) return 'file';
   return null;
 }
 
 export function AdminChatScreen() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [params] = useSearchParams();
   // Admins open a specific student's thread via ?c=<id>; students get their own.
   const chat = useConversation(params.get('c') ?? undefined);
@@ -100,13 +103,14 @@ export function AdminChatScreen() {
   }
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    const picked = e.target.files?.[0];
     e.target.value = '';
-    if (!file) return;
+    if (!picked) return;
+    const file = normalizePickedFile(picked);
 
     const kind = kindForFile(file);
     if (!kind) {
-      setNotice('Only images, videos and PDFs can be attached.');
+      setNotice('That file type cannot be attached.');
       return;
     }
     setNotice(null);
@@ -153,15 +157,13 @@ export function AdminChatScreen() {
       <div style={css('flex:none;height:58px;display:flex;align-items:center;padding:0 18px;gap:11px;border-bottom:1px solid var(--border)')}>
         <AppBackButton fallback="/chat" />
         <div style={css('position:relative;flex:none')}>
-          <div style={css('width:38px;height:38px;border-radius:50%;background:var(--avatar-bg);color:var(--avatar-ink);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700')}>A</div>
+          <div style={css('width:38px;height:38px;border-radius:50%;background:var(--ink-chip);display:flex;align-items:center;justify-content:center')}><img src={logo} alt="Admin" style={css('width:31px;height:31px;object-fit:contain')} /></div>
           <div style={{ position: 'absolute', right: -1, bottom: -1, width: 11, height: 11, borderRadius: '50%', background: connection === 'online' && peerOnline ? 'var(--success)' : 'var(--neutral-fill-2)', border: '2.2px solid var(--border-on-accent)' }} />
         </div>
         <div style={css('flex:1;display:flex;flex-direction:column;gap:1px;min-width:0')}>
           <div style={css('font-size:15px;font-weight:700;letter-spacing:-.25px')}>Admin</div>
           <div style={{ fontSize: 11.5, fontWeight: 600, color: subtitleColor }}>{subtitle}</div>
         </div>
-        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" style={css('cursor:pointer;flex:none')}><path d="M4.5 5.2c0-1 .8-1.8 1.8-1.8h1.9c.8 0 1.5.5 1.7 1.3l.7 2.5c.2.7-.1 1.5-.7 1.9l-1.2.8a11 11 0 0 0 4.4 4.4l.8-1.2c.4-.6 1.2-.9 1.9-.7l2.5.7c.8.2 1.3.9 1.3 1.7v1.9c0 1-.8 1.8-1.8 1.8C10.6 20.3 4.5 14.2 4.5 5.2z" /></svg>
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.8} strokeLinejoin="round" style={css('cursor:pointer;flex:none;margin-left:4px')}><rect x="2.6" y="6.8" width="12.4" height="10.4" rx="2.6" /><path d="M15 11 20.8 8v8l-5.8-3z" /></svg>
       </div>
 
       <div
@@ -184,6 +186,7 @@ export function AdminChatScreen() {
               key={m.clientId}
               message={m}
               out={m.senderId === user?.id}
+              incomingIsAdmin={!isAdmin}
               onRetry={() => chat.retry(m.clientId)}
               onDelete={() => chat.deleteMessage(m)}
             />
@@ -216,7 +219,7 @@ export function AdminChatScreen() {
       <input
         ref={fileInput}
         type="file"
-        accept="image/*,video/*,application/pdf"
+        accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.zip,.txt,.csv"
         onChange={handleFile}
         style={{ display: 'none' }}
       />

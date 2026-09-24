@@ -3,6 +3,8 @@ import { css } from '../../lib/css';
 import { formatDuration, type ChatMessage } from '../../lib/chat/types';
 import { useMediaUrl, usePosterUrl } from './useMediaUrl';
 import { FailedNote, MetaRow } from './bubble-parts';
+import { MediaActions } from '../media/MediaActions';
+import { getMediaUrl } from '../../lib/chat/media-api';
 
 const SIZE = 184;
 const RING = 3;
@@ -146,6 +148,7 @@ export function CircularVideoBubble({ message, out, onRetry }: {
             {poster.url && !showVideo && (
               <img
                 src={poster.url}
+                onError={poster.retry}
                 alt={message.fileName ?? 'Video message'}
                 decoding="async"
                 style={css('width:100%;height:100%;object-fit:cover;display:block')}
@@ -159,6 +162,7 @@ export function CircularVideoBubble({ message, out, onRetry }: {
                 playsInline
                 // Never preloads: the src only exists after a tap.
                 preload="none"
+                onError={media.retry}
                 onTimeUpdate={e => {
                   const el = e.currentTarget;
                   setElapsed(el.currentTime);
@@ -201,6 +205,7 @@ export function CircularVideoBubble({ message, out, onRetry }: {
       </div>
 
       <div style={css('display:flex;flex-direction:column;gap:5px;padding-right:4px')}>
+        {!message.mediaPurged && message.status === 'sent' && <MediaActions storageKey={message.storageKey} fileName={message.fileName} getUrl={getMediaUrl} />}
         <FailedNote message={message} onRetry={onRetry} />
         <MetaRow message={message} out={out} />
       </div>

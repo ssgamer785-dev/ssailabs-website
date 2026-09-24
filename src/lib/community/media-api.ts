@@ -6,7 +6,7 @@
 
 import { supabase } from '../supabase';
 
-export type PostMediaKind = 'image' | 'video' | 'pdf' | 'file';
+export type PostMediaKind = 'image' | 'video' | 'pdf' | 'file' | 'voice';
 
 async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
@@ -83,7 +83,8 @@ const urlCache = new Map<string, { url: string; expiresAt: number }>();
 /** Collapses the burst of requests a fast scroll makes for the same key. */
 const inFlight = new Map<string, Promise<string>>();
 
-export async function getPostMediaUrl(storageKey: string): Promise<string> {
+export async function getPostMediaUrl(storageKey: string, force = false): Promise<string> {
+  if (force) urlCache.delete(storageKey);
   const hit = urlCache.get(storageKey);
   if (hit && hit.expiresAt > Date.now()) return hit.url;
 
@@ -111,4 +112,15 @@ export async function getPostMediaUrl(storageKey: string): Promise<string> {
   } finally {
     inFlight.delete(storageKey);
   }
+}
+
+export async function resumePostUploadUrl(ticket: PostUploadTicket, args: {
+  kind: PostMediaKind; mimeType: string; sizeBytes: number; posterBytes?: number;
+}): Promise<PostUploadTicket> {
+  const res = await fetch('/api/posts/resume-upload', {
+    method: 'POST', headers: await authHeaders(),
+    body: JSON.stringify({ ...args, storageKey: ticket.storageKey, posterKey: ticket.posterKey }),
+  });
+  if (!res.ok) throw new Error(await readError(res, 'Could not retry the upload.'));
+  return res.json();
 }

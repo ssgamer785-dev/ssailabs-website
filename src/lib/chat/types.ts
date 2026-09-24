@@ -6,7 +6,7 @@ export type { MessageKind, UploadStatus };
 export type SendStatus = 'sending' | 'uploading' | 'sent' | 'failed';
 
 /** Attachment kinds that carry an R2 object (i.e. everything except plain text). */
-export type MediaKind = 'image' | 'video' | 'pdf' | 'voice';
+export type MediaKind = 'image' | 'video' | 'pdf' | 'file' | 'voice';
 
 export interface ChatMessage {
   /** Server row id once persisted; before that, the client id. */
@@ -51,7 +51,7 @@ export type ConnectionState = 'connecting' | 'online' | 'offline';
 export const MEDIA_QUOTA_BYTES = 100 * 1024 * 1024;
 
 export function isMediaKind(kind: MessageKind): kind is MediaKind {
-  return kind === 'image' || kind === 'video' || kind === 'pdf' || kind === 'voice';
+  return kind === 'image' || kind === 'video' || kind === 'pdf' || kind === 'file' || kind === 'voice';
 }
 
 export function formatBytes(bytes: number): string {

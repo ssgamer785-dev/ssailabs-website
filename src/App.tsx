@@ -28,6 +28,8 @@ import { PersonalInformationScreen } from './screens/PersonalInformationScreen';
 import { PrivacyPolicyScreen } from './screens/PrivacyPolicyScreen';
 import { TermsScreen } from './screens/TermsScreen';
 import { HelpSupportScreen } from './screens/HelpSupportScreen';
+import { PushNotifications } from './components/PushNotifications';
+import { LifecycleSplash } from './components/LifecycleSplash';
 
 export default function App() {
   return (
@@ -35,6 +37,8 @@ export default function App() {
       <AuthProvider>
       <AppStateProvider>
         <BrowserRouter>
+          <LifecycleSplash />
+          <PushNotifications />
           <Routes>
             <Route path="/" element={<SplashScreen />} />
             {/* The entry point for anyone signed out. */}

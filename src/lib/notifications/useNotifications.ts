@@ -85,7 +85,7 @@ export function useNotifications(): UseNotifications {
           // so the badge hook below seeing the same INSERT cannot double-strike.
           if (payload.eventType === 'INSERT') {
             const row = payload.new as Partial<NotificationRow> | undefined;
-            if (row && !row.read_at) playNotificationChime(row.id);
+            if (row && !row.read_at && document.visibilityState === 'visible') playNotificationChime(row.id);
           }
           void refresh();
         })
@@ -152,7 +152,7 @@ export function useUnreadNotificationCount(): number {
           // inside playNotificationChime collapses the two calls into one.
           if (payload.eventType === 'INSERT') {
             const row = payload.new as Partial<NotificationRow> | undefined;
-            if (row && !row.read_at) playNotificationChime(row.id);
+            if (row && !row.read_at && document.visibilityState === 'visible') playNotificationChime(row.id);
           }
           void refresh();
         })

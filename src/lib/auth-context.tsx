@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import type { Database } from './database.types';
+import { unsubscribePush } from './notifications/push';
 
 type Profile = Database['public']['Tables']['profiles']['Row'];
 
@@ -57,7 +58,14 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null);
 
 function errorMessage(e: unknown): string {
-  return e instanceof Error ? e.message : 'Something went wrong. Please try again.';
+  const error = e as { status?: number; code?: string; message?: string } | null;
+  if (error?.status === 429) return 'Too many attempts. Please wait and try again.';
+  if ((error?.status && error.status >= 500) || error?.code === 'fetch_error'
+    || /failed to fetch|network request failed/i.test(error?.message ?? '')) {
+    return 'The sign-in service is temporarily unavailable. Please try again.';
+  }
+  if (error?.code === 'invalid_credentials') return 'Incorrect email or password.';
+  return error?.message || 'Something went wrong. Please try again.';
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -122,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async (email: string, password: string): Promise<SignResult> => {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
-      return { error: error?.message ?? null };
+      return { error: error ? errorMessage(error) : null };
     } catch (e) {
       return { error: errorMessage(e) };
     }
@@ -151,7 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         provider: 'google',
         options: { redirectTo: `${window.location.origin}/login` },
       });
-      return { error: error?.message ?? null };
+      return { error: error ? errorMessage(error) : null };
     } catch (e) {
       return { error: errorMessage(e) };
     }
@@ -164,13 +172,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
         options: { data: { full_name: fullName } },
       });
-      return { error: error?.message ?? null, needsEmailConfirmation: !error && !data.session };
+      return { error: error ? errorMessage(error) : null, needsEmailConfirmation: !error && !data.session };
     } catch (e) {
       return { error: errorMessage(e), needsEmailConfirmation: false };
     }
   }, []);
 
   const signOut = useCallback(async () => {
+    await unsubscribePush().catch(() => {});
     await supabase.auth.signOut();
   }, []);
 

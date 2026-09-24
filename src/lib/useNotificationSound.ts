@@ -65,16 +65,23 @@ function context(): AudioContext | null {
  */
 const chimed = new Set<string>();
 const CHIMED_CAP = 200;
+let lastChimeAt = 0;
 
 /** Plays the chime once for `id`; a repeat call with the same id does nothing. */
 export function playNotificationChime(id?: string): void {
   if (id) {
     if (chimed.has(id)) return;
     chimed.add(id);
-    // A session left open for days would otherwise grow this set without
-    // bound. Clearing wholesale is safe: the ids it drops are long delivered.
-    if (chimed.size > CHIMED_CAP) chimed.clear();
+    // Bound memory without clearing the id that just arrived. A second
+    // subscriber can still deliver that same row after the throttle window.
+    if (chimed.size > CHIMED_CAP) {
+      const oldest = chimed.values().next().value;
+      if (oldest) chimed.delete(oldest);
+    }
   }
+
+  if (Date.now() - lastChimeAt < 900) return;
+  lastChimeAt = Date.now();
 
   const audio = context();
   if (!audio) return;
@@ -124,6 +131,18 @@ export function playNotificationChime(id?: string): void {
   } catch {
     /* no audio in this environment; the notification still arrived */
   }
+}
+
+/** Resume Web Audio on the first real gesture, before any realtime event arrives. */
+export function installNotificationAudioUnlock(): void {
+  const unlock = () => {
+    const audio = context();
+    if (audio?.state === 'suspended') void audio.resume().catch(() => {});
+    document.removeEventListener('pointerdown', unlock);
+    document.removeEventListener('keydown', unlock);
+  };
+  document.addEventListener('pointerdown', unlock, { once: true });
+  document.addEventListener('keydown', unlock, { once: true });
 }
 
 /** Hook form, for components that would rather not import a bare function. */

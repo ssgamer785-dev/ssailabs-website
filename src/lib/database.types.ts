@@ -7,8 +7,8 @@
 export type MembershipRequestStatus = 'pending' | 'contacted' | 'approved' | 'rejected';
 export type UserRole = 'admin' | 'student';
 export type PostChannel = 'official' | 'students';
-export type AttachmentKind = 'none' | 'image' | 'video' | 'pdf' | 'file' | 'poll' | 'chart';
-export type MessageKind = 'text' | 'image' | 'pdf' | 'chart' | 'voice' | 'video';
+export type AttachmentKind = 'none' | 'image' | 'video' | 'pdf' | 'file' | 'poll' | 'chart' | 'voice';
+export type MessageKind = 'text' | 'image' | 'pdf' | 'file' | 'chart' | 'voice' | 'video';
 export type NotificationKind = 'signal' | 'chat' | 'like' | 'comment' | 'target' | 'session';
 /** Where a media row is in its upload: 'pending' until the bytes reach R2. */
 export type UploadStatus = 'pending' | 'ready';

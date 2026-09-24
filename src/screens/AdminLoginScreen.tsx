@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
@@ -28,13 +28,15 @@ export function AdminLoginScreen() {
   const [show, setShow] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
 
   const login = useCallback(async () => {
-    if (submitting) return;
+    if (inFlight.current) return;
     if (!username.trim() || !password) {
       setError('Enter your username and password.');
       return;
     }
+    inFlight.current = true;
     setSubmitting(true);
     setError(null);
 
@@ -47,8 +49,8 @@ export function AdminLoginScreen() {
       const body = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        setSubmitting(false);
-        setError(body?.error ?? 'Incorrect username or password.');
+        setError(typeof body?.error === 'string' ? body.error : res.status === 401
+          ? 'Incorrect username or password.' : 'Admin sign-in is temporarily unavailable. Please try again.');
         return;
       }
 
@@ -59,7 +61,6 @@ export function AdminLoginScreen() {
         refresh_token: body.refresh_token,
       });
       if (sessionError) {
-        setSubmitting(false);
         setError('Could not start your session. Please try again.');
         return;
       }
@@ -67,10 +68,12 @@ export function AdminLoginScreen() {
       await refreshProfile();
       navigate('/admin/activation-codes', { replace: true });
     } catch {
-      setSubmitting(false);
       setError('Could not reach the server. Check your connection and try again.');
+    } finally {
+      inFlight.current = false;
+      setSubmitting(false);
     }
-  }, [navigate, password, refreshProfile, submitting, username]);
+  }, [navigate, password, refreshProfile, username]);
 
   return (
     <PhoneShell>

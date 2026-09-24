@@ -4,12 +4,15 @@ import { css } from '../lib/css';
 import { supabase } from '../lib/supabase';
 import { useAppState } from '../lib/app-state';
 import { useAuth } from '../lib/auth-context';
-import { requestPostUploadUrl, uploadPostMedia, type PostMediaKind, type PostUploadTicket } from '../lib/community/media-api';
+import { requestPostUploadUrl, resumePostUploadUrl, uploadPostMedia, type PostMediaKind, type PostUploadTicket } from '../lib/community/media-api';
 import { createPollPost } from '../lib/community/polls';
 import { probeVideo } from '../lib/media/video-poster';
 import type { AttachmentKind, PostChannel } from '../lib/database.types';
 import { PhoneShell } from '../components/PhoneShell';
 import { AppBackButton } from '../components/ui/AppBackButton';
+import { useVoiceRecorder } from '../lib/chat/useVoiceRecorder';
+import { formatDuration } from '../lib/chat/types';
+import { normalizePickedFile } from '../lib/media/file-types';
 
 const attachBtn = css('width:56px;height:56px;border-radius:15px;background:var(--surface);border:1px solid var(--border-4);box-shadow:0 2px 8px rgba(var(--shadow-rgb),.04);display:flex;align-items:center;justify-content:center');
 const attachCol = css('width:62px;display:flex;flex-direction:column;align-items:center;gap:9px;cursor:pointer');
@@ -28,6 +31,7 @@ function kindForFile(file: File): PostMediaKind | null {
   if (file.type.startsWith('image/')) return 'image';
   if (file.type.startsWith('video/')) return 'video';
   if (file.type === 'application/pdf') return 'pdf';
+  if (file.type.startsWith('audio/')) return 'voice';
   if (file.type) return 'file';
   return null;
 }
@@ -67,6 +71,7 @@ export function CreatePostScreen() {
   const [params] = useSearchParams();
   const { reveal, toggleReveal, userName } = useAppState();
   const { user, isAdmin } = useAuth();
+  const recorder = useVoiceRecorder();
 
   // Admins compose Official updates via ?channel=official; everything else is
   // a student post. ?edit=<id> reuses this same screen to edit in place.
@@ -120,9 +125,10 @@ export function CreatePostScreen() {
   }
 
   async function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const picked = e.target.files?.[0];
+    const raw = e.target.files?.[0];
     e.target.value = '';
-    if (!picked) return;
+    if (!raw) return;
+    const picked = normalizePickedFile(raw);
     if (!kindForFile(picked)) {
       setError('That file type cannot be attached.');
       return;
@@ -145,8 +151,27 @@ export function CreatePostScreen() {
     }
   }
 
+  async function stopVoice() {
+    const clip = await recorder.stop();
+    if (!clip) return;
+    const extension = clip.mimeType.includes('mp4') || clip.mimeType.includes('aac') ? 'm4a' : 'webm';
+    const voiceFile = new File([clip.blob], `Voice message.${extension}`, { type: clip.mimeType });
+    setPollMode(false);
+    setFile(voiceFile);
+    setPoster(null);
+    setTicket(null);
+    setCanRetry(false);
+    setPreviewUrl(URL.createObjectURL(voiceFile));
+    setError(null);
+  }
+
   async function submit() {
     if (busy || !user) return;
+
+    if (editId && file) {
+      setError('Attachments cannot be changed while editing a post.');
+      return;
+    }
 
     if (pollMode) {
       const filled = pollOptions.map(o => o.trim()).filter(Boolean);
@@ -186,12 +211,15 @@ export function CreatePostScreen() {
         setProgress(0);
         // Reuse the ticket from a failed attempt while its signature is still
         // good; otherwise ask for a fresh one.
-        const active = ticket ?? await requestPostUploadUrl({
+        const uploadArgs = {
           kind,
           mimeType: file.type,
           sizeBytes: file.size,
           posterBytes: poster?.size,
-        });
+        };
+        const active = ticket
+          ? await resumePostUploadUrl(ticket, uploadArgs)
+          : await requestPostUploadUrl(uploadArgs);
         setTicket(active);
 
         await uploadPostMedia(active.uploadUrl, file, file.type, setProgress);
@@ -251,7 +279,9 @@ export function CreatePostScreen() {
 
       <input ref={fileInput} type="file" accept={accept} onChange={pickFile} style={{ display: 'none' }} />
 
-      <div style={css('flex:none;padding:6px 20px 0;display:flex;justify-content:space-between;gap:4px')}>
+      {!editId && <div style={css(isAdmin
+        ? 'flex:none;padding:6px 20px 0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));justify-items:center;row-gap:14px'
+        : 'flex:none;padding:6px 20px 0;display:flex;justify-content:space-between;gap:4px')}>
         <button type="button" onClick={() => openPicker('image')} aria-label="Attach an image" style={attachCol} className="row-focus">
           <span style={attachBtn}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--success-ink)" strokeWidth={1.7} strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3.4" /><circle cx="9" cy="10" r="1.7" /><path d="M4.6 17.4l4.5-4.3 3.3 3.1 2.6-2.4 4.4 4" /></svg></span>
           <span style={attachLabel}>Image</span>
@@ -291,7 +321,22 @@ export function CreatePostScreen() {
           </span>
           <span style={{ ...attachLabel, color: pollMode ? 'var(--accent-ink)' : 'var(--text-tertiary)', fontWeight: pollMode ? 700 : 500 }}>Poll</span>
         </button>
-      </div>
+        {isAdmin && <button type="button" onClick={() => recorder.recording ? void stopVoice() : void recorder.start()}
+          aria-label={recorder.recording ? 'Stop recording voice message' : 'Record voice message'}
+          style={attachCol} className="row-focus">
+          <span style={{ ...attachBtn, background: recorder.recording ? 'var(--danger-soft)' : 'var(--surface)' }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={recorder.recording ? 'var(--danger-ink)' : 'var(--accent-ink)'} strokeWidth={1.8} strokeLinecap="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" /></svg>
+          </span>
+          <span style={attachLabel}>{recorder.recording ? formatDuration(recorder.seconds) : 'Voice'}</span>
+        </button>}
+      </div>}
+
+      {recorder.recording && <div style={css('display:flex;align-items:center;justify-content:space-between;margin:12px 20px;color:var(--danger-ink);font-size:12px')}>
+        <span>Recording · {formatDuration(recorder.seconds)}</span>
+        <button type="button" onClick={recorder.cancel} style={css('color:var(--danger-ink);font-weight:700')}>Cancel</button>
+        <button type="button" onClick={() => void stopVoice()} style={css('color:var(--accent-ink);font-weight:700')}>Stop &amp; preview</button>
+      </div>}
+      {recorder.error && <div role="alert" style={css('padding:8px 20px;color:var(--danger-ink);font-size:12px')}>{recorder.error}</div>}
 
       {pollMode && (
         <div style={css('flex:none;margin:14px 20px 0;padding:14px;border-radius:14px;border:1px solid var(--accent-border);background:var(--accent-tint);display:flex;flex-direction:column;gap:9px')}>
@@ -338,14 +383,6 @@ export function CreatePostScreen() {
         </div>
       )}
 
-      <div style={css('flex:none;margin:20px 20px 0;height:52px;border:1px solid var(--border-4);border-radius:12px;display:flex;align-items:center;padding:0 14px;gap:10px;cursor:pointer;background:var(--surface)')}>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-primary)" strokeWidth={1.6} strokeLinejoin="round" style={css('flex:none')}><circle cx="12" cy="12" r="8.4" /><path d="M3.6 12h16.8" /><path d="M12 3.6c2.2 2.3 3.3 5.2 3.3 8.4S14.2 18.1 12 20.4c-2.2-2.3-3.3-5.2-3.3-8.4S9.8 5.9 12 3.6z" /></svg>
-        <div style={css('font-size:14.5px;font-weight:600')}>{channel === 'official' ? 'Official' : 'Public'}</div>
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--text-primary)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={css('flex:none')}><path d="M6 9.5l6 6 6-6" /></svg>
-        <div style={css('flex:1')} />
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" style={css('flex:none')}><path d="M9 6l6 6-6 6" /></svg>
-      </div>
-
       {channel === 'students' && (
         <div style={css('flex:none;margin:11px 20px 0;border:1px solid var(--border-4);border-radius:12px;padding:13px 14px;display:flex;align-items:center;gap:12px;background:var(--surface)')}>
           <div style={css('flex:1;display:flex;flex-direction:column;gap:3px;min-width:0')}>
@@ -378,7 +415,11 @@ export function CreatePostScreen() {
       {file && (
       <div style={{ ...css('flex:none;padding:22px 20px 0'), display: pollMode ? 'none' : 'block' }}>
         <div style={css('position:relative;width:122px;height:156px;border-radius:14px;overflow:hidden;box-shadow:0 6px 18px rgba(var(--shadow-rgb),.14)')}>
-          {previewUrl ? (
+          {previewUrl && file.type.startsWith('audio/') ? (
+            <div style={css('width:100%;height:100%;background:var(--surface-secondary);display:flex;align-items:center;justify-content:center;padding:8px')}>
+              <audio src={previewUrl} controls preload="metadata" style={css('width:100%')} />
+            </div>
+          ) : previewUrl ? (
             <img src={previewUrl} alt="Attachment preview" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
           ) : (
             <div style={css('width:100%;height:100%;background:var(--surface-sunken-2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:0 12px')}>

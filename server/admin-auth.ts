@@ -176,7 +176,11 @@ export function adminAuthRouter(): Router {
       // password can be told apart from an account-level block that no
       // password would pass.
       console.error('[admin-auth] rejected by Supabase sign-in:', error?.message ?? 'no session returned');
-      return res.status(401).json({ error: REJECTED });
+      if (error?.status === 429) return res.status(429).json({ error: 'Too many sign-in attempts. Please wait and try again.' });
+      if (error?.code === 'invalid_credentials' || error?.message === 'Invalid login credentials') {
+        return res.status(401).json({ error: REJECTED });
+      }
+      return res.status(503).json({ error: 'Admin sign-in is temporarily unavailable. Please try again.' });
     }
 
     // The client installs this with supabase.auth.setSession(), which is why

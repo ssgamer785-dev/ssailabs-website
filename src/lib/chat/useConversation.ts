@@ -546,6 +546,15 @@ export function useConversation(explicitConversationId?: string): UseConversatio
 
   const deleteMessage = useCallback(async (message: ChatMessage) => {
     if (message.senderId !== userId) return;
+    if (message.deletedAt) {
+      if (!message.storageKey || message.mediaPurged) return;
+      try { await deleteRemoteMedia(message.id); patch(message.clientId, { mediaPurged: true, storageKey: null }); }
+      catch (e) {
+        setError(e instanceof Error ? e.message : 'Could not remove the attachment.');
+        throw e;
+      }
+      return;
+    }
 
     // Never reached the database — just drop the local bubble.
     if (message.status !== 'sent' && message.uploadStatus !== 'pending') {
@@ -556,8 +565,12 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     // An abandoned upload: remove the row and its object outright, rather than
     // leaving a tombstone for something nobody ever saw.
     if (message.uploadStatus === 'pending') {
+      try { await deleteRemoteMedia(message.id); }
+      catch (e) {
+        setError(e instanceof Error ? e.message : 'Could not remove the upload.');
+        throw e;
+      }
       setMessages(prev => prev.filter(m => m.clientId !== message.clientId));
-      await deleteRemoteMedia(message.id).catch(() => {});
       return;
     }
 
@@ -573,10 +586,16 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     if (delErr) {
       setMessages(previous);
       setError(delErr.message);
-      return;
+      throw delErr;
     }
-    if (message.storageKey) await deleteRemoteMedia(message.id).catch(() => {});
-  }, [messages, userId]);
+    if (message.storageKey) {
+      try { await deleteRemoteMedia(message.id); patch(message.clientId, { mediaPurged: true, storageKey: null }); }
+      catch (e) {
+        setError('Message deleted, but attachment cleanup is pending. Use the message menu to retry.');
+        throw e;
+      }
+    }
+  }, [messages, userId, patch]);
 
   const markRead = useCallback(async () => {
     if (!conversationId) return;

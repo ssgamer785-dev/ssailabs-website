@@ -82,6 +82,13 @@ export function SplashScreen() {
     return () => window.clearTimeout(t);
   }, [ready, leaving]);
 
+  // A failed artwork load or an auth endpoint that never responds must not
+  // leave the launch screen up forever on a poor connection.
+  useEffect(() => {
+    const t = window.setTimeout(() => setLeaving(true), 8000);
+    return () => window.clearTimeout(t);
+  }, []);
+
   // Navigate only once the fade has actually played, so the app appears behind
   // a splash that is already gone rather than replacing one mid-frame.
   useEffect(() => {
@@ -121,6 +128,7 @@ export function SplashScreen() {
             fetchPriority="high"
             decoding="async"
             onLoad={() => setArtReady(true)}
+            onError={() => setArtReady(true)}
             // cover, not contain: contain would letterbox, and the artwork is
             // 9:16 while the frame is taller, so something has to give. Cover
             // keeps the aspect ratio exactly and trims the sides instead.

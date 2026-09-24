@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
@@ -35,9 +35,10 @@ export function SignupScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const inFlight = useRef(false);
 
   async function handleSubmit() {
-    if (submitting) return;
+    if (inFlight.current) return;
     setError(null);
     setInfo(null);
 
@@ -54,8 +55,10 @@ export function SignupScreen() {
       return;
     }
 
+    inFlight.current = true;
     setSubmitting(true);
     const { error: signUpError, needsEmailConfirmation } = await signUp(email.trim(), pw, fullName.trim());
+    inFlight.current = false;
     setSubmitting(false);
 
     if (signUpError) {

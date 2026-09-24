@@ -1,6 +1,8 @@
 {
   "name": "The Traders Planet",
   "short_name": "Traders Planet",
+  "id": "/",
+  "scope": "/",
   "description": "Trading education, signals and community.",
   "start_url": "/",
   "display": "standalone",
