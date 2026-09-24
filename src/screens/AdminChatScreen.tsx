@@ -67,6 +67,7 @@ export function AdminChatScreen() {
   const conversationId = params.get('c');
   // Admins open a specific student's thread via ?c=<id>; students get their own.
   const chat = useConversation(conversationId ?? undefined);
+  const chatReady = !!chat.conversationId && !chat.loading;
   const [peer, setPeer] = useState<{ name: string; avatarKey: string | null } | null>(null);
   useEffect(() => {
     if (!isAdmin || !conversationId) { setPeer(null); return; }
@@ -120,7 +121,7 @@ export function AdminChatScreen() {
 
   async function handleSendText() {
     const body = msg.trim();
-    if (!body) return;
+    if (!body || !chatReady) return;
     setMsg('');
     chat.stopTyping();
     atBottom.current = true;
@@ -131,6 +132,7 @@ export function AdminChatScreen() {
     const picked = e.target.files?.[0];
     e.target.value = '';
     if (!picked) return;
+    if (!chatReady) return;
     const file = normalizePickedFile(picked);
 
     const kind = kindForFile(file);
@@ -144,6 +146,7 @@ export function AdminChatScreen() {
   }
 
   async function handleMic() {
+    if (!chatReady) return;
     if (!recorder.recording) {
       await recorder.start();
       return;
@@ -168,7 +171,7 @@ export function AdminChatScreen() {
   function MicBtn({ size = 40 }: { size?: number }) {
     const on = recorder.recording;
     return (
-      <div onClick={handleMic} title="Record a voice message" style={{ width: size, height: size, borderRadius: '50%', flex: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: on ? 'var(--danger)' : 'var(--surface-secondary)', boxShadow: on ? '0 0 0 4px rgba(239,68,68,.16)' : 'none' }}>
+      <div onClick={chatReady ? handleMic : undefined} title="Record a voice message" aria-disabled={!chatReady} style={{ width: size, height: size, borderRadius: '50%', flex: 'none', cursor: chatReady ? 'pointer' : 'default', opacity: chatReady ? 1 : .45, display: 'flex', alignItems: 'center', justifyContent: 'center', background: on ? 'var(--danger)' : 'var(--surface-secondary)', boxShadow: on ? '0 0 0 4px rgba(239,68,68,.16)' : 'none' }}>
         <svg width={Math.round(size * 0.44)} height={Math.round(size * 0.44)} viewBox="0 0 24 24" fill="none" stroke={on ? 'var(--on-accent)' : 'var(--text-muted)'} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
           <rect x={9} y={3.2} width={6} height={10.4} rx={3} />
           <path d="M5.6 11.4a6.4 6.4 0 0 0 12.8 0M12 17.8v3M8.8 20.8h6.4" />
@@ -203,9 +206,14 @@ export function AdminChatScreen() {
         )}
         {chat.loading ? (
           <div style={css('flex:1;display:flex;align-items:center;justify-content:center;font-size:12.5px;color:var(--text-faint)')}>Loading chat…</div>
+        ) : !chat.conversationId && chat.error ? (
+          <div role="alert" style={css('flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:24px;color:var(--danger-ink);font-size:12.5px')}>
+            <span>{chat.error}</span>
+            <button type="button" onClick={chat.retryOpen} style={css('padding:9px 18px;border-radius:10px;background:var(--accent);color:var(--on-accent);font-weight:700;cursor:pointer')}>Retry opening chat</button>
+          </div>
         ) : messages.length === 0 ? (
           <div style={css('flex:1;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12.5px;color:var(--text-faint);line-height:1.5;padding:0 30px')}>
-            No messages yet. Say hello to the Admin — they usually reply within a few hours.
+            {isAdmin ? 'No messages yet. Start a conversation with this member.' : 'No messages yet. Say hello to the Admin — they usually reply within a few hours.'}
           </div>
         ) : (
           messages.map(m => (
@@ -239,7 +247,7 @@ export function AdminChatScreen() {
         </div>
       )}
 
-      {(notice || chat.error) && (
+      {(notice || (chat.conversationId && chat.error)) && (
         <div style={css('flex:none;padding:6px 18px;font-size:11.5px;color:var(--danger-ink);text-align:center;line-height:1.4')}>
           {notice ?? chat.error}
         </div>
@@ -248,6 +256,7 @@ export function AdminChatScreen() {
       <input
         ref={fileInput}
         type="file"
+        disabled={!chatReady}
         accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.zip,.txt,.csv"
         onChange={handleFile}
         style={{ display: 'none' }}
@@ -255,12 +264,13 @@ export function AdminChatScreen() {
 
       {!recorder.recording ? (
         <div style={{ ...css('flex:none;display:flex;align-items:center;gap:9px;background:var(--surface)'), padding: '12px 18px', paddingBottom: `calc(24px + env(safe-area-inset-bottom, 0px) + ${keyboardInset}px)` }}>
-          <div onClick={() => fileInput.current?.click()} style={css('width:38px;height:38px;border-radius:50%;background:var(--surface-secondary);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')}>
+          <div onClick={chatReady ? () => fileInput.current?.click() : undefined} aria-disabled={!chatReady} style={css(`width:38px;height:38px;border-radius:50%;background:var(--surface-secondary);display:flex;align-items:center;justify-content:center;cursor:${chatReady ? 'pointer' : 'default'};opacity:${chatReady ? 1 : .45};flex:none`)}>
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth={2.1} strokeLinecap="round"><path d="M12 6v12M6 12h12" /></svg>
           </div>
           <div style={css('flex:1;min-width:0;height:44px;border-radius:999px;background:var(--surface-secondary);display:flex;align-items:center;padding:0 16px')}>
             <input
               placeholder="Type a message..."
+              disabled={!chatReady}
               value={msg}
               onChange={e => { setMsg(e.target.value); chat.notifyTyping(); }}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void handleSendText(); } }}
@@ -269,7 +279,7 @@ export function AdminChatScreen() {
             />
           </div>
           <MicBtn />
-          <Hoverable onClick={handleSendText} style={css('width:44px;height:44px;border-radius:50%;background:var(--accent);box-shadow:0 6px 16px rgba(11,95,239,.32);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')} hoverStyle={css('background:var(--accent-hover)')}>
+          <Hoverable onClick={chatReady ? handleSendText : undefined} aria-disabled={!chatReady} style={css(`width:44px;height:44px;border-radius:50%;background:var(--accent);box-shadow:0 6px 16px rgba(11,95,239,.32);display:flex;align-items:center;justify-content:center;cursor:${chatReady ? 'pointer' : 'default'};opacity:${chatReady ? 1 : .45};flex:none`)} hoverStyle={css('background:var(--accent-hover)')}>
             <svg width="19" height="19" viewBox="0 0 24 24" fill="var(--on-accent)" style={css('margin-left:-1px')}><path d="M20.8 3.2 3.9 9.9c-.7.3-.6 1.3.1 1.5l6.3 1.9 1.9 6.3c.2.7 1.2.8 1.5.1z" /></svg>
           </Hoverable>
         </div>

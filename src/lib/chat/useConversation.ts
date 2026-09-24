@@ -96,6 +96,7 @@ export interface UseConversation {
   loadOlder: () => Promise<void>;
   sendText: (body: string) => Promise<void>;
   sendMedia: (file: Blob, kind: MediaKind, fileName: string, durationSeconds?: number) => Promise<void>;
+  retryOpen: () => void;
   retry: (clientId: string) => Promise<void>;
   deleteMessage: (message: ChatMessage) => Promise<void>;
   markRead: () => Promise<void>;
@@ -115,6 +116,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
   const userId = user?.id ?? null;
 
   const [conversationId, setConversationId] = useState<string | null>(explicitConversationId ?? null);
+  const [openAttempt, setOpenAttempt] = useState(0);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -147,13 +149,27 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     }
     if (!userId) return;
     let active = true;
-    supabase.rpc('get_or_create_my_conversation').then(({ data, error: rpcError }) => {
+    setLoading(true);
+    setError(null);
+    Promise.resolve(supabase.rpc('get_or_create_my_conversation')).then(({ data, error: rpcError }) => {
       if (!active) return;
-      if (rpcError) setError(rpcError.message);
-      else setConversationId(data as unknown as string);
+      if (rpcError || !data) {
+        setError(rpcError?.message ?? 'Could not open this conversation.');
+        setLoading(false);
+      } else setConversationId(data as unknown as string);
+    }).catch(() => {
+      if (!active) return;
+      setError('Could not open this conversation.');
+      setLoading(false);
     });
     return () => { active = false; };
-  }, [explicitConversationId, userId]);
+  }, [explicitConversationId, userId, openAttempt]);
+
+  const retryOpen = useCallback(() => {
+    if (explicitConversationId || conversationId) return;
+    setLoading(true);
+    setOpenAttempt(attempt => attempt + 1);
+  }, [explicitConversationId, conversationId]);
 
   // ---- initial page -------------------------------------------------------
 
@@ -658,6 +674,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     loadOlder,
     sendText,
     sendMedia,
+    retryOpen,
     retry,
     deleteMessage,
     markRead,
