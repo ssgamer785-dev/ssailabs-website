@@ -46,6 +46,27 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <!-- A dynamic import, not a plain <script src>, so a failure the app
+         itself cannot recover from — e.g. required configuration missing at
+         build time — is catchable here. main.tsx and everything it imports
+         normally mount into #root within this promise and this .catch()
+         never runs; it exists only so a hard failure shows something instead
+         of leaving #root permanently empty with no visible sign anything
+         went wrong. The real error still goes to the console for
+         diagnosis — this message is deliberately generic for the visitor. -->
+    <script type="module">
+      import('/src/main.tsx').catch((err) => {
+        console.error('The app failed to start:', err);
+        const root = document.getElementById('root');
+        if (root) {
+          root.innerHTML =
+            '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;' +
+            'padding:24px;text-align:center;background:#0C091E;color:#fff;' +
+            'font-family:system-ui,-apple-system,sans-serif;font-size:15px;line-height:1.5">' +
+            'Something went wrong loading The Traders Planet. Please try again shortly.' +
+            '</div>';
+        }
+      });
+    </script>
   </body>
 </html>
