@@ -97,7 +97,7 @@ function ReplyRow({ postId, anonymous }: { postId: string; anonymous: boolean })
     <div style={css('display:flex;align-items:center;gap:9px')}>
       <div style={css('flex:1;height:38px;border-radius:999px;background:var(--surface-secondary);display:flex;align-items:center;padding:0 14px')}>
         <input
-          placeholder="Reply or send a voice note..."
+          placeholder="Write a reply..."
           value={text}
           onChange={e => setText(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void send(); } }}
