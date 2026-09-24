@@ -275,7 +275,7 @@ export function HomeScreen() {
             </div>
             <div style={quickLabel}>Official<br /><br />Update</div>
           </div>
-          <div style={quickAction} onClick={() => navigate('/community')}>
+          <div style={quickAction} onClick={() => navigate('/community?tab=students')}>
             <div style={quickIconWrap}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="8.2" r="3.1" /><path d="M3.4 19.6c0-3.1 2.5-5.5 5.6-5.5s5.6 2.4 5.6 5.5" /><path d="M16.3 5.8a3 3 0 0 1 0 5.9" /><path d="M16.8 14.4c2.3.5 4 2.5 4 5.2" /></svg>
             </div>

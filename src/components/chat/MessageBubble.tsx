@@ -8,6 +8,7 @@ import { useMediaUrl } from './useMediaUrl';
 import { CircularVideoBubble } from './CircularVideoBubble';
 import { FailedNote, MetaRow, UploadBar } from './bubble-parts';
 import logo from '../../assets/traders-planet-mark.png';
+import { Avatar } from '../ui/Avatar';
 import { MediaActions } from '../media/MediaActions';
 
 /** Static waveform, seeded off the message id so a clip always looks the same. */
@@ -140,10 +141,12 @@ function TextBubble({ message, out, onRetry }: { message: ChatMessage; out: bool
   );
 }
 
-export function MessageBubble({ message, out, incomingIsAdmin, onRetry, onDelete }: {
+export function MessageBubble({ message, out, incomingIsAdmin, incomingName, incomingAvatarKey, onRetry, onDelete }: {
   message: ChatMessage;
   out: boolean;
   incomingIsAdmin: boolean;
+  incomingName: string;
+  incomingAvatarKey: string | null;
   onRetry: () => void;
   onDelete: () => Promise<void>;
 }) {
@@ -185,7 +188,7 @@ export function MessageBubble({ message, out, incomingIsAdmin, onRetry, onDelete
     >
       {!out && (incomingIsAdmin
         ? <div style={{...AVATAR,background:'var(--ink-chip)'}}><img src={logo} alt="Admin" style={css('width:24px;height:24px;object-fit:contain')} /></div>
-        : <div style={AVATAR}>S</div>)}
+        : <Avatar name={incomingName} avatarKey={incomingAvatarKey} size={30} fontSize={12} />)}
       <div style={css('display:flex;flex-direction:column;gap:5px;align-items:flex-end')}>
         {body}
         {canDelete && !confirming && <button type="button" aria-label="Message options" onClick={() => setConfirming(true)} style={css('color:var(--text-faint);font-size:15px;padding:0 5px;line-height:1')}>⋯</button>}

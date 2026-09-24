@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { makeRand } from '../lib/rng';
 import { useAuth } from '../lib/auth-context';
+import { supabase } from '../lib/supabase';
 import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { useConversation } from '../lib/chat/useConversation';
 import { useVoiceRecorder } from '../lib/chat/useVoiceRecorder';
@@ -12,6 +13,7 @@ import { PhoneShell } from '../components/PhoneShell';
 import { MessageBubble } from '../components/chat/MessageBubble';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import logo from '../assets/traders-planet-mark.png';
+import { Avatar } from '../components/ui/Avatar';
 import { normalizePickedFile } from '../lib/media/file-types';
 
 function Wave({ bars, color, height, gap, seed }: { bars: number; color: string; height: number; gap: number; seed: number }) {
@@ -25,10 +27,12 @@ function Wave({ bars, color, height, gap, seed }: { bars: number; color: string;
 }
 
 /** Three-dot "typing" bubble, styled like an incoming message. */
-function TypingBubble() {
+function TypingBubble({ incomingIsAdmin, peerName, peerAvatarKey }: { incomingIsAdmin: boolean; peerName: string; peerAvatarKey: string | null }) {
   return (
     <div style={css('display:flex;align-items:flex-end;gap:9px')}>
-      <div style={css('width:30px;height:30px;border-radius:50%;background:var(--ink-chip);display:flex;align-items:center;justify-content:center;flex:none')}><img src={logo} alt="Admin" style={css('width:24px;height:24px;object-fit:contain')} /></div>
+      {incomingIsAdmin
+        ? <div style={css('width:30px;height:30px;border-radius:50%;background:var(--ink-chip);display:flex;align-items:center;justify-content:center;flex:none')}><img src={logo} alt="Admin" style={css('width:24px;height:24px;object-fit:contain')} /></div>
+        : <Avatar name={peerName} avatarKey={peerAvatarKey} size={30} fontSize={12} />}
       <div style={css('background:var(--surface-secondary-2);border-radius:16px 16px 16px 5px;padding:13px 15px;display:flex;align-items:center;gap:4px')}>
         {[0, 1, 2].map(i => (
           <div key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--neutral-fill)', animation: `tp-blink 1.2s ${i * 0.18}s infinite ease-in-out` }} />
@@ -48,12 +52,33 @@ function kindForFile(file: File): MediaKind | null {
   return null;
 }
 
+/** Admins need a member thread; never create a conversation with themselves. */
+export function AdminChatRoute() {
+  const { isAdmin } = useAuth();
+  const [params] = useSearchParams();
+  if (isAdmin && !params.get('c')) return <Navigate to="/admin-inbox" replace />;
+  return <AdminChatScreen />;
+}
+
 export function AdminChatScreen() {
   const navigate = useNavigate();
   const { user, isAdmin } = useAuth();
   const [params] = useSearchParams();
+  const conversationId = params.get('c');
   // Admins open a specific student's thread via ?c=<id>; students get their own.
-  const chat = useConversation(params.get('c') ?? undefined);
+  const chat = useConversation(conversationId ?? undefined);
+  const [peer, setPeer] = useState<{ name: string; avatarKey: string | null } | null>(null);
+  useEffect(() => {
+    if (!isAdmin || !conversationId) { setPeer(null); return; }
+    let active = true;
+    void supabase.rpc('admin_conversations').then(({ data }) => {
+      if (!active) return;
+      const row = (data as { conversation_id: string | null; full_name: string; avatar_key: string | null }[] | null)
+        ?.find(item => item.conversation_id === conversationId);
+      setPeer(row ? { name: row.full_name, avatarKey: row.avatar_key } : null);
+    });
+    return () => { active = false; };
+  }, [isAdmin, conversationId]);
   const recorder = useVoiceRecorder();
   const keyboardInset = useKeyboardInset();
 
@@ -157,11 +182,13 @@ export function AdminChatScreen() {
       <div style={css('flex:none;height:58px;display:flex;align-items:center;padding:0 18px;gap:11px;border-bottom:1px solid var(--border)')}>
         <AppBackButton fallback="/chat" />
         <div style={css('position:relative;flex:none')}>
-          <div style={css('width:38px;height:38px;border-radius:50%;background:var(--ink-chip);display:flex;align-items:center;justify-content:center')}><img src={logo} alt="Admin" style={css('width:31px;height:31px;object-fit:contain')} /></div>
+          {isAdmin
+            ? <Avatar name={peer?.name ?? 'Member'} avatarKey={peer?.avatarKey} size={38} fontSize={14} />
+            : <div style={css('width:38px;height:38px;border-radius:50%;background:var(--ink-chip);display:flex;align-items:center;justify-content:center')}><img src={logo} alt="Admin" style={css('width:31px;height:31px;object-fit:contain')} /></div>}
           <div style={{ position: 'absolute', right: -1, bottom: -1, width: 11, height: 11, borderRadius: '50%', background: connection === 'online' && peerOnline ? 'var(--success)' : 'var(--neutral-fill-2)', border: '2.2px solid var(--border-on-accent)' }} />
         </div>
         <div style={css('flex:1;display:flex;flex-direction:column;gap:1px;min-width:0')}>
-          <div style={css('font-size:15px;font-weight:700;letter-spacing:-.25px')}>Admin</div>
+          <div style={css('font-size:15px;font-weight:700;letter-spacing:-.25px')}>{isAdmin ? peer?.name ?? 'Member' : 'Admin'}</div>
           <div style={{ fontSize: 11.5, fontWeight: 600, color: subtitleColor }}>{subtitle}</div>
         </div>
       </div>
@@ -187,12 +214,14 @@ export function AdminChatScreen() {
               message={m}
               out={m.senderId === user?.id}
               incomingIsAdmin={!isAdmin}
+              incomingName={peer?.name ?? 'Member'}
+              incomingAvatarKey={peer?.avatarKey ?? null}
               onRetry={() => chat.retry(m.clientId)}
               onDelete={() => chat.deleteMessage(m)}
             />
           ))
         )}
-        {peerTyping && <TypingBubble />}
+        {peerTyping && <TypingBubble incomingIsAdmin={!isAdmin} peerName={peer?.name ?? 'Member'} peerAvatarKey={peer?.avatarKey ?? null} />}
         <div ref={bottomRef} />
         <div style={css('flex:1')} />
       </div>

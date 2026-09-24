@@ -2,7 +2,7 @@ const CACHE = 'tp-shell-v1';
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => Promise.allSettled(
-    ['/', '/site.webmanifest', '/icon-192.png', '/icon-512.png'].map(url => cache.add(url)),
+    ['/', '/site.webmanifest', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png'].map(url => cache.add(url)),
   )));
   self.skipWaiting();
 });

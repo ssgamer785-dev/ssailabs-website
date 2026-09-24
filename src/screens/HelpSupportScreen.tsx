@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { supportWhatsAppDisplay, supportWhatsAppUrl } from '../lib/support';
+import { useAuth } from '../lib/auth-context';
 import { B, DocumentScreen, P, Section } from '../components/ui/DocumentScreen';
 
 /**
@@ -101,6 +102,7 @@ function Faq({ q, children }: { q: string; children: ReactNode }) {
 
 export function HelpSupportScreen() {
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   // null when the number is not configured — the card is dropped rather than
   // rendered as a link that opens an empty chat with nobody.
   const whatsapp = supportWhatsAppUrl(
@@ -110,14 +112,14 @@ export function HelpSupportScreen() {
   return (
     <DocumentScreen
       title="Help & Support"
-      intro="Stuck on something? Start with the answers below — if none of them fit, the admin team is one tap away."
+      intro={isAdmin ? 'Find answers below or open the member inbox.' : 'Stuck on something? Start with the answers below — if none of them fit, the admin team is one tap away.'}
     >
       <div style={css('flex:none;padding-top:16px;display:flex;flex-direction:column;gap:9px')}>
         <ActionCard
           primary
-          onClick={() => navigate('/chat/admin')}
-          title="Message the admin team"
-          sub="The fastest route. Replies arrive in your chat."
+          onClick={() => navigate(isAdmin ? '/admin-inbox' : '/chat/admin')}
+          title={isAdmin ? 'Open Member Inbox' : 'Message the admin team'}
+          sub={isAdmin ? 'Continue conversations with members.' : 'The fastest route. Replies arrive in your chat.'}
           icon={
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
               <path d="M20.2 12.2c0 3.7-3.7 6.8-8.2 6.8-.9 0-1.8-.1-2.6-.4l-4.6 1.8 1.4-3.4c-1.5-1.3-2.4-3-2.4-4.8 0-3.7 3.7-6.8 8.2-6.8s8.2 3.1 8.2 6.8z" />

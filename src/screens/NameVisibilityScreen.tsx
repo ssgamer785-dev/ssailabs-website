@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { useAppState } from '../lib/app-state';
+import { useAuth } from '../lib/auth-context';
 import { PhoneShell } from '../components/PhoneShell';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
@@ -21,6 +22,7 @@ function LinkRow({ label, sub, onClick }: { label: string; sub: string; onClick:
 export function NameVisibilityScreen() {
   const navigate = useNavigate();
   const { userName, reveal, toggleReveal } = useAppState();
+  const { isAdmin } = useAuth();
 
   return (
     <PhoneShell>
@@ -49,7 +51,11 @@ export function NameVisibilityScreen() {
       <div style={css('flex:none;height:1px;background:var(--surface-divider);margin:0 22px')} />
       <LinkRow label="Students Community" sub="Members see Unknown User until you share your name" onClick={() => navigate('/community?tab=students')} />
       <div style={css('height:1px;background:var(--surface-divider);margin:0 22px')} />
-      <LinkRow label="Admin Inbox" sub="Direct messages, with real names shown" onClick={() => navigate('/admin-inbox')} />
+      <LinkRow
+        label={isAdmin ? 'Admin Inbox' : 'Admin Chat'}
+        sub="Direct messages, with real names shown"
+        onClick={() => navigate(isAdmin ? '/admin-inbox' : '/chat/admin')}
+      />
       <div style={css('height:1px;background:var(--surface-divider);margin:0 22px')} />
 
       <div style={css('flex:1')} />

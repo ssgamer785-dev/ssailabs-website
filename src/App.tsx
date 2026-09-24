@@ -18,7 +18,7 @@ import { CreatePostScreen } from './screens/CreatePostScreen';
 import { RiskCalculatorScreen } from './screens/RiskCalculatorScreen';
 import { EconomicCalendarScreen } from './screens/EconomicCalendarScreen';
 import { ChatListScreen } from './screens/ChatListScreen';
-import { AdminChatScreen } from './screens/AdminChatScreen';
+import { AdminChatRoute } from './screens/AdminChatScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 import { PostDetailScreen } from './screens/PostDetailScreen';
 import { NotificationsScreen } from './screens/NotificationsScreen';
@@ -62,7 +62,7 @@ export default function App() {
             <Route path="/economic-calendar" element={<RequireActivated><EconomicCalendarScreen /></RequireActivated>} />
             <Route path="/news" element={<Navigate to="/economic-calendar" replace />} />
             <Route path="/chat" element={<RequireActivated><ChatListScreen /></RequireActivated>} />
-            <Route path="/chat/admin" element={<RequireActivated><AdminChatScreen /></RequireActivated>} />
+            <Route path="/chat/admin" element={<RequireActivated><AdminChatRoute /></RequireActivated>} />
             <Route path="/profile" element={<RequireActivated><ProfileScreen /></RequireActivated>} />
             <Route path="/profile/personal" element={<RequireActivated><PersonalInformationScreen /></RequireActivated>} />
             <Route path="/profile/name-visibility" element={<RequireActivated><NameVisibilityScreen /></RequireActivated>} />
