@@ -1,8 +1,7 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback } from 'react';
 import moneySound from '../assets/money-sound-for-trader.m4a';
 import { createOneShotAudioPlayer } from './audio/one-shot-audio';
-
-let bootHandled = false;
+import { audioPreferenceEnabled } from './audio/preferences';
 
 const moneyPlayer = createOneShotAudioPlayer({
   createContext: () => {
@@ -25,21 +24,24 @@ const moneyPlayer = createOneShotAudioPlayer({
   },
 });
 
+let preloadStarted = false;
+
+/** Pre-decode at boot so a later refresh gesture can schedule without waiting on network I/O. */
+export function preloadMoneyRefreshSound(): void {
+  if (preloadStarted) return;
+  preloadStarted = true;
+  void moneyPlayer.preload();
+}
+
 export function useMoneySound() {
-  useEffect(() => {
-    if (bootHandled) return;
-    bootHandled = true;
-    const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
-    void moneyPlayer.preload().then(() => {
-      if (navigation?.type === 'reload') moneyPlayer.tryAutoplay();
-    });
-  }, []);
 
   // PhoneShell calls this directly from its pull-to-refresh pointer gesture.
-  return useCallback(() => moneyPlayer.playFromGesture(), []);
+  return useCallback(() => {
+    if (audioPreferenceEnabled('refreshSound')) moneyPlayer.playFromGesture();
+  }, []);
 }
 
 /** Shared entry point for explicit in-app refresh/retry buttons. */
 export function playMoneyRefreshSound(): void {
-  moneyPlayer.playFromGesture();
+  if (audioPreferenceEnabled('refreshSound')) moneyPlayer.playFromGesture();
 }

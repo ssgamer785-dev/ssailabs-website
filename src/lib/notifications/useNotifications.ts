@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabase';
 import { useAuth } from '../auth-context';
 import type { NotificationKind } from '../database.types';
-import { playNotificationChime } from '../useNotificationSound';
 
 const PAGE_SIZE = 30;
 
@@ -93,14 +92,8 @@ export function useNotifications(): UseNotifications {
         { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
         payload => {
           if (!active) return;
-          // Only a genuinely new, still-unread row is worth a sound. An UPDATE
-          // is this user marking something read — chiming for that would mean
-          // the app rings at you for tidying up. The chime is keyed by row id,
-          // so the badge hook below seeing the same INSERT cannot double-strike.
-          if (payload.eventType === 'INSERT') {
-            const row = payload.new as Partial<NotificationRow> | undefined;
-            if (row && !row.read_at && document.visibilityState === 'visible') playNotificationChime(row.id);
-          }
+          // Sound is centralized in PushNotifications so event rows cannot be
+          // played twice by the feed, badge and app-wide listeners.
           void refresh();
         })
       .subscribe();
@@ -162,12 +155,8 @@ export function useUnreadNotificationCount(): number {
         payload => {
           if (!active) return;
           // Screens that show only the badge never mount the feed hook, so the
-          // chime has to be raised here too. When both are mounted the id guard
-          // inside playNotificationChime collapses the two calls into one.
-          if (payload.eventType === 'INSERT') {
-            const row = payload.new as Partial<NotificationRow> | undefined;
-            if (row && !row.read_at && document.visibilityState === 'visible') playNotificationChime(row.id);
-          }
+          // unread count is refreshed here too. Sound is handled by the single
+          // app-wide listener in PushNotifications.
           void refresh();
         })
       .subscribe();

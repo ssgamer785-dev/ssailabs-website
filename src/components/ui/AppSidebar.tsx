@@ -44,6 +44,10 @@ const ITEMS: { route: string; label: string; icon: ReactNode }[] = [
     icon: <g><path d="M18 16.4H6l1.4-2.3V11a4.6 4.6 0 0 1 9.2 0v3.1z" /><path d="M10.3 19.2a1.9 1.9 0 0 0 3.4 0" /></g>,
   },
   {
+    route: '/haptics', label: 'HAPTICS',
+    icon: <g><path d="M4 9v6M8 6v12M12 9v6M16 6v12M20 9v6" /></g>,
+  },
+  {
     route: '/profile', label: 'Profile',
     icon: <g><circle cx="12" cy="8" r="3.4" /><path d="M5.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6" /></g>,
   },

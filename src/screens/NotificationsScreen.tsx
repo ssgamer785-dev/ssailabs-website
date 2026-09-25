@@ -7,7 +7,6 @@ import { PhoneShell, useRefreshHandler } from '../components/PhoneShell';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 import { notificationDestination } from '../lib/notifications/destination';
-import { notificationSoundEnabled, setNotificationSoundEnabled } from '../lib/useNotificationSound';
 
 const NCATS = ['All', 'Community', 'Chat'] as const;
 
@@ -60,7 +59,6 @@ export function NotificationsScreen() {
   const { notifications, loading, error, markRead, markAllRead, refresh } = useNotifications();
   useRefreshHandler(refresh);
   const [notifCat, setNotifCat] = useState<typeof NCATS[number]>('All');
-  const [soundOn, setSoundOn] = useState(notificationSoundEnabled);
 
   const isUnread = (n: AppNotification) => !n.readAt;
 
@@ -98,10 +96,6 @@ export function NotificationsScreen() {
         <div style={css('flex:1;text-align:center;font-size:17px;font-weight:700;letter-spacing:-.35px;white-space:nowrap')}>Notifications</div>
         <div onClick={markAllRead} style={css('font-size:12.5px;font-weight:600;color:var(--accent-ink);cursor:pointer;flex:none;white-space:nowrap')}>Mark all read</div>
       </div>
-      <button type="button" aria-pressed={soundOn} onClick={() => { const next = !soundOn; setNotificationSoundEnabled(next); setSoundOn(next); }}
-        style={css('align-self:flex-end;margin:0 20px 8px;color:var(--accent-ink);font-size:12px;font-weight:600;min-height:36px;cursor:pointer')}>
-        Notification sound: {soundOn ? 'On' : 'Off'}
-      </button>
       <div style={css('flex:none;padding:4px 20px 0;display:flex;gap:9px;overflow:hidden')}>
         {NCATS.map(c => {
           const on = notifCat === c;

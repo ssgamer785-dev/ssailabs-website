@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { notificationSoundSettingEnabled } from './useNotificationSound';
+import { markNotificationSoundSeen, notificationSoundSettingEnabled } from './useNotificationSound';
 
 describe('notification sound preference', () => {
   it('is enabled by default and remains enabled when explicitly stored on', () => {
@@ -9,5 +9,11 @@ describe('notification sound preference', () => {
 
   it('respects an explicit opt-out', () => {
     expect(notificationSoundSettingEnabled('off')).toBe(false);
+  });
+
+  it('deduplicates the same Realtime notification delivered to overlapping listeners', () => {
+    const eventId = `notif-${crypto.randomUUID()}`;
+    expect(markNotificationSoundSeen(eventId)).toBe(true);
+    expect(markNotificationSoundSeen(eventId)).toBe(false);
   });
 });

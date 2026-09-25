@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth-context';
 import { registerWorker, subscribePush, supportsPush } from '../lib/notifications/push';
 import { supabase } from '../lib/supabase';
-import { playNotificationChime } from '../lib/useNotificationSound';
+import { playNotificationChime, unlockNotificationAudio } from '../lib/useNotificationSound';
+import { foregroundNotificationSoundId, incomingStudentPostSoundId } from '../lib/notifications/sound-events';
 
 const REMIND_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 const RESYNC_AFTER_MS = 6 * 60 * 60 * 1000;
@@ -72,14 +73,24 @@ export function PushNotifications() {
     if (!user || !isActivated) return;
     const sub = supabase.channel(`app-notifications-${user.id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, payload => {
-        const row = payload.new as { id?: string; read_at?: string | null };
-        if (row.id && !row.read_at && document.visibilityState === 'visible') playNotificationChime(row.id);
+        const id = foregroundNotificationSoundId(payload.new as { id?: string; read_at?: string | null }, document.visibilityState === 'visible');
+        if (id) playNotificationChime(id);
+      })
+      // Student-community posts do not create per-recipient notification rows;
+      // listen app-wide so a new post still chimes while the member is elsewhere.
+      // Official posts already fan out notification rows in Postgres, so excluding
+      // them here prevents a second event path from sounding the same announcement.
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, payload => {
+        const id = incomingStudentPostSoundId(payload.new as { id?: string; author_id?: string; channel?: string }, user.id, document.visibilityState === 'visible');
+        if (id) playNotificationChime(id);
       }).subscribe();
     return () => { void supabase.removeChannel(sub); };
   }, [user?.id, isActivated]);
 
   async function enable() {
     if (busy) return;
+    // This executes in the Allow button's trusted click before awaiting the OS prompt.
+    unlockNotificationAudio();
     setBusy(true);
     setError(null);
     try {

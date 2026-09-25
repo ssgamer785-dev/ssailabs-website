@@ -33,6 +33,8 @@ import { HelpSupportScreen } from './screens/HelpSupportScreen';
 import { PushNotifications } from './components/PushNotifications';
 import { LifecycleSplash } from './components/LifecycleSplash';
 import { NotificationNavigation } from './components/NotificationNavigation';
+import { AudioPreferencesRuntime } from './components/AudioPreferencesRuntime';
+import { HapticsScreen } from './screens/HapticsScreen';
 
 export default function App() {
   return (
@@ -40,6 +42,7 @@ export default function App() {
       <AuthProvider>
       <AppStateProvider>
         <BrowserRouter>
+          <AudioPreferencesRuntime />
           <LifecycleSplash />
           <NotificationNavigation />
           <PushNotifications />
@@ -80,6 +83,7 @@ export default function App() {
             <Route path="/post" element={<RequireActivated><PostDetailScreen /></RequireActivated>} />
             <Route path="/analysis" element={<RequireActivated><PostDetailScreen /></RequireActivated>} />
             <Route path="/notifications" element={<RequireActivated><NotificationsScreen /></RequireActivated>} />
+            <Route path="/haptics" element={<RequireActivated><HapticsScreen /></RequireActivated>} />
             <Route path="/admin-inbox" element={<RequireAdmin><AdminInboxScreen /></RequireAdmin>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
