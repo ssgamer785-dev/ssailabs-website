@@ -4,6 +4,29 @@ import { useAuth } from '../auth-context';
 import type { NotificationKind } from '../database.types';
 
 const PAGE_SIZE = 30;
+export const NOTIFICATIONS_CHANGED_EVENT = 'tp:notifications-changed';
+
+async function deleteNotificationRequest(path: string): Promise<void> {
+  const { data, error } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (error || !token) throw new Error('Your session expired. Sign in again and retry.');
+
+  let response: Response;
+  try {
+    response = await fetch(path, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+  } catch {
+    throw new Error('Could not reach the server. Check your connection and retry.');
+  }
+  if (response.ok) return;
+
+  const payload = await response.json().catch(() => null) as { error?: string } | null;
+  if (response.status === 401) throw new Error('Your session expired. Sign in again and retry.');
+  throw new Error(payload?.error || 'Could not delete notifications. Please retry.');
+}
+
+function announceNotificationsChanged(userId: string): void {
+  window.dispatchEvent(new CustomEvent(NOTIFICATIONS_CHANGED_EVENT, { detail: { userId } }));
+}
 
 export interface AppNotification {
   id: string;
@@ -47,6 +70,8 @@ export interface UseNotifications {
   error: string | null;
   markRead: (id: string) => Promise<void>;
   markAllRead: () => Promise<void>;
+  deleteNotification: (id: string) => Promise<void>;
+  deleteAllNotifications: () => Promise<void>;
   /** Re-reads the feed. Already used internally; exposed for pull-to-refresh. */
   refresh: () => Promise<void>;
 }
@@ -125,9 +150,53 @@ export function useNotifications(): UseNotifications {
     }
   }, [notifications]);
 
+  const deleteNotification = useCallback(async (id: string) => {
+    if (!userId) throw new Error('Sign in to manage notifications.');
+    const target = notifications.find(n => n.id === id);
+    if (!target) return;
+
+    setError(null);
+    setNotifications(prev => prev.filter(n => n.id !== id));
+    try {
+      await deleteNotificationRequest(`/api/notifications/${encodeURIComponent(id)}`);
+      if (activeUser.current === userId) announceNotificationsChanged(userId);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'Could not delete this notification. Please retry.';
+      if (activeUser.current === userId) {
+        setNotifications(prev => prev.some(n => n.id === id)
+          ? prev
+          : [...prev, target].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+        setError(message);
+      }
+      throw new Error(message);
+    }
+  }, [notifications, userId]);
+
+  const deleteAllNotifications = useCallback(async () => {
+    if (!userId) throw new Error('Sign in to manage notifications.');
+    const previous = notifications;
+    setError(null);
+    setNotifications([]);
+    try {
+      await deleteNotificationRequest('/api/notifications');
+      if (activeUser.current === userId) announceNotificationsChanged(userId);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'Could not clear notifications. Please retry.';
+      if (activeUser.current === userId) {
+        setNotifications(prev => {
+          const existing = new Set(prev.map(n => n.id));
+          return [...prev, ...previous.filter(n => !existing.has(n.id))]
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        });
+        setError(message);
+      }
+      throw new Error(message);
+    }
+  }, [notifications, userId]);
+
   const unreadCount = notifications.reduce((n, item) => n + (item.readAt ? 0 : 1), 0);
 
-  return { notifications, unreadCount, loading, error, markRead, markAllRead, refresh };
+  return { notifications, unreadCount, loading, error, markRead, markAllRead, deleteNotification, deleteAllNotifications, refresh };
 }
 
 /**
@@ -148,6 +217,12 @@ export function useUnreadNotificationCount(): number {
     };
     void refresh();
 
+    const onNotificationsChanged = (event: Event) => {
+      const changedUserId = (event as CustomEvent<{ userId?: string }>).detail?.userId;
+      if (changedUserId === user.id) void refresh();
+    };
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onNotificationsChanged);
+
     const sub = supabase
       .channel('notification-badge')
       .on('postgres_changes',
@@ -161,7 +236,11 @@ export function useUnreadNotificationCount(): number {
         })
       .subscribe();
 
-    return () => { active = false; supabase.removeChannel(sub); };
+    return () => {
+      active = false;
+      window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onNotificationsChanged);
+      supabase.removeChannel(sub);
+    };
   }, [user]);
 
   return count;

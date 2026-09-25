@@ -15,6 +15,7 @@ import { adminAuthRouter } from "./admin-auth.js";
 import { profileMediaRouter } from "./profile-media.js";
 import { fxRouter } from "./fx.js";
 import { pushRouter } from "./push.js";
+import { notificationsRouter } from "./notifications.js";
 
 dotenv.config();
 
@@ -46,6 +47,8 @@ app.use("/api/profile", profileMediaRouter());
 // Cached USD-based FX rates for the Risk Calculator. No auth: public rate data.
 app.use("/api/fx", fxRouter());
 app.use("/api/push", pushRouter());
+// Authenticated, per-owner notification deletion; does not touch content rows.
+app.use("/api/notifications", notificationsRouter());
 
 interface Lead {
   id: string;

@@ -56,13 +56,44 @@ function whenLabel(iso: string): string {
 
 export function NotificationsScreen() {
   const navigate = useNavigate();
-  const { notifications, loading, error, markRead, markAllRead, refresh } = useNotifications();
+  const { notifications, unreadCount, loading, error, markRead, markAllRead, deleteNotification, deleteAllNotifications, refresh } = useNotifications();
   useRefreshHandler(refresh);
   const [notifCat, setNotifCat] = useState<typeof NCATS[number]>('All');
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState('');
 
   const isUnread = (n: AppNotification) => !n.readAt;
 
-  function Rows({ when }: { when: 'today' | 'earlier' }) {
+  async function removeNotification(id: string) {
+    setDeletingId(id);
+    setFeedback('Deleting notification…');
+    try {
+      await deleteNotification(id);
+      setFeedback('Notification deleted.');
+    } catch {
+      setFeedback('The notification could not be deleted. Please retry.');
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  async function clearAllNotifications() {
+    setDeletingAll(true);
+    setFeedback('Clearing notifications…');
+    try {
+      await deleteAllNotifications();
+      setConfirmClearAll(false);
+      setFeedback('All notifications cleared.');
+    } catch {
+      setFeedback('Notifications could not be cleared. Please retry.');
+    } finally {
+      setDeletingAll(false);
+    }
+  }
+
+  function renderRows(when: 'today' | 'earlier') {
     const list = notifications.filter(n =>
       (when === 'today' ? isToday(n.createdAt) : !isToday(n.createdAt))
       && (notifCat === 'All' || categoryOf(n.kind) === notifCat));
@@ -72,16 +103,21 @@ export function NotificationsScreen() {
         {list.map(n => {
           const unread = isUnread(n);
           return (
-            <div key={n.id} role="link" tabIndex={0} onKeyDown={event => { if (event.key === 'Enter') { void markRead(n.id); navigate(notificationDestination(n)); } }} onClick={() => { void markRead(n.id); navigate(notificationDestination(n)); }} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 20px', cursor: 'pointer', background: unread ? 'var(--accent-tint-2)' : 'transparent', borderLeft: unread ? '3px solid var(--accent)' : '3px solid transparent' }}>
-              <NotifIcon kind={n.kind} />
-              <div style={css('flex:1;display:flex;flex-direction:column;gap:3px;min-width:0')}>
-                <div style={{ fontSize: 13.5, fontWeight: unread ? 700 : 600, letterSpacing: '-.2px', lineHeight: 1.35 }}>{n.title}</div>
-                <div style={css('font-size:12.5px;color:var(--text-muted);line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>{n.body}</div>
-              </div>
-              <div style={css('flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:7px')}>
-                <div style={{ fontSize: 11, color: unread ? 'var(--accent-ink)' : 'var(--text-faint)', fontWeight: unread ? 600 : 400, whiteSpace: 'nowrap' }}>{whenLabel(n.createdAt)}</div>
-                {unread && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)' }} />}
-              </div>
+            <div key={n.id} style={{ display: 'flex', alignItems: 'stretch', gap: 2, padding: '4px 12px 4px 0', background: unread ? 'var(--accent-tint-2)' : 'transparent', borderLeft: unread ? '3px solid var(--accent)' : '3px solid transparent' }}>
+              <button type="button" aria-label={`Open notification: ${n.title}`} onClick={() => { void markRead(n.id); navigate(notificationDestination(n)); }} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start', gap: 12, padding: '8px 4px 8px 17px', color: 'inherit', textAlign: 'left', border: 0, background: 'transparent', cursor: 'pointer', font: 'inherit' }}>
+                <NotifIcon kind={n.kind} />
+                <div style={css('flex:1;display:flex;flex-direction:column;gap:3px;min-width:0')}>
+                  <div style={{ fontSize: 13.5, fontWeight: unread ? 700 : 600, letterSpacing: '-.2px', lineHeight: 1.35 }}>{n.title}</div>
+                  <div style={css('font-size:12.5px;color:var(--text-muted);line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>{n.body}</div>
+                </div>
+                <div style={css('flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:7px')}>
+                  <div style={{ fontSize: 11, color: unread ? 'var(--accent-ink)' : 'var(--text-faint)', fontWeight: unread ? 600 : 400, whiteSpace: 'nowrap' }}>{whenLabel(n.createdAt)}</div>
+                  {unread && <div aria-label="Unread" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)' }} />}
+                </div>
+              </button>
+              <button type="button" aria-label={`Delete notification: ${n.title}`} title="Delete notification" disabled={!!deletingId || deletingAll} onClick={() => void removeNotification(n.id)} style={{ width: 44, minHeight: 44, flex: 'none', alignSelf: 'center', display: 'grid', placeItems: 'center', border: 0, borderRadius: 12, color: 'var(--text-faint)', background: 'transparent', cursor: deletingAll || deletingId ? 'wait' : 'pointer', opacity: deletingAll || deletingId ? .5 : 1 }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5.5 7l1 13h11l1-13M9 7V4h6v3" /></svg>
+              </button>
             </div>
           );
         })}
@@ -94,7 +130,15 @@ export function NotificationsScreen() {
       <div style={css('flex:none;height:52px;display:flex;align-items:center;padding:0 20px;gap:12px')}>
         <AppBackButton fallback="/home" />
         <div style={css('flex:1;text-align:center;font-size:17px;font-weight:700;letter-spacing:-.35px;white-space:nowrap')}>Notifications</div>
-        <div onClick={markAllRead} style={css('font-size:12.5px;font-weight:600;color:var(--accent-ink);cursor:pointer;flex:none;white-space:nowrap')}>Mark all read</div>
+        <div style={css('width:42px;flex:none')} />
+      </div>
+      <div style={css('flex:none;min-height:38px;padding:1px 20px 3px;display:flex;align-items:center;justify-content:flex-end;gap:16px')}>
+        {feedback && <div role="status" aria-live="polite" style={css('flex:1;min-width:0;font-size:11.5px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap')}>{feedback}</div>}
+        <button type="button" disabled={!unreadCount} onClick={() => void markAllRead()} style={{ padding: '7px 0', border: 0, background: 'transparent', color: unreadCount ? 'var(--accent-ink)' : 'var(--text-faint)', fontSize: 12, fontWeight: 600, cursor: unreadCount ? 'pointer' : 'default', whiteSpace: 'nowrap' }}>Mark all read</button>
+        <button type="button" disabled={!notifications.length || deletingAll || !!deletingId} onClick={() => setConfirmClearAll(true)} style={{ padding: '7px 0', display: 'inline-flex', alignItems: 'center', gap: 5, border: 0, background: 'transparent', color: notifications.length ? 'var(--danger-ink)' : 'var(--text-faint)', fontSize: 12, fontWeight: 600, cursor: notifications.length && !deletingAll && !deletingId ? 'pointer' : 'default', whiteSpace: 'nowrap' }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5.5 7l1 13h11l1-13M9 7V4h6v3" /></svg>
+          Clear all
+        </button>
       </div>
       <div style={css('flex:none;padding:4px 20px 0;display:flex;gap:9px;overflow:hidden')}>
         {NCATS.map(c => {
@@ -123,14 +167,26 @@ export function NotificationsScreen() {
         ) : (
         <>
         <div style={css('flex:none;padding:0 20px 9px;font-size:11px;font-weight:700;color:var(--text-faint);letter-spacing:.07em;white-space:nowrap')}>TODAY</div>
-        <Rows when="today" />
+        {renderRows('today')}
         <div style={css('flex:none;padding:16px 20px 9px;font-size:11px;font-weight:700;color:var(--text-faint);letter-spacing:.07em;white-space:nowrap')}>EARLIER</div>
-        <Rows when="earlier" />
+        {renderRows('earlier')}
         <div style={css('height:16px;flex:none')} />
         </>
         )}
       </div>
       <AuthenticatedBottomNav />
+      {confirmClearAll && (
+        <div onMouseDown={event => { if (event.target === event.currentTarget && !deletingAll) setConfirmClearAll(false); }} style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 22, background: 'rgba(7, 15, 31, .52)', backdropFilter: 'blur(4px)' }}>
+          <section role="alertdialog" aria-modal="true" aria-labelledby="clear-notifications-title" aria-describedby="clear-notifications-description" style={{ width: '100%', maxWidth: 360, padding: 22, border: '1px solid var(--border)', borderRadius: 20, background: 'var(--surface)', boxShadow: '0 20px 60px rgba(0,0,0,.24)' }}>
+            <div style={css('font-size:16px;font-weight:700;letter-spacing:-.25px')} id="clear-notifications-title">Clear all notifications?</div>
+            <div id="clear-notifications-description" style={css('margin-top:8px;font-size:13px;color:var(--text-muted);line-height:1.5')}>This removes notifications from your account only. Messages and community posts will not be deleted.</div>
+            <div style={css('display:flex;justify-content:flex-end;gap:10px;margin-top:22px')}>
+              <button type="button" autoFocus disabled={deletingAll} onClick={() => setConfirmClearAll(false)} style={css('min-height:42px;padding:0 15px;border:1px solid var(--border);border-radius:11px;background:var(--surface-secondary);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer')}>Cancel</button>
+              <button type="button" disabled={deletingAll} onClick={() => void clearAllNotifications()} style={css('min-height:42px;padding:0 15px;border:0;border-radius:11px;background:var(--danger-ink);color:white;font-size:13px;font-weight:650;cursor:pointer;opacity:' + (deletingAll ? '.7' : '1'))}>{deletingAll ? 'Clearing…' : 'Clear all'}</button>
+            </div>
+          </section>
+        </div>
+      )}
     </PhoneShell>
   );
 }

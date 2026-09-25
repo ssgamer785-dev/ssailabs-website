@@ -134,11 +134,8 @@ function OfficialUpdateCard({ post, onOpen }: { post: FeedPost; onOpen: () => vo
         <path d="M0,80 L16,74 L32,70 L48,60 L64,63 L80,50 L96,44 L112,32 L128,27 L144,15 L168,6 L168,86 L0,86 Z" fill="rgba(11,95,239,.09)" />
         <path d="M0,80 L16,74 L32,70 L48,60 L64,63 L80,50 L96,44 L112,32 L128,27 L144,15 L168,6" fill="none" stroke="rgba(11,95,239,.32)" strokeWidth={1.3} />
       </svg>
-      <div style={css('position:absolute;top:14px;right:15px;width:36px;height:36px;border-radius:12px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center')}>
-        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M4.5 5.2c0-1 .8-1.8 1.8-1.8h1.9c.8 0 1.5.5 1.7 1.3l.7 2.5c.2.7-.1 1.5-.7 1.9l-1.2.8a11 11 0 0 0 4.4 4.4l.8-1.2c.4-.6 1.2-.9 1.9-.7l2.5.7c.8.2 1.3.9 1.3 1.7v1.9c0 1-.8 1.8-1.8 1.8C10.6 20.3 4.5 14.2 4.5 5.2z" /></svg>
-      </div>
       <div style={css('position:relative;width:24px;height:3px;border-radius:2px;background:var(--gold)')} />
-      <div style={css('position:relative;margin-top:9px;font-size:14.5px;font-weight:700;letter-spacing:-.25px;padding-right:44px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
+      <div style={css('position:relative;margin-top:9px;font-size:14.5px;font-weight:700;letter-spacing:-.25px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
         {headline(post)}
       </div>
       {summaryLines(post).map((line, i) => (
