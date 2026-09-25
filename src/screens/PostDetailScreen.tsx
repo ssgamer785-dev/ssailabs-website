@@ -9,6 +9,8 @@ import { useComments } from '../lib/community/useComments';
 import { PhoneShell } from '../components/PhoneShell';
 import { PostMedia, PdfRow } from '../components/community/PostMedia';
 import { formatDateTime } from '../lib/format-date-time';
+import { displayPostBody } from '../lib/community/display-body';
+import { playMoneyRefreshSound } from '../lib/useMoneySound';
 import { PollCard } from '../components/community/PollCard';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
@@ -117,7 +119,7 @@ export function PostDetailScreen() {
           <Hoverable
             as="button"
             type="button"
-            onClick={() => void refresh()}
+            onClick={() => { playMoneyRefreshSound(); void refresh(); }}
             className="pressable row-focus"
             style={css('height:38px;padding:0 16px;border-radius:10px;border:1px solid var(--border-strong);display:flex;align-items:center;font-size:13px;font-weight:700;color:var(--text-primary);cursor:pointer;background:var(--surface)')}
             hoverStyle={css('background:var(--surface-hover)')}
@@ -149,6 +151,7 @@ export function PostDetailScreen() {
 
   const official = post.channel === 'official';
   const heading = official ? 'Official Update' : 'Community Post';
+  const visibleBody = displayPostBody(post.title, post.body);
 
   // One shared decision (resolveAuthorName) rather than logic re-implemented
   // per screen — see its own doc comment for why that duplication was the bug.
@@ -207,9 +210,9 @@ export function PostDetailScreen() {
             {post.title}
           </div>
         )}
-        {post.body && (
+        {visibleBody && (
           <div style={css('flex:none;margin-top:6px;font-size:13.5px;line-height:1.55;color:var(--text-secondary);white-space:pre-wrap;word-break:break-word')}>
-            {linkifiedText(post.body)}
+            {linkifiedText(visibleBody)}
           </div>
         )}
 

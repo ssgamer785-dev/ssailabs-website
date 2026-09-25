@@ -10,6 +10,7 @@ class FakeSource {
   disconnected = 0;
   connect(_destination: AudioNode) {}
   start(when = 0) { this.startedAt = when; }
+  stop() { this.finish(); }
   disconnect() { this.disconnected += 1; }
   finish() { this.onended?.(new Event('ended')); }
 }
@@ -21,8 +22,17 @@ class FakeContext {
   sources: FakeSource[] = [];
   closeCount = 0;
   resumeCount = 0;
+  deferResume = false;
+  resumePending: (() => void) | null = null;
   constructor(state: AudioContextState = 'running') { this.state = state; }
-  resume() { this.resumeCount += 1; this.state = 'running'; return Promise.resolve(); }
+  resume() {
+    this.resumeCount += 1;
+    if (this.deferResume) return new Promise<void>(resolve => {
+      this.resumePending = () => { this.state = 'running'; resolve(); };
+    });
+    this.state = 'running';
+    return Promise.resolve();
+  }
   close() { this.closeCount += 1; this.state = 'closed'; return Promise.resolve(); }
   decodeAudioData(_bytes: ArrayBuffer) { return Promise.resolve({ duration: 2 } as AudioBuffer); }
   createBufferSource() { const source = new FakeSource(); this.sources.push(source); return source; }
@@ -73,6 +83,34 @@ describe('one-shot refresh sound lifecycle', () => {
     expect(context.sources).toHaveLength(0);
     expect(context.closeCount).toBe(1);
     expect(player.state()).toEqual({ queued: 0, active: 0, hasContext: false });
+  });
+
+  it('schedules a preloaded sound synchronously during the refresh gesture', async () => {
+    const contexts: FakeContext[] = [];
+    let loads = 0;
+    const player = createOneShotAudioPlayer({
+      createContext: () => {
+        const context = new FakeContext(contexts.length ? 'suspended' : 'running');
+        if (contexts.length) context.deferResume = true;
+        contexts.push(context);
+        return context;
+      },
+      loadBuffer: async () => { loads += 1; return { duration: 2 }; },
+    });
+
+    await player.preload();
+    expect(contexts[0].closeCount).toBe(1);
+    expect(loads).toBe(1);
+
+    player.playFromGesture();
+    expect(contexts[1].sources).toHaveLength(1);
+    expect(contexts[1].sources[0].startedAt).toBe(0.01);
+    expect(contexts[1].state).toBe('suspended');
+    contexts[1].resumePending?.();
+    await flush();
+    expect(contexts[1].state).toBe('running');
+    expect(loads).toBe(1);
+    contexts[1].sources[0].finish();
   });
 
   it('keeps the original refresh recording byte-for-byte unchanged', async () => {

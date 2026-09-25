@@ -112,10 +112,11 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       const fns = [...refreshHandlers];
       if (!fns.length) { settle(); return; }
 
+      // Start the sound in the release/touch gesture before animation or fetch.
+      playMoneyRef.current();
       state.busy = true;
       state.target = 54;
       run();
-      playMoneyRef.current();
 
       const started = Date.now();
       try {

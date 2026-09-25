@@ -8,6 +8,7 @@ import { useRefreshHandler } from './PhoneShell';
 import { useComments } from '../lib/community/useComments';
 import { PostMedia } from './community/PostMedia';
 import { formatDateTime } from '../lib/format-date-time';
+import { displayPostBody } from '../lib/community/display-body';
 import { linkifiedText } from './ui/LinkifiedText';
 import { PollCard } from './community/PollCard';
 import { resolveAuthorName } from '../lib/community/author-name';
@@ -435,6 +436,7 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
     official, isAdminViewer: admin, isMine: post.isMine, reveal,
     isAnonymous: post.isAnonymous, authorName: post.authorName, myName: userName,
   });
+  const body = displayPostBody(post.title, post.body);
 
   const role = official
     ? 'Admin'
@@ -480,13 +482,13 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
       </header>
 
       {/* ---- body ---- */}
-      {(post.title || post.body) && (
+      {(post.title || body) && (
         <div onClick={onOpen} style={css('padding:0 18px;display:flex;flex-direction:column;gap:4px;cursor:pointer')}>
           {post.title && (
             <div style={css('font-size:15px;font-weight:700;letter-spacing:-.3px;line-height:1.3;text-wrap:pretty')}>{post.title}</div>
           )}
-          {post.body && (
-            <div style={css('font-size:13.5px;line-height:1.5;color:var(--text-secondary);white-space:pre-wrap;word-break:break-word')}>{linkifiedText(post.body)}</div>
+          {body && (
+            <div style={css('font-size:13.5px;line-height:1.5;color:var(--text-secondary);white-space:pre-wrap;word-break:break-word')}>{linkifiedText(body)}</div>
           )}
         </div>
       )}

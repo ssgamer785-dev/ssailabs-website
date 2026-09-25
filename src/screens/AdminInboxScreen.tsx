@@ -6,6 +6,7 @@ import { formatTime } from '../lib/chat/types';
 import { useAdminConversations, openConversationWith, type AdminConversation } from '../lib/chat/useAdminConversations';
 import { useConversationsPresence } from '../lib/chat/useConversationsPresence';
 import { PhoneShell, useRefreshHandler } from '../components/PhoneShell';
+import { playMoneyRefreshSound } from '../lib/useMoneySound';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 import { Avatar } from '../components/ui/Avatar';
@@ -186,7 +187,7 @@ export function AdminInboxScreen() {
               read it as &ldquo;no members&rdquo;.
             </div>
             <Hoverable
-              onClick={() => void refresh()}
+              onClick={() => { playMoneyRefreshSound(); void refresh(); }}
               className="pressable"
               style={css('height:34px;padding:0 14px;border-radius:9px;border:1px solid var(--danger-border);display:flex;align-items:center;font-size:12px;font-weight:700;color:var(--danger-ink);cursor:pointer')}
               hoverStyle={css('background:var(--danger-soft)')}

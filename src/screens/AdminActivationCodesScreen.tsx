@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { PhoneShell } from '../components/PhoneShell';
+import { playMoneyRefreshSound } from '../lib/useMoneySound';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import {
   createActivationCode, listActivationCodes,
@@ -180,7 +181,7 @@ export function AdminActivationCodesScreen() {
               issued are unaffected.
             </div>
             <Hoverable
-              onClick={() => { setLoading(true); void refresh(); }}
+              onClick={() => { playMoneyRefreshSound(); setLoading(true); void refresh(); }}
               className="pressable"
               style={css('height:34px;padding:0 14px;border-radius:9px;border:1px solid var(--danger-border);display:flex;align-items:center;font-size:12px;font-weight:700;color:var(--danger-ink);cursor:pointer')}
               hoverStyle={css('background:var(--danger-soft)')}

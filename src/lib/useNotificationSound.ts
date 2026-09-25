@@ -34,6 +34,7 @@ type Ctor = typeof AudioContext;
 let ctx: AudioContext | null = null;
 
 function context(): AudioContext | null {
+  if (ctx?.state === 'closed') ctx = null;
   if (ctx) return ctx;
   const Ctor: Ctor | undefined =
     typeof window === 'undefined'
@@ -63,8 +64,12 @@ const CHIMED_CAP = 200;
 let lastChimeAt = 0;
 const SOUND_SETTING = 'tp:notification-sound';
 
+export function notificationSoundSettingEnabled(value: string | null): boolean {
+  return value !== 'off';
+}
+
 export function notificationSoundEnabled(): boolean {
-  try { return localStorage.getItem(SOUND_SETTING) !== 'off'; }
+  try { return notificationSoundSettingEnabled(localStorage.getItem(SOUND_SETTING)); }
   catch { return true; }
 }
 
@@ -95,50 +100,50 @@ export function playNotificationChime(id?: string): void {
   if (!audio) return;
 
   try {
-    // Suspended is the normal state before the page's first gesture, and after
-    // a tab has been backgrounded. resume() is a promise that may reject.
-    if (audio.state === 'suspended') void audio.resume().catch(() => {});
+    // Schedule only after resume resolves. Scheduling against a frozen
+    // currentTime before that promise settles caused silent/delayed chimes on
+    // suspended contexts, especially after a background/foreground cycle.
+    const ready = audio.state === 'running' ? Promise.resolve() : audio.resume();
+    void ready.then(() => {
+      if (ctx !== audio || audio.state !== 'running') return;
+      const startedAt = Date.now();
+      const now = audio.currentTime;
 
-    const now = audio.currentTime;
+      // One shared lowpass: the raw sines have no harmonics above their
+      // fundamental, but the attack transient does, and it is what makes an
+      // otherwise smooth tone click at onset.
+      const tone = audio.createBiquadFilter();
+      tone.type = 'lowpass';
+      tone.frequency.value = 5200;
+      tone.Q.value = 0.7;
+      tone.connect(audio.destination);
 
-    // One shared lowpass: the raw sines have no harmonics above their
-    // fundamental, but the attack transient does, and it is what makes an
-    // otherwise smooth tone click at onset.
-    const tone = audio.createBiquadFilter();
-    tone.type = 'lowpass';
-    tone.frequency.value = 5200;
-    tone.Q.value = 0.7;
-    tone.connect(audio.destination);
+      for (const p of PARTIALS) {
+        const osc = audio.createOscillator();
+        const gain = audio.createGain();
+        const start = now + p.delay;
 
-    for (const p of PARTIALS) {
-      const osc = audio.createOscillator();
-      const gain = audio.createGain();
-      const start = now + p.delay;
+        osc.type = 'sine';
+        osc.frequency.value = p.hz;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(p.gain, start + ATTACK_SECONDS);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + p.decay);
 
-      osc.type = 'sine';
-      osc.frequency.value = p.hz;
+        osc.connect(gain);
+        gain.connect(tone);
+        osc.start(start);
+        osc.stop(start + p.decay + 0.02);
+        osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+      }
 
-      // Ramp from a small positive value, never from 0: exponentialRampToValue
-      // throws on a zero endpoint, and a linear release sounds like a fade
-      // rather than a decay.
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(p.gain, start + ATTACK_SECONDS);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + p.decay);
-
-      osc.connect(gain);
-      gain.connect(tone);
-      osc.start(start);
-      osc.stop(start + p.decay + 0.02);
-      // Nodes are one-shot; releasing them here keeps a long session from
-      // accumulating a graph it can never play again.
-      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
-    }
-
-    // Longest partial plus its delay, plus the stop margin above.
-    window.setTimeout(() => {
-      tone.disconnect();
-      if (lastChimeAt === playedAt && audio.state === 'running') void audio.suspend().catch(() => {});
-    }, 900);
+      // Longest partial plus its delay, plus the stop margin above.
+      window.setTimeout(() => {
+        tone.disconnect();
+        if (lastChimeAt === playedAt && audio.state === 'running') void audio.suspend().catch(() => {});
+      }, Math.max(0, 900 - (Date.now() - startedAt)));
+    }).catch(() => {
+      // Autoplay can still be denied; the notification itself remains active.
+    });
   } catch {
     /* no audio in this environment; the notification still arrived */
   }
@@ -148,7 +153,7 @@ export function playNotificationChime(id?: string): void {
 export function installNotificationAudioUnlock(): void {
   const unlock = () => {
     const audio = context();
-    if (audio?.state === 'suspended') {
+    if (audio && audio.state !== 'running' && audio.state !== 'closed') {
       void audio.resume().then(() => {
         if (Date.now() - lastChimeAt >= 900 && audio.state === 'running') return audio.suspend();
       }).catch(() => {});

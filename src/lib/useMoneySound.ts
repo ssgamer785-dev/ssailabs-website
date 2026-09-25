@@ -30,9 +30,16 @@ export function useMoneySound() {
     if (bootHandled) return;
     bootHandled = true;
     const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
-    if (navigation?.type === 'reload') moneyPlayer.tryAutoplay();
+    void moneyPlayer.preload().then(() => {
+      if (navigation?.type === 'reload') moneyPlayer.tryAutoplay();
+    });
   }, []);
 
   // PhoneShell calls this directly from its pull-to-refresh pointer gesture.
   return useCallback(() => moneyPlayer.playFromGesture(), []);
+}
+
+/** Shared entry point for explicit in-app refresh/retry buttons. */
+export function playMoneyRefreshSound(): void {
+  moneyPlayer.playFromGesture();
 }

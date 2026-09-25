@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { PhoneShell } from '../components/PhoneShell';
+import { playMoneyRefreshSound } from '../lib/useMoneySound';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import { listMembershipRequests, setMembershipStatus, type MembershipRequest } from '../lib/activation';
 import type { MembershipRequestStatus } from '../lib/database.types';
@@ -142,7 +143,7 @@ export function AdminMembershipRequestsScreen() {
               not an empty inbox &mdash; don&rsquo;t read it as &ldquo;nobody applied&rdquo;.
             </div>
             <Hoverable
-              onClick={() => { setLoading(true); void refresh(); }}
+              onClick={() => { playMoneyRefreshSound(); setLoading(true); void refresh(); }}
               className="pressable"
               style={css('height:34px;padding:0 14px;border-radius:9px;border:1px solid var(--danger-border);display:flex;align-items:center;font-size:12px;font-weight:700;color:var(--danger-ink);cursor:pointer')}
               hoverStyle={css('background:var(--danger-soft)')}
