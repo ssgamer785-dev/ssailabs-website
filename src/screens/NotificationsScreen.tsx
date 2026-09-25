@@ -56,7 +56,7 @@ function whenLabel(iso: string): string {
 
 export function NotificationsScreen() {
   const navigate = useNavigate();
-  const { notifications, unreadCount, loading, error, markRead, markAllRead, deleteNotification, deleteAllNotifications, refresh } = useNotifications();
+  const { notifications, loading, error, markRead, markAllRead, deleteNotification, deleteAllNotifications, refresh } = useNotifications();
   useRefreshHandler(refresh);
   const [notifCat, setNotifCat] = useState<typeof NCATS[number]>('All');
   const [confirmClearAll, setConfirmClearAll] = useState(false);
@@ -134,7 +134,7 @@ export function NotificationsScreen() {
       </div>
       <div style={css('flex:none;min-height:38px;padding:1px 20px 3px;display:flex;align-items:center;justify-content:flex-end;gap:16px')}>
         {feedback && <div role="status" aria-live="polite" style={css('flex:1;min-width:0;font-size:11.5px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap')}>{feedback}</div>}
-        <button type="button" disabled={!unreadCount} onClick={() => void markAllRead()} style={{ padding: '7px 0', border: 0, background: 'transparent', color: unreadCount ? 'var(--accent-ink)' : 'var(--text-faint)', fontSize: 12, fontWeight: 600, cursor: unreadCount ? 'pointer' : 'default', whiteSpace: 'nowrap' }}>Mark all read</button>
+        <button type="button" onClick={() => void markAllRead()} style={css('padding:7px 0;border:0;background:transparent;color:var(--accent-ink);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap')}>Mark all read</button>
         <button type="button" disabled={!notifications.length || deletingAll || !!deletingId} onClick={() => setConfirmClearAll(true)} style={{ padding: '7px 0', display: 'inline-flex', alignItems: 'center', gap: 5, border: 0, background: 'transparent', color: notifications.length ? 'var(--danger-ink)' : 'var(--text-faint)', fontSize: 12, fontWeight: 600, cursor: notifications.length && !deletingAll && !deletingId ? 'pointer' : 'default', whiteSpace: 'nowrap' }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5.5 7l1 13h11l1-13M9 7V4h6v3" /></svg>
           Clear all
