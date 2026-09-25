@@ -7,7 +7,6 @@ import { sortByTime, upsertMessage as upsert } from './merge';
 import {
   purgeNotice,
   type ChatMessage,
-  type ConnectionState,
   type MediaKind,
   type MessageKind,
   type UploadStatus,
@@ -84,9 +83,7 @@ export interface UseConversation {
   messages: ChatMessage[];
   loading: boolean;
   error: string | null;
-  connection: ConnectionState;
   /** True while the other side of this thread has the screen open. */
-  peerOnline: boolean;
   hasMore: boolean;
   loadingOlder: boolean;
   peerTyping: boolean;
@@ -106,7 +103,8 @@ export interface UseConversation {
 
 /**
  * Drives one Student <-> Admin thread: history, pagination, Realtime sync,
- * presence, optimistic sends with retry, read receipts and typing.
+ * optimistic sends with retry, read receipts and typing. Account presence is
+ * handled by the shared app-wide presence topics, not this conversation room.
  *
  * Pass a conversationId to open a specific thread (admin viewing a student);
  * omit it and the current student's own thread is resolved or created.
@@ -120,8 +118,6 @@ export function useConversation(explicitConversationId?: string): UseConversatio
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [connection, setConnection] = useState<ConnectionState>('connecting');
-  const [peerOnline, setPeerOnline] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [peerTyping, setPeerTyping] = useState(false);
@@ -260,7 +256,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
 
     const channel = supabase
       .channel(`chat:${conversationId}`, {
-        config: { broadcast: { self: false }, presence: { key: userId } },
+        config: { broadcast: { self: false } },
       })
       .on(
         'postgres_changes',
@@ -289,25 +285,15 @@ export function useConversation(explicitConversationId?: string): UseConversatio
           typingTimer.current = setTimeout(() => setPeerTyping(false), TYPING_TIMEOUT_MS);
         }
       })
-      .on('presence', { event: 'sync' }, () => {
-        if (!active) return;
-        // Anyone in the channel who isn't us is the other side of the thread.
-        const others = Object.keys(channel.presenceState()).filter(key => key !== userId);
-        setPeerOnline(others.length > 0);
-      })
       .subscribe(status => {
         if (!active) return;
         if (status === 'SUBSCRIBED') {
-          setConnection('online');
-          void channel.track({ userId, onlineAt: new Date().toISOString() });
           if (hadDrop) {
             hadDrop = false;
             void fillGap(conversationId);
           }
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           hadDrop = true;
-          setConnection('offline');
-          setPeerOnline(false);
           setPeerTyping(false);
         }
       });
@@ -664,8 +650,6 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     messages: visible,
     loading,
     error,
-    connection,
-    peerOnline,
     hasMore,
     loadingOlder,
     peerTyping,

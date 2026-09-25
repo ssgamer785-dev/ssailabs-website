@@ -9,6 +9,8 @@ import { PhoneShell } from '../components/PhoneShell';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 import { Avatar } from '../components/ui/Avatar';
+import { ownPresenceTarget } from '../lib/presence/presence-state';
+import { PresenceIndicator, usePresence } from '../lib/presence/usePresence';
 
 function Row({ icon, label, trailing, onClick }: { icon: ReactNode; label: string; trailing?: string; onClick?: () => void }) {
   // Rows that navigate are real buttons: focusable, operable from the keyboard
@@ -88,7 +90,9 @@ function ThemeChoice() {
 export function ProfileScreen() {
   const navigate = useNavigate();
   const { userName, reveal } = useAppState();
-  const { signOut, user, profile } = useAuth();
+  const { signOut, user, profile, isAdmin } = useAuth();
+  const presence = usePresence(user ? [ownPresenceTarget(user.id, isAdmin)] : []);
+  const myPresence = user ? presence[isAdmin ? 'admin' : user.id] ?? 'unknown' : 'unknown';
   const myIdentity = reveal ? userName : 'Unknown User';
 
   // The email always exists on the session; the phone is nullable on profiles
@@ -118,6 +122,7 @@ export function ProfileScreen() {
           <div style={{ ...css('font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'), color: phone ? 'var(--text-muted-2)' : 'var(--text-placeholder)' }}>
             {phone || 'No phone number added'}
           </div>
+          <PresenceIndicator status={myPresence} />
         </div>
       </div>
       <div style={css('flex:none;height:1px;background:var(--surface-divider);margin:0 20px')} />

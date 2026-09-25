@@ -4,7 +4,7 @@ import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { formatTime } from '../lib/chat/types';
 import { useAdminConversations, openConversationWith, type AdminConversation } from '../lib/chat/useAdminConversations';
-import { useConversationsPresence } from '../lib/chat/useConversationsPresence';
+import { PresenceIndicator, usePresence, type PresenceStatus } from '../lib/presence/usePresence';
 import { PhoneShell, useRefreshHandler } from '../components/PhoneShell';
 import { playMoneyRefreshSound } from '../lib/useMoneySound';
 import { AppBackButton } from '../components/ui/AppBackButton';
@@ -20,14 +20,13 @@ import { Avatar } from '../components/ui/Avatar';
  * `admin_conversations()`, and a row can be tapped to open that member's real
  * thread, creating it if they have never written.
  *
- * The green dot is Realtime presence on the member's own conversation channel,
- * the same source the chat screen reads. It is shown only when it is true, and
- * only for the threads presence was resolved for.
+ * Presence comes from each member's account-scoped private topic; it remains
+ * available even if the member is on another screen or device.
  */
 
-function Row({ item, online, onOpen, opening }: {
+function Row({ item, presence, onOpen, opening }: {
   item: AdminConversation;
-  online: boolean;
+  presence: PresenceStatus;
   onOpen: () => void;
   opening: boolean;
 }) {
@@ -44,14 +43,8 @@ function Row({ item, online, onOpen, opening }: {
       }}
       hoverStyle={css('background:var(--surface-hover)')}
     >
-      <div style={css('position:relative;flex:none')}>
+      <div style={css('flex:none')}>
         <Avatar name={item.fullName} avatarKey={item.avatarKey} size={46} />
-        {online && (
-          <div
-            aria-label="Online"
-            style={css('position:absolute;right:0;bottom:0;width:12px;height:12px;border-radius:50%;background:var(--success);border:2.4px solid var(--surface)')}
-          />
-        )}
       </div>
 
       <div style={css('flex:1;display:flex;flex-direction:column;gap:3px;min-width:0')}>
@@ -70,6 +63,7 @@ function Row({ item, online, onOpen, opening }: {
             Appears to others as Unknown User
           </div>
         )}
+        <PresenceIndicator status={presence} />
         <div style={{
           ...css('font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'),
           color: item.lastMessagePreview ? 'var(--text-muted)' : 'var(--text-placeholder)',
@@ -107,11 +101,6 @@ export function AdminInboxScreen() {
   const [opening, setOpening] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const presence = useConversationsPresence(useMemo(
-    () => conversations.map(c => c.conversationId),
-    [conversations],
-  ));
-
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return conversations;
@@ -119,6 +108,12 @@ export function AdminInboxScreen() {
       c.fullName.toLowerCase().includes(q)
       || (c.lastMessagePreview ?? '').toLowerCase().includes(q));
   }, [conversations, search]);
+
+  const presenceTargets = useMemo(
+    () => shown.slice(0, 40).map(item => ({ kind: 'student' as const, userId: item.studentId })),
+    [shown],
+  );
+  const presence = usePresence(presenceTargets);
 
   const totalUnread = conversations.reduce((n, c) => n + c.unreadCount, 0);
 
@@ -219,7 +214,7 @@ export function AdminInboxScreen() {
                 {i > 0 && <div style={css('height:1px;background:var(--surface-divider)')} />}
                 <Row
                   item={item}
-                  online={!!item.conversationId && presence.has(item.conversationId)}
+                  presence={presence[item.studentId] ?? 'unknown'}
                   opening={opening === item.studentId}
                   onOpen={() => void open(item)}
                 />

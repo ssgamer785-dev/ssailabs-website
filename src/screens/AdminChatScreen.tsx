@@ -15,6 +15,7 @@ import { AppBackButton } from '../components/ui/AppBackButton';
 import logo from '../assets/traders-planet-mark.png';
 import { Avatar } from '../components/ui/Avatar';
 import { normalizePickedFile } from '../lib/media/file-types';
+import { PresenceIndicator, usePresence } from '../lib/presence/usePresence';
 
 function Wave({ bars, color, height, gap, seed }: { bars: number; color: string; height: number; gap: number; seed: number }) {
   const rand = makeRand(seed);
@@ -69,15 +70,15 @@ export function AdminChatScreen() {
   // Admins open a specific student's thread via ?c=<id>; students get their own.
   const chat = useConversation(conversationId ?? undefined);
   const chatReady = !!chat.conversationId && !chat.loading;
-  const [peer, setPeer] = useState<{ name: string; avatarKey: string | null } | null>(null);
+  const [peer, setPeer] = useState<{ id: string; name: string; avatarKey: string | null } | null>(null);
   useEffect(() => {
     if (!isAdmin || !conversationId) { setPeer(null); return; }
     let active = true;
     void supabase.rpc('admin_conversations').then(({ data }) => {
       if (!active) return;
-      const row = (data as { conversation_id: string | null; full_name: string; avatar_key: string | null }[] | null)
+      const row = (data as { conversation_id: string | null; student_id: string; full_name: string; avatar_key: string | null }[] | null)
         ?.find(item => item.conversation_id === conversationId);
-      setPeer(row ? { name: row.full_name, avatarKey: row.avatar_key } : null);
+      setPeer(row ? { id: row.student_id, name: row.full_name, avatarKey: row.avatar_key } : null);
     });
     return () => { active = false; };
   }, [isAdmin, conversationId]);
@@ -98,7 +99,11 @@ export function AdminChatScreen() {
   const targetPages = useRef(0);
   const targetReached = useRef(false);
 
-  const { messages, markRead, loadOlder, hasMore, loadingOlder, peerTyping, connection, peerOnline } = chat;
+  const presence = usePresence(isAdmin
+    ? (peer ? [{ kind: 'student' as const, userId: peer.id }] : [])
+    : [{ kind: 'admin' as const }]);
+  const peerPresence = presence[isAdmin ? peer?.id ?? '' : 'admin'] ?? 'unknown';
+  const { messages, markRead, loadOlder, hasMore, loadingOlder, peerTyping } = chat;
 
   useEffect(() => { targetPages.current = 0; targetReached.current = false; }, [targetMessageId]);
   useEffect(() => {
@@ -188,16 +193,9 @@ export function AdminChatScreen() {
     } finally { setSendingVoice(false); }
   }
 
-  // Our own socket state comes first — "Online" would be a lie while we are
-  // reconnecting, because we cannot know what the other side is doing.
-  const subtitle = connection === 'offline' ? 'Reconnecting…'
-    : connection === 'connecting' ? 'Connecting…'
-    : peerTyping ? 'typing…'
-    : peerOnline ? 'Online'
-    : 'Offline';
-  const subtitleColor = peerTyping ? 'var(--accent-ink)'
-    : connection === 'online' && peerOnline ? 'var(--success-ink-2)'
-    : 'var(--text-faint)';
+  // Typing is transient conversation state; account online/offline state is
+  // resolved independently by the authenticated account Presence topic.
+  const subtitleColor = peerTyping ? 'var(--accent-ink)' : 'var(--text-faint)';
 
   function MicBtn({ size = 40 }: { size?: number }) {
     const on = recorder.recording;
@@ -219,11 +217,13 @@ export function AdminChatScreen() {
           {isAdmin
             ? <Avatar name={peer?.name ?? 'Member'} avatarKey={peer?.avatarKey} size={38} fontSize={14} />
             : <div style={css('width:38px;height:38px;border-radius:50%;background:var(--ink-chip);display:flex;align-items:center;justify-content:center')}><img src={logo} alt="Admin" style={css('width:31px;height:31px;object-fit:contain')} /></div>}
-          <div style={{ position: 'absolute', right: -1, bottom: -1, width: 11, height: 11, borderRadius: '50%', background: connection === 'online' && peerOnline ? 'var(--success)' : 'var(--neutral-fill-2)', border: '2.2px solid var(--border-on-accent)' }} />
+          <div aria-hidden="true" style={{ position: 'absolute', right: -1, bottom: -1, width: 11, height: 11, borderRadius: '50%', background: peerPresence === 'online' ? 'var(--success)' : peerPresence === 'offline' ? 'var(--neutral-fill-2)' : 'var(--text-faint)', border: '2.2px solid var(--border-on-accent)' }} />
         </div>
         <div style={css('flex:1;display:flex;flex-direction:column;gap:1px;min-width:0')}>
           <div style={css('font-size:15px;font-weight:700;letter-spacing:-.25px')}>{isAdmin ? peer?.name ?? 'Member' : 'Admin'}</div>
-          <div style={{ fontSize: 11.5, fontWeight: 600, color: subtitleColor }}>{subtitle}</div>
+          {peerTyping
+            ? <div style={{ fontSize: 11.5, fontWeight: 600, color: subtitleColor }}>typing…</div>
+            : <PresenceIndicator status={peerPresence} />}
         </div>
       </div>
 

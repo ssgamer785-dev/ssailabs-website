@@ -35,6 +35,7 @@ import { LifecycleSplash } from './components/LifecycleSplash';
 import { NotificationNavigation } from './components/NotificationNavigation';
 import { AudioPreferencesRuntime } from './components/AudioPreferencesRuntime';
 import { HapticsScreen } from './screens/HapticsScreen';
+import { PresenceRuntime } from './lib/presence/usePresence';
 
 export default function App() {
   return (
@@ -46,6 +47,7 @@ export default function App() {
           <LifecycleSplash />
           <NotificationNavigation />
           <PushNotifications />
+          <PresenceRuntime />
           <Routes>
             <Route path="/" element={<SplashScreen />} />
             {/* The entry point for anyone signed out. */}

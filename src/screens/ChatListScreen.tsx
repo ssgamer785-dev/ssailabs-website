@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { useAuth } from '../lib/auth-context';
 import { useChatOverview } from '../lib/chat/useChatOverview';
-import { usePeerPresence } from '../lib/chat/usePeerPresence';
 import { formatTime } from '../lib/chat/types';
+import { PresenceIndicator, usePresence } from '../lib/presence/usePresence';
 import { PhoneShell, useRefreshHandler } from '../components/PhoneShell';
 import logo from '../assets/traders-planet-mark.png';
 import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
@@ -36,9 +36,10 @@ export function ChatListScreen() {
   const { overview, refresh } = useChatOverview();
   useRefreshHandler(refresh);
 
-  // Real presence on the admin thread's own Realtime channel — not a green dot
-  // that is always lit.
-  const adminOnline = usePeerPresence(overview?.conversationId);
+  // Students see the Admin account's own authenticated Presence topic. This
+  // works from the inbox without requiring the Admin to open this conversation.
+  const presence = usePresence([{ kind: 'admin' }]);
+  const adminPresence = presence.admin ?? 'unknown';
 
   const preview = overview?.lastMessagePreview ?? 'Start a conversation with the Admin';
   const unread = overview?.unreadCount ?? 0;
@@ -103,24 +104,13 @@ export function ChatListScreen() {
               <div style={css('width:46px;height:46px;border-radius:50%;background:var(--ink-chip-2);display:flex;align-items:center;justify-content:center;overflow:hidden')}>
                 <img src={logo} alt="The Traders Planet" style={css('width:40px;height:40px;object-fit:contain')} />
               </div>
-              {adminOnline && (
-                <div
-                  aria-hidden="true"
-                  style={css('position:absolute;right:0;bottom:0;width:12px;height:12px;border-radius:50%;background:var(--success);border:2.4px solid var(--border-on-accent)')}
-                />
-              )}
             </div>
             <div style={css('flex:1;display:flex;flex-direction:column;gap:2px;min-width:0')}>
               <div style={css('display:flex;align-items:center;gap:5px')}>
                 <div style={css('font-size:14.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap')}>Admin</div>
                 <svg width="14" height="14" viewBox="0 0 24 24" style={css('display:block;flex:none')}><circle cx="12" cy="12" r="9.5" fill="var(--accent-ink)" /><path d="M8.2 12.3l2.6 2.6 5.1-5.4" fill="none" stroke="var(--on-accent)" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" /></svg>
               </div>
-              {/* Shown only when it is true. There is no "Offline" counterpart:
-                  the admin not having the thread open is the normal state, and
-                  labelling it would read as the service being down. */}
-              {adminOnline && (
-                <div style={css('font-size:11.5px;font-weight:600;color:var(--success-ink-2)')}>Online</div>
-              )}
+              <PresenceIndicator status={adminPresence} />
               <div style={css('font-size:12.5px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>{preview}</div>
             </div>
             <div style={css('flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:7px')}>
