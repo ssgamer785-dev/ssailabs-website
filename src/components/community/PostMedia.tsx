@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { css } from '../../lib/css';
 import { getPostMediaUrl } from '../../lib/community/media-api';
 import { useLazyMediaUrl } from '../../lib/media/useLazyMediaUrl';
@@ -9,6 +9,7 @@ import { DocumentViewer } from '../media/DocumentViewer';
 import { useAudioPlayer } from '../../lib/chat/useAudioPlayer';
 import { formatDuration } from '../../lib/chat/types';
 import { VideoViewer } from '../media/VideoViewer';
+import { clampVideoPosition, snapshotVideoPlayback, type VideoPlaybackSnapshot } from '../../lib/media/video-playback-state';
 
 function bytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -16,67 +17,224 @@ function bytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/**
- * A video attachment in the feed.
- *
- * Rectangular on purpose: the circular treatment belongs to short clips in a
- * private thread, and would crop a chart or a screen recording to uselessness
- * in a post card. What it borrows from the chat side is the loading discipline
- * — a poster frame until someone taps, and no video bytes before that.
- */
-function PostVideo({ post, height }: { post: FeedPost; height: number }) {
+/** A WhatsApp-style circular community clip; full-screen viewing is a separate action. */
+function PostVideo({ post }: { post: FeedPost }) {
   const [viewerOpen, setViewerOpen] = useState(false);
-
+  const [viewerStart, setViewerStart] = useState<VideoPlaybackSnapshot>({ currentTime: 0, playing: false });
+  const [playing, setPlaying] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  const [duration, setDuration] = useState(0);
   const poster = useLazyMediaUrl(post.posterKey, getPostMediaUrl);
-  const media = useLazyMediaUrl(post.storageKey, getPostMediaUrl, { armed: viewerOpen });
+  // Resolve a signed URL when the circle approaches the viewport; preload=none
+  // keeps the large video body idle until the member taps Play.
+  const media = useLazyMediaUrl(post.storageKey, getPostMediaUrl);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const pendingPlay = useRef(false);
+  const lastPosition = useRef(0);
+  const playIntent = useRef(false);
+  const previousUrl = useRef<string | null>(null);
+  const resumeInline = useRef(false);
+  const wasViewerOpen = useRef(false);
+
+  function playInline() {
+    playIntent.current = true;
+    const video = videoRef.current;
+    if (!video || !media.url) {
+      pendingPlay.current = true;
+      return;
+    }
+    pendingPlay.current = false;
+    setBlocked(false);
+    void video.play().then(() => setBlocked(false)).catch(() => {
+      // Some browsers need another direct tap after the signed URL resolves.
+      setBlocked(true);
+    });
+  }
+
+  function toggleInline() {
+    const video = videoRef.current;
+    if (video && !video.paused) {
+      pendingPlay.current = false;
+      playIntent.current = false;
+      video.pause();
+      return;
+    }
+    if (media.failed) {
+      pendingPlay.current = true;
+      media.forceRetry();
+      return;
+    }
+    playInline();
+  }
+
+  // The signed URL is normally ready by the time the visible bubble is tapped.
+  // If signing is still in flight, finish the original play request as soon as
+  // it arrives instead of requiring a second tap.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!media.url || !video) return;
+    const previous = previousUrl.current;
+    previousUrl.current = media.url;
+
+    if (pendingPlay.current) {
+      playInline();
+      return;
+    }
+    if (previous && previous !== media.url) {
+      const position = lastPosition.current;
+      const resume = playIntent.current;
+      const restore = () => {
+        video.currentTime = clampVideoPosition(position, video.duration);
+        if (resume) video.addEventListener('seeked', () => { void video.play().catch(() => setBlocked(true)); }, { once: true });
+      };
+      if (video.readyState >= 1) restore();
+      else video.addEventListener('loadedmetadata', restore, { once: true });
+    }
+  }, [media.url]);
+
+  // Return from the viewer to the same point in the inline bubble. If the
+  // viewer was paused before closing, leave the inline clip paused too.
+  useEffect(() => {
+    if (viewerOpen) {
+      wasViewerOpen.current = true;
+      return;
+    }
+    if (!wasViewerOpen.current) return;
+    wasViewerOpen.current = false;
+    const video = videoRef.current;
+    if (!video) return;
+    if (lastPosition.current > 0 && video.readyState >= 1) {
+      video.currentTime = clampVideoPosition(lastPosition.current, video.duration);
+    }
+    if (resumeInline.current) {
+      resumeInline.current = false;
+      void video.play().catch(() => setBlocked(true));
+    }
+  }, [viewerOpen]);
+
+  function openViewer(event: React.MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    const state = snapshotVideoPlayback(videoRef.current);
+    lastPosition.current = state.currentTime;
+    playIntent.current = state.playing;
+    resumeInline.current = state.playing;
+    setViewerStart(state);
+    videoRef.current?.pause();
+    setViewerOpen(true);
+  }
+
+  function closeViewer(state?: VideoPlaybackSnapshot) {
+    if (state) {
+      lastPosition.current = state.currentTime;
+      playIntent.current = state.playing;
+      resumeInline.current = state.playing;
+    }
+    setViewerOpen(false);
+  }
+
+  function retryVideo() {
+    const video = videoRef.current;
+    const state = snapshotVideoPlayback(video);
+    lastPosition.current = state.currentTime;
+    playIntent.current = state.playing || playIntent.current || pendingPlay.current;
+    pendingPlay.current = playIntent.current;
+    media.forceRetry();
+  }
+
+  const failed = media.failed;
 
   return (
     <div
-      // One element, two observers: the poster loads on approach, the video
-      // waits for a tap.
-      ref={node => { poster.ref(node); media.ref(node); }}
-      // Stop here: the card around this opens the post, and a tap on the video
-      // means "play it", not "take me somewhere else". Everywhere else on the
-      // card still navigates exactly as it did before.
-      onClick={e => { e.stopPropagation(); setViewerOpen(true); }}
-      role="button"
-      tabIndex={0}
-      aria-label={`Play ${post.fileName ?? 'video'}`}
-      onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setViewerOpen(true); } }}
-      style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: 'var(--ink-chip)', cursor: 'pointer' }}
+      onClick={event => event.stopPropagation()}
+      role="group"
+      aria-label={`${post.fileName ?? 'Community video'} controls`}
+      style={css('position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;flex:none')}
     >
-      {poster.url && (
-        <img src={poster.url} onError={poster.retry} alt={post.fileName ?? 'Video'} decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
-      )}
-      {(
-        <div style={css('position:absolute;inset:0;display:flex;align-items:center;justify-content:center')}>
-          {viewerOpen && media.loading ? (
-            <div style={css('width:34px;height:34px;border-radius:50%;border:2.5px solid rgba(255,255,255,.35);border-top-color:var(--border-on-accent);animation:tp-spin .8s linear infinite')}>
-              <style>{'@keyframes tp-spin{to{transform:rotate(360deg)}}'}</style>
+      <div
+      ref={node => { poster.ref(node); media.ref(node); }}
+      onClick={event => { event.stopPropagation(); toggleInline(); }}
+      role="button"
+      aria-label={`${playing ? 'Pause' : 'Play'} ${post.fileName ?? 'community video'}`}
+      aria-pressed={playing}
+      onKeyDown={event => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); toggleInline(); }
+      }}
+      tabIndex={0}
+      style={{
+        position: 'relative', width: 184, height: 184, maxWidth: '68vw', maxHeight: '68vw',
+        borderRadius: '50%', overflow: 'hidden', background: 'var(--ink-chip)', cursor: 'pointer',
+        flex: 'none', boxShadow: '0 4px 16px rgba(var(--shadow-rgb),.16)', WebkitTapHighlightColor: 'transparent',
+      }}
+    >
+      <video
+        ref={videoRef}
+        src={media.url ?? undefined}
+        poster={poster.url ?? undefined}
+        playsInline
+        preload="none"
+        onLoadedMetadata={event => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+        onTimeUpdate={event => { lastPosition.current = snapshotVideoPlayback(event.currentTarget).currentTime; }}
+        onPlay={() => { setPlaying(true); playIntent.current = true; pendingPlay.current = false; setBlocked(false); }}
+        onPause={() => { setPlaying(false); }}
+        onEnded={() => { setPlaying(false); playIntent.current = false; lastPosition.current = 0; }}
+        onError={() => {
+          const video = videoRef.current;
+          lastPosition.current = snapshotVideoPlayback(video).currentTime || lastPosition.current;
+          pendingPlay.current = playIntent.current;
+          media.retry();
+        }}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block', pointerEvents: 'none' }}
+      />
+      {(!playing || media.loading || failed || blocked) && (
+        <div style={css('position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.12);pointer-events:none')}>
+          {failed ? (
+            <div role="alert" style={css('font-size:11px;color:var(--on-accent);background:rgba(0,0,0,.68);padding:8px 11px;border-radius:10px')}>
+              Tap to retry
             </div>
-          ) : media.failed ? (
-            <button type="button" onClick={event => { event.stopPropagation(); media.forceRetry(); }} style={css('font-size:11.5px;color:var(--on-accent);background:rgba(0,0,0,.65);padding:9px 12px;border-radius:10px')}>Try again</button>
+          ) : media.loading && !media.url ? (
+            <div role="status" aria-label="Loading video" style={css('width:32px;height:32px;border-radius:50%;border:2.5px solid rgba(255,255,255,.35);border-top-color:var(--border-on-accent);animation:tp-community-video-spin .8s linear infinite')}>
+              <style>{'@keyframes tp-community-video-spin{to{transform:rotate(360deg)}}'}</style>
+            </div>
           ) : (
-            <div style={css('width:52px;height:52px;border-radius:50%;background:rgba(var(--shadow-rgb),.55);display:flex;align-items:center;justify-content:center')}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--on-accent)" style={css('margin-left:2px')}><path d="M8.5 5.5l10 6.5-10 6.5z" /></svg>
+            <div aria-hidden="true" style={css('width:48px;height:48px;border-radius:50%;background:rgba(var(--shadow-rgb),.6);color:var(--on-accent);font-size:20px;display:flex;align-items:center;justify-content:center')}>
+              {playing ? 'Ⅱ' : '▶'}
             </div>
           )}
         </div>
       )}
-      {!poster.url && (
-        <div style={css('position:absolute;left:10px;bottom:10px;font-size:10.5px;color:rgba(255,255,255,.75)')}>Video</div>
+      {!poster.url && !playing && !media.loading && !failed && (
+        <div style={css('position:absolute;left:0;right:0;bottom:48px;text-align:center;font-size:10.5px;color:rgba(255,255,255,.75);pointer-events:none')}>VIDEO</div>
       )}
-      <div style={css('position:absolute;right:8px;bottom:8px;z-index:2;background:var(--surface);padding:6px 8px;border-radius:8px')}>
-        <MediaActions storageKey={post.storageKey} fileName={post.fileName} getUrl={getPostMediaUrl} />
+      {duration > 0 && (
+        <div style={css('position:absolute;left:0;right:0;bottom:12px;display:flex;justify-content:center;pointer-events:none')}>
+          <div style={css('padding:2px 9px;border-radius:999px;background:rgba(var(--shadow-rgb),.62);font-size:10.5px;font-weight:600;color:var(--on-accent)')}>
+            {formatDuration(duration)}
+          </div>
+        </div>
+      )}
       </div>
+      <button type="button" aria-label="Open video full screen" title="Open full screen" onClick={openViewer}
+        style={css('position:absolute;top:9px;right:9px;z-index:2;width:34px;height:34px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:19px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.25)')}>
+        ⛶
+      </button>
+      {!post.mediaPurged && <div style={css('min-height:20px')}>
+        <MediaActions storageKey={post.storageKey} fileName={post.fileName} getUrl={getPostMediaUrl} />
+      </div>}
       {viewerOpen && <VideoViewer
         src={media.url}
         poster={poster.url}
         fileName={post.fileName}
         loading={media.loading}
         error={media.failed ? media.error ?? 'Could not load this video.' : null}
-        onRetry={media.forceRetry}
-        onClose={() => setViewerOpen(false)}
+        onRetry={retryVideo}
+        initialTime={viewerStart.currentTime}
+        autoPlay={viewerStart.playing}
+        onPlaybackUpdate={state => {
+          lastPosition.current = state.currentTime;
+          playIntent.current = state.playing;
+          resumeInline.current = state.playing;
+        }}
+        onClose={closeViewer}
       />}
     </div>
   );
@@ -127,7 +285,7 @@ export function PostMedia({ post, height }: { post: FeedPost; height: number }) 
   }
 
   if (isVideo && post.storageKey && !post.mediaPurged) {
-    return <PostVideo post={post} height={height} />;
+    return <PostVideo post={post} />;
   }
 
   if (isImage && post.storageKey && !post.mediaPurged) {
