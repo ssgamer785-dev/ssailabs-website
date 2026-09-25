@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
@@ -92,6 +92,42 @@ function Row({ item, presence, onOpen, opening }: {
   );
 }
 
+function VisibleRow({ item, onOpen, opening, divided }: {
+  item: AdminConversation;
+  onOpen: () => void;
+  opening: boolean;
+  divided: boolean;
+}) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [nearViewport, setNearViewport] = useState(false);
+  useEffect(() => {
+    const element = rowRef.current;
+    if (!element || !('IntersectionObserver' in window)) {
+      setNearViewport(true);
+      return;
+    }
+    const observer = new IntersectionObserver(([entry]) => {
+      setNearViewport(entry.isIntersecting);
+    }, { rootMargin: '120px 0px' });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const presence = usePresence(nearViewport
+    ? [{ kind: 'student', userId: item.studentId }]
+    : []);
+  return (
+    <div ref={rowRef}>
+      {divided && <div style={css('height:1px;background:var(--surface-divider)')} />}
+      <Row
+        item={item}
+        presence={presence[item.studentId] ?? 'unknown'}
+        opening={opening}
+        onOpen={onOpen}
+      />
+    </div>
+  );
+}
+
 export function AdminInboxScreen() {
   const navigate = useNavigate();
   const { conversations, loading, loadFailed, refresh } = useAdminConversations();
@@ -108,12 +144,6 @@ export function AdminInboxScreen() {
       c.fullName.toLowerCase().includes(q)
       || (c.lastMessagePreview ?? '').toLowerCase().includes(q));
   }, [conversations, search]);
-
-  const presenceTargets = useMemo(
-    () => shown.slice(0, 40).map(item => ({ kind: 'student' as const, userId: item.studentId })),
-    [shown],
-  );
-  const presence = usePresence(presenceTargets);
 
   const totalUnread = conversations.reduce((n, c) => n + c.unreadCount, 0);
 
@@ -210,15 +240,13 @@ export function AdminInboxScreen() {
         ) : (
           <div style={css('padding-bottom:14px')}>
             {shown.map((item, i) => (
-              <div key={item.studentId}>
-                {i > 0 && <div style={css('height:1px;background:var(--surface-divider)')} />}
-                <Row
-                  item={item}
-                  presence={presence[item.studentId] ?? 'unknown'}
-                  opening={opening === item.studentId}
-                  onOpen={() => void open(item)}
-                />
-              </div>
+              <VisibleRow
+                key={item.studentId}
+                item={item}
+                divided={i > 0}
+                opening={opening === item.studentId}
+                onOpen={() => void open(item)}
+              />
             ))}
           </div>
         )}
