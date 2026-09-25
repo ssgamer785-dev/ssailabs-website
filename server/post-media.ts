@@ -183,7 +183,8 @@ export function postMediaRouter(): Router {
     }
 
     const stem = `posts/${caller.userId}/${Date.now()}-${randomUUID()}`;
-    const storageKey = `${stem}.${EXTENSION[kind]}`;
+    const voiceExtension = /^audio\/mp4/i.test(mimeType) ? 'm4a' : /^audio\/aac/i.test(mimeType) ? 'aac' : /^audio\/ogg/i.test(mimeType) ? 'ogg' : /^audio\/wav/i.test(mimeType) ? 'wav' : 'webm';
+    const storageKey = `${stem}.${kind === 'voice' ? voiceExtension : EXTENSION[kind]}`;
     const uploadUrl = await signPut(storageKey, mimeType, sizeBytes);
 
     const posterKey = wantsPoster ? `${stem}-poster.jpg` : undefined;

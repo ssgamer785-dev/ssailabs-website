@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabase';
 import { useAuth } from '../auth-context';
 import type { NotificationKind } from '../database.types';
@@ -13,6 +13,8 @@ export interface AppNotification {
   body: string | null;
   relatedPostId: string | null;
   relatedConversationId: string | null;
+  relatedMessageId: string | null;
+  relatedCommentId: string | null;
   readAt: string | null;
   createdAt: string;
 }
@@ -20,6 +22,7 @@ export interface AppNotification {
 type NotificationRow = {
   id: string; user_id: string; kind: NotificationKind; title: string; body: string | null;
   related_post_id: string | null; related_conversation_id: string | null;
+  related_message_id?: string | null; related_comment_id?: string | null;
   read_at: string | null; created_at: string;
 };
 
@@ -31,6 +34,8 @@ function toNotification(r: NotificationRow): AppNotification {
     body: r.body,
     relatedPostId: r.related_post_id,
     relatedConversationId: r.related_conversation_id,
+    relatedMessageId: r.related_message_id ?? null,
+    relatedCommentId: r.related_comment_id ?? null,
     readAt: r.read_at,
     createdAt: r.created_at,
   };
@@ -53,21 +58,30 @@ export function useNotifications(): UseNotifications {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const userId = user?.id;
+  const activeUser = useRef(userId);
+  activeUser.current = userId;
 
   const refresh = useCallback(async () => {
+    if (!userId) return;
     const { data, error: qError } = await supabase
       .from('notifications')
       .select('*')
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(PAGE_SIZE);
 
+    if (activeUser.current !== userId) return;
     if (qError) { setError(qError.message); return; }
     setNotifications(((data ?? []) as NotificationRow[]).map(toNotification));
     setError(null);
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
-    if (!user) { setLoading(false); return; }
+    setNotifications([]);
+    setError(null);
+    if (!userId) { setLoading(false); return; }
+    setLoading(true);
     let active = true;
     refresh().finally(() => { if (active) setLoading(false); });
 
@@ -76,7 +90,7 @@ export function useNotifications(): UseNotifications {
     const sub = supabase
       .channel('notifications')
       .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
+        { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
         payload => {
           if (!active) return;
           // Only a genuinely new, still-unread row is worth a sound. An UPDATE
@@ -92,7 +106,7 @@ export function useNotifications(): UseNotifications {
       .subscribe();
 
     return () => { active = false; supabase.removeChannel(sub); };
-  }, [user, refresh]);
+  }, [userId, refresh]);
 
   const markRead = useCallback(async (id: string) => {
     const target = notifications.find(n => n.id === id);

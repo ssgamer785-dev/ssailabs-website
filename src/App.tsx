@@ -11,6 +11,8 @@ import { AdminLoginScreen } from './screens/AdminLoginScreen';
 import { AdminActivationCodesScreen } from './screens/AdminActivationCodesScreen';
 import { AdminMembershipRequestsScreen } from './screens/AdminMembershipRequestsScreen';
 import { LoginScreen } from './screens/LoginScreen';
+import { ForgotPasswordScreen } from './screens/ForgotPasswordScreen';
+import { ResetPasswordScreen } from './screens/ResetPasswordScreen';
 import { SignupScreen } from './screens/SignupScreen';
 import { HomeScreen } from './screens/HomeScreen';
 import { CommunityPage } from './screens/CommunityPage';
@@ -30,6 +32,7 @@ import { TermsScreen } from './screens/TermsScreen';
 import { HelpSupportScreen } from './screens/HelpSupportScreen';
 import { PushNotifications } from './components/PushNotifications';
 import { LifecycleSplash } from './components/LifecycleSplash';
+import { NotificationNavigation } from './components/NotificationNavigation';
 
 export default function App() {
   return (
@@ -38,6 +41,7 @@ export default function App() {
       <AppStateProvider>
         <BrowserRouter>
           <LifecycleSplash />
+          <NotificationNavigation />
           <PushNotifications />
           <Routes>
             <Route path="/" element={<SplashScreen />} />
@@ -51,6 +55,8 @@ export default function App() {
             <Route path="/admin/activation-codes" element={<RequireAdmin><AdminActivationCodesScreen /></RequireAdmin>} />
             <Route path="/admin/membership-requests" element={<RequireAdmin><AdminMembershipRequestsScreen /></RequireAdmin>} />
             <Route path="/login" element={<RedirectIfAuthed><LoginScreen /></RedirectIfAuthed>} />
+            <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
+            <Route path="/reset-password" element={<ResetPasswordScreen />} />
             <Route path="/signup" element={<RedirectIfAuthed><SignupScreen /></RedirectIfAuthed>} />
             <Route path="/home" element={<RequireActivated><HomeScreen /></RequireActivated>} />
             <Route path="/community" element={<RequireActivated><CommunityPage /></RequireActivated>} />

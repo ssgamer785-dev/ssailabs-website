@@ -1,5 +1,6 @@
 import { css } from '../../lib/css';
-import { formatTime, type ChatMessage } from '../../lib/chat/types';
+import { type ChatMessage } from '../../lib/chat/types';
+import { formatDateTime } from '../../lib/format-date-time';
 
 /** sending → clock, sent → single check, read → the design's blue double-check. */
 export function StatusTick({ message }: { message: ChatMessage }) {
@@ -34,7 +35,7 @@ export function StatusTick({ message }: { message: ChatMessage }) {
 export function MetaRow({ message, out }: { message: ChatMessage; out: boolean }) {
   return (
     <div style={css('display:flex;align-items:center;justify-content:flex-end;gap:5px')}>
-      <div style={css('font-size:10px;color:var(--text-muted);white-space:nowrap')}>{formatTime(message.createdAt)}</div>
+      <time dateTime={message.createdAt} style={css('font-size:10px;color:var(--text-muted);white-space:nowrap')}>{formatDateTime(message.createdAt)}</time>
       {out && <StatusTick message={message} />}
     </div>
   );

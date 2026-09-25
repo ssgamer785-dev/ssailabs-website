@@ -6,7 +6,9 @@ import { useUnreadNotificationCount } from '../lib/notifications/useNotification
 import { useHomeHighlights } from '../lib/community/useHomeHighlights';
 import { getPostMediaUrl } from '../lib/community/media-api';
 import { useLazyMediaUrl } from '../lib/media/useLazyMediaUrl';
-import { timeAgo } from '../components/community/PostMedia';
+import { formatDateTime } from '../lib/format-date-time';
+import { Avatar } from '../components/ui/Avatar';
+import { useAuth } from '../lib/auth-context';
 import type { FeedPost } from '../lib/community/useFeed';
 import { BrandHero } from '../components/ui/BrandHero';
 import { indiaGreeting, msUntilNextIndiaHour } from '../lib/india-time';
@@ -25,12 +27,6 @@ const homeNote = css('font-size:12px;color:var(--text-faint);line-height:1.5');
 const officialCardFrame = css('flex:none;margin:0 20px;background:var(--surface);border:1px solid var(--border-2);border-radius:16px;box-shadow:0 3px 14px rgba(var(--shadow-rgb),.05);padding:14px 15px 12px');
 const homeNoteRow = { ...css('flex:none;margin:0 20px'), ...homeNote };
 const officialCardNote = { ...officialCardFrame, ...homeNote };
-
-/** The two avatar tints the Recent Posts rows already used, alternating. */
-const ROW_TINTS: [string, string][] = [
-  ['var(--avatar-bg-2)', 'var(--avatar-ink-2)'],
-  ['var(--avatar-bg-3)', 'var(--avatar-ink-3)'],
-];
 
 function firstLine(text: string | null): string {
   return (text ?? '').split('\n').map(l => l.trim()).find(Boolean) ?? '';
@@ -153,8 +149,9 @@ function OfficialUpdateCard({ post, onOpen }: { post: FeedPost; onOpen: () => vo
       <div style={css('position:relative;margin-top:13px;display:flex;align-items:center;gap:9px')}>
         <AttachmentChips post={post} />
         <div style={css('flex:1')} />
-        <div style={css('font-size:11px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px')}>
-          {post.authorName} · {timeAgo(post.createdAt)}
+        <div style={css('max-width:155px;min-width:0;display:flex;flex-direction:column;align-items:flex-end;gap:2px;text-align:right')}>
+          <div style={css('width:100%;font-size:11px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>{post.authorName}</div>
+          <time dateTime={post.createdAt} style={css('font-size:10px;color:var(--text-faint);white-space:normal')}>{formatDateTime(post.createdAt)}</time>
         </div>
       </div>
     </div>
@@ -162,8 +159,7 @@ function OfficialUpdateCard({ post, onOpen }: { post: FeedPost; onOpen: () => vo
 }
 
 /** One "Recent Posts" row. The first has no rule above it, as before. */
-function RecentPostRow({ post, index, onOpen }: { post: FeedPost; index: number; onOpen: () => void }) {
-  const [bg, fg] = ROW_TINTS[index % ROW_TINTS.length];
+function RecentPostRow({ post, index, isAdmin, onOpen }: { post: FeedPost; index: number; isAdmin: boolean; onOpen: () => void }) {
   const title = headline(post);
   const first = index === 0;
 
@@ -174,9 +170,12 @@ function RecentPostRow({ post, index, onOpen }: { post: FeedPost; index: number;
         ? css('flex:none;margin:0 20px;display:flex;align-items:center;gap:11px;cursor:pointer')
         : css('flex:none;margin:16px 20px 0;padding-top:15px;border-top:1px solid var(--border);display:flex;align-items:center;gap:11px;cursor:pointer')}
     >
-      <div style={{ ...css('width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:none'), background: bg, color: fg }}>
-        {initials(title)}
-      </div>
+      <Avatar
+        name={post.isAnonymous && !isAdmin ? 'Unknown User' : post.authorName}
+        avatarKey={null}
+        avatarUserId={post.isAnonymous && !isAdmin ? null : post.authorId}
+        size={38}
+      />
       <div style={css('flex:1;display:flex;flex-direction:column;gap:2px;min-width:0')}>
         <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
           {title}
@@ -185,7 +184,7 @@ function RecentPostRow({ post, index, onOpen }: { post: FeedPost; index: number;
           {previewLine(post, title)}
         </div>
       </div>
-      <div style={css('font-size:11px;color:var(--text-faint);flex:none;white-space:nowrap')}>{timeAgo(post.createdAt)}</div>
+      <time dateTime={post.createdAt} style={css('font-size:10px;color:var(--text-faint);flex:none;white-space:normal;text-align:right;max-width:112px')}>{formatDateTime(post.createdAt)}</time>
     </div>
   );
 }
@@ -208,6 +207,7 @@ export function HomeScreen() {
     return () => window.clearTimeout(timer);
   }, []);
   const { userName } = useAppState();
+  const { isAdmin } = useAuth();
   const unread = useUnreadNotificationCount();
   const highlights = useHomeHighlights();
   useRefreshHandler(highlights.reload);
@@ -331,11 +331,12 @@ export function HomeScreen() {
             No community posts yet. Be the first to share a setup.
           </div>
         ) : (
-          highlights.recent.map((post, i) => (
+          highlights.recent.map((post, index) => (
             <RecentPostRow
               key={post.id}
               post={post}
-              index={i}
+              index={index}
+              isAdmin={isAdmin}
               onOpen={() => navigate(`/post?post=${post.id}`)}
             />
           ))

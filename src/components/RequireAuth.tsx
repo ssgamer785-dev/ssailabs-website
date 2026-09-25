@@ -1,12 +1,20 @@
 import type { ReactNode } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth-context';
+import { AuthLoading } from './AuthLoading';
+import { pendingDestination, rememberDestination } from '../lib/notifications/destination';
+
+function LoginRedirect({ admin = false }: { admin?: boolean }) {
+  const location = useLocation();
+  rememberDestination(location.pathname + location.search);
+  return <Navigate to={admin ? '/admin-login' : '/login'} replace />;
+}
 
 /** Gates a route behind a signed-in session; sends anonymous visitors to /login. */
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { session, loading } = useAuth();
-  if (loading) return null;
-  if (!session) return <Navigate to="/login" replace />;
+  if (loading) return <AuthLoading />;
+  if (!session) return <LoginRedirect />;
   return <>{children}</>;
 }
 
@@ -25,20 +33,20 @@ export function RequireAuth({ children }: { children: ReactNode }) {
  */
 export function RequireActivated({ children }: { children: ReactNode }) {
   const { session, loading, profileLoading, isActivated } = useAuth();
-  if (loading) return null;
-  if (!session) return <Navigate to="/login" replace />;
+  if (loading) return <AuthLoading />;
+  if (!session) return <LoginRedirect />;
   // The profile decides this, so wait for it rather than guess from its absence.
-  if (profileLoading) return null;
-  if (!isActivated) return <Navigate to="/activate" replace />;
+  if (profileLoading) return <AuthLoading />;
+  if (!isActivated) return <LoginRedirectToActivation />;
   return <>{children}</>;
 }
 
 /** Admin-only routes. An activated non-admin is sent back to their own home. */
 export function RequireAdmin({ children }: { children: ReactNode }) {
   const { session, loading, profileLoading, isAdmin } = useAuth();
-  if (loading) return null;
-  if (!session) return <Navigate to="/admin-login" replace />;
-  if (profileLoading) return null;
+  if (loading) return <AuthLoading />;
+  if (!session) return <LoginRedirect admin />;
+  if (profileLoading) return <AuthLoading />;
   if (!isAdmin) return <Navigate to="/home" replace />;
   return <>{children}</>;
 }
@@ -46,9 +54,15 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
 /** Keeps an already-signed-in user off /login and /signup. */
 export function RedirectIfAuthed({ children }: { children: ReactNode }) {
   const { session, loading, profileLoading, isActivated } = useAuth();
-  if (loading) return null;
+  if (loading) return <AuthLoading />;
   if (!session) return <>{children}</>;
-  if (profileLoading) return null;
+  if (profileLoading) return <AuthLoading />;
   // Signed in but not yet activated: the gate, not the app.
-  return <Navigate to={isActivated ? '/home' : '/activate'} replace />;
+  return <Navigate to={isActivated ? (pendingDestination() ?? '/home') : '/activate'} replace />;
+}
+
+function LoginRedirectToActivation() {
+  const location = useLocation();
+  rememberDestination(location.pathname + location.search);
+  return <Navigate to="/activate" replace />;
 }

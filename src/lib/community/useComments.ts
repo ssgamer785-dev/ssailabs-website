@@ -160,11 +160,15 @@ export function useComments(postId: string | null): UseComments {
 
   const deleteComment = useCallback(async (id: string) => {
     const previous = comments;
+    setError(null);
     setComments(prev => prev.filter(c => c.id !== id));
-    const { error: delError } = await supabase.from('comments').delete().eq('id', id);
-    if (delError) {
+    try {
+      const { data, error: delError } = await supabase.from('comments').delete().eq('id', id).select('id');
+      if (delError || !data?.length) throw new Error(delError?.message ?? 'This comment could not be deleted.');
+    } catch (e) {
       setComments(previous);
-      setError(delError.message);
+      setError(e instanceof Error ? e.message : 'This comment could not be deleted.');
+      throw e;
     }
   }, [comments]);
 

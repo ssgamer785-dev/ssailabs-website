@@ -22,6 +22,8 @@ export function useLazyMediaUrl(
   failed: boolean;
   loading: boolean;
   retry: () => void;
+  forceRetry: () => void;
+  error: string | null;
 } {
   const armed = options?.armed ?? true;
   const localUrl = options?.localUrl ?? null;
@@ -31,21 +33,39 @@ export function useLazyMediaUrl(
   const [url, setUrl] = useState<string | null>(localUrl);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const observerRef = useRef<IntersectionObserver | null>(null);
   const resolveRef = useRef(resolve);
   resolveRef.current = resolve;
   const lastRetry = useRef(0);
+  const loadFailures = useRef(0);
 
-  const retry = useCallback(() => {
-    if (!storageKey || Date.now() - lastRetry.current < 30000) return;
+  const resolveAgain = useCallback((force: boolean) => {
+    if (!storageKey || (!force && Date.now() - lastRetry.current < 30000)) return;
     lastRetry.current = Date.now();
     setLoading(true);
     void resolveRef.current(storageKey, true)
-      .then(next => { setUrl(next); setFailed(false); })
-      .catch(() => setFailed(true))
+      .then(next => { setUrl(next); setFailed(false); setError(null); })
+      .catch(e => { setFailed(true); setError(e instanceof Error ? e.message : 'Could not load attachment.'); })
       .finally(() => setLoading(false));
   }, [storageKey]);
+  const retry = useCallback(() => {
+    loadFailures.current += 1;
+    if (loadFailures.current > 1) {
+      setFailed(true);
+      setError('This attachment could not be opened. Please try again.');
+      return;
+    }
+    resolveAgain(true);
+  }, [resolveAgain]);
+  const forceRetry = useCallback(() => {
+    loadFailures.current = 0;
+    setUrl(null);
+    setFailed(false);
+    setError(null);
+    resolveAgain(true);
+  }, [resolveAgain]);
 
   // A callback ref rather than useRef + useEffect: the node arrives on mount
   // and can be swapped out, and this observes it either way.
@@ -70,7 +90,7 @@ export function useLazyMediaUrl(
 
   useEffect(() => () => observerRef.current?.disconnect(), []);
 
-  useEffect(() => { setUrl(localUrl); setFailed(false); lastRetry.current = 0; }, [storageKey]);
+  useEffect(() => { setUrl(localUrl); setFailed(false); setError(null); lastRetry.current = 0; loadFailures.current = 0; }, [storageKey]);
 
   // A local object URL (an attachment still uploading) always wins: it is the
   // real bytes, already in memory, and needs no round trip.
@@ -88,8 +108,9 @@ export function useLazyMediaUrl(
         if (!active) return;
         setUrl(resolved);
         setFailed(false);
+        setError(null);
       })
-      .catch(() => { if (active) setFailed(true); })
+      .catch(e => { if (active) { setFailed(true); setError(e instanceof Error ? e.message : 'Could not load attachment.'); } })
       .finally(() => { if (active) setLoading(false); });
 
     return () => { active = false; };
@@ -97,9 +118,9 @@ export function useLazyMediaUrl(
 
   useEffect(() => {
     if (!visible || !armed || !storageKey || localUrl) return;
-    const timer = window.setInterval(retry, 12 * 60 * 1000);
+    const timer = window.setInterval(() => resolveAgain(false), 12 * 60 * 1000);
     return () => window.clearInterval(timer);
-  }, [visible, armed, storageKey, localUrl, retry]);
+  }, [visible, armed, storageKey, localUrl, resolveAgain]);
 
-  return { ref, url, failed, loading, retry };
+  return { ref, url, failed, loading, retry, forceRetry, error };
 }

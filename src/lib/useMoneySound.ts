@@ -1,63 +1,95 @@
 import { useCallback, useEffect } from 'react';
 import moneySound from '../assets/money-sound-for-trader.m4a';
 
-/**
- * The cash-register sound that marks a completed pull-to-refresh.
- *
- * This used to be synthesised with Web Audio oscillators — an approximation of
- * a cha-ching, built because there was no audio asset. There is one now, so it
- * plays that file and nothing else.
- *
- * One element, created on first play and reused. That is what keeps a fast
- * second pull from stacking a second voice on top of the first: rewinding to
- * zero restarts the clip instead of overlapping it. It also means the auth
- * screens never construct an audio element at all, since they never reach the
- * call site.
- *
- * Every failure path here is silent on purpose. If the browser's autoplay
- * policy refuses the play() promise, or the element cannot be created at all,
- * the refresh still runs — a missing sound effect is not worth an error.
- */
-export function useMoneySound() {
-  useEffect(() => {
-    const unlock = () => {
-      const el = moneyElement();
-      if (!el || unlocked) return;
-      const started = Date.now();
-      el.muted = true;
-      void el.play().then(() => {
-        if (lastPlayedAt <= started) { el.pause(); el.currentTime = 0; }
-        el.muted = false; unlocked = true;
-      }).catch(() => { el.muted = false; });
-    };
-    document.addEventListener('pointerdown', unlock, { once: true });
-    document.addEventListener('keydown', unlock, { once: true });
-    return () => { document.removeEventListener('pointerdown', unlock); document.removeEventListener('keydown', unlock); };
-  }, []);
+/** The original recording, played as a short UI effect rather than an HTML media player. */
+let context: AudioContext | null = null;
+let decoded: Promise<AudioBuffer> | null = null;
+let active: AudioBufferSourceNode | null = null;
+let pending = false;
+let bootHandled = false;
+let listenersInstalled = false;
+let lastPlayedAt = 0;
 
-  // Stable across renders. PhoneShell's gesture effect depends on this
-  // callback, and a new identity each render would tear the effect down mid-
-  // refresh and strand the indicator.
-  return useCallback(function playMoney() {
-    try {
-      const el = moneyElement();
-      if (!el || Date.now() - lastPlayedAt < 800) return;
-      lastPlayedAt = Date.now();
-      el.muted = false;
-      el.pause();
-      el.currentTime = 0;
-      void el.play().catch(() => { /* autoplay blocked; stay quiet */ });
-    } catch {
-      /* no audio support in this environment */
-    }
-  }, []);
+function audioContext(): AudioContext | null {
+  if (context) return context;
+  const Constructor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Constructor) return null;
+  try { context = new Constructor(); return context; } catch { return null; }
 }
 
-let sharedElement: HTMLAudioElement | null = null;
-let unlocked = false;
-let lastPlayedAt = 0;
-function moneyElement(): HTMLAudioElement | null {
-  if (typeof Audio === 'undefined') return null;
-  if (!sharedElement) { sharedElement = new Audio(moneySound); sharedElement.preload = 'auto'; }
-  return sharedElement;
+function buffer(ctx: AudioContext): Promise<AudioBuffer> {
+  if (!decoded) decoded = fetch(moneySound).then(res => {
+    if (!res.ok) throw new Error('Could not load startup sound.');
+    return res.arrayBuffer();
+  }).then(bytes => ctx.decodeAudioData(bytes)).catch(error => { decoded = null; throw error; });
+  return decoded;
+}
+
+function removeUnlock(): void {
+  if (!listenersInstalled) return;
+  document.removeEventListener('pointerdown', unlock);
+  document.removeEventListener('keydown', unlock);
+  listenersInstalled = false;
+}
+
+function unlock(): void {
+  const ctx = audioContext();
+  if (!ctx) return;
+  void ctx.resume().then(() => {
+    if (pending) void play();
+    else { removeUnlock(); void ctx.suspend().catch(() => {}); }
+  }).catch(() => {});
+}
+
+function installUnlock(): void {
+  if (listenersInstalled) return;
+  document.addEventListener('pointerdown', unlock);
+  document.addEventListener('keydown', unlock);
+  listenersInstalled = true;
+}
+
+async function play(): Promise<void> {
+  if (active || Date.now() - lastPlayedAt < 800) return;
+  const ctx = audioContext();
+  if (!ctx) return;
+  pending = true;
+  installUnlock();
+  try {
+    // Decode once, retaining the exact asset bytes. A gesture resumes the
+    // context when browser autoplay rules blocked the first attempt.
+    const clip = await buffer(ctx);
+    if (ctx.state !== 'running') {
+      await ctx.resume();
+      if ((ctx as AudioContext).state !== 'running') return;
+    }
+    if (active || Date.now() - lastPlayedAt < 800) return;
+    const source = ctx.createBufferSource();
+    source.buffer = clip;
+    source.connect(ctx.destination);
+    active = source;
+    lastPlayedAt = Date.now();
+    pending = false;
+    removeUnlock();
+    source.onended = () => {
+      source.disconnect();
+      if (active === source) active = null;
+      // Releasing the output session avoids a lingering iOS lock-screen player.
+      void ctx.suspend().catch(() => {});
+    };
+    source.start();
+  } catch {
+    // Autoplay and decoder support vary by browser; retain one pending attempt.
+  }
+}
+
+export function useMoneySound() {
+  useEffect(() => {
+    installUnlock();
+    if (bootHandled) return;
+    bootHandled = true;
+    const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+    if (navigation?.type === 'reload') void play();
+  }, []);
+
+  return useCallback(() => { void play(); }, []);
 }

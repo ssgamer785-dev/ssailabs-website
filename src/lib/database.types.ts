@@ -289,6 +289,8 @@ export interface Database {
           body: string | null;
           related_post_id: string | null;
           related_conversation_id: string | null;
+          related_message_id: string | null;
+          related_comment_id: string | null;
           read_at: string | null;
           created_at: string;
         };

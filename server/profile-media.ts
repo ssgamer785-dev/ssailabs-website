@@ -133,7 +133,23 @@ export function profileMediaRouter(): Router {
     const caller = await authenticate(req);
     if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
 
-    const storageKey = avatarObjectKey(req.query.key);
+    let rawKey = req.query.key;
+    if (typeof req.query.userId === 'string') {
+      const userId = req.query.userId;
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)) {
+        return res.status(400).json({ error: 'Invalid profile id.' });
+      }
+      // The endpoint returns only a signed avatar URL. Profiles RLS deliberately
+      // hides other members' rows, so the service lookup selects no personal
+      // fields and is limited to the requested avatar key.
+      const { data: profile, error } = await getAdmin()!
+        .from('profiles').select('avatar_key').eq('id', userId).maybeSingle();
+      if (error) throw error;
+      rawKey = profile?.avatar_key ?? undefined;
+      if (!rawKey) return res.status(404).json({ error: 'Profile picture not found.' });
+    }
+
+    const storageKey = avatarObjectKey(rawKey);
     if (!storageKey) return res.status(400).json({ error: 'Invalid avatar key.' });
 
     const url = await getSignedUrl(

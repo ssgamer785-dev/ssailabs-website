@@ -11,10 +11,12 @@
 
 import { supabase } from './supabase';
 import { validateFullName } from './profile-name';
+import { normalizeIndianMobile, validateIndianMobile } from './profile-phone';
 
 // Re-exported so screens have one import for the whole flow, while the rules
 // themselves stay free of the Supabase client and unit-testable.
 export { MAX_NAME_LENGTH, MIN_NAME_LENGTH, validateFullName } from './profile-name';
+export { normalizeIndianMobile, validateIndianMobile } from './profile-phone';
 
 async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
@@ -45,6 +47,25 @@ export async function updateFullName(userId: string, fullName: string): Promise<
   if (error) {
     console.error('[profile] name update failed:', error);
     return { ok: false, message: 'Could not save your name. Please try again.' };
+  }
+  return { ok: true };
+}
+
+/** Saves only the current profile's optional mobile field; profiles RLS enforces ownership. */
+export async function updatePhoneNumber(userId: string, phone: string): Promise<{ ok: boolean; message?: string }> {
+  const normalized = normalizeIndianMobile(phone);
+  if (normalized === null || validateIndianMobile(phone)) {
+    return { ok: false, message: validateIndianMobile(phone) ?? 'Enter a valid 10-digit Indian mobile number.' };
+  }
+
+  const { error } = await supabase
+    .from('profiles')
+    .update({ phone: normalized || null })
+    .eq('id', userId);
+
+  if (error) {
+    console.error('[profile] mobile update failed:', error);
+    return { ok: false, message: 'Could not save your mobile number. Please try again.' };
   }
   return { ok: true };
 }
@@ -121,20 +142,27 @@ export async function removeAvatar(): Promise<{ ok: boolean; message?: string }>
 // ---------------------------------------------------------------------------
 const urlCache = new Map<string, { url: string; expiresAt: number }>();
 const inFlight = new Map<string, Promise<string>>();
+const cacheGeneration = new Map<string, number>();
 
-export async function getAvatarUrl(storageKey: string): Promise<string> {
-  const hit = urlCache.get(storageKey);
+export async function getAvatarUrl(storageKey?: string | null, userId?: string | null): Promise<string> {
+  if (!storageKey && !userId) throw new Error('No profile picture was provided.');
+  const cacheKey = storageKey ? `key:${storageKey}` : `user:${userId}`;
+  const hit = urlCache.get(cacheKey);
   if (hit && hit.expiresAt > Date.now()) return hit.url;
 
-  const pending = inFlight.get(storageKey);
+  const pending = inFlight.get(cacheKey);
   if (pending) return pending;
+  const generation = cacheGeneration.get(cacheKey) ?? 0;
 
   const work = (async () => {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
     if (!token) throw new Error('You are signed out. Please log in again.');
 
-    const res = await fetch(`/api/profile/avatar-url?key=${encodeURIComponent(storageKey)}`, {
+    const query = storageKey
+      ? `key=${encodeURIComponent(storageKey)}`
+      : `userId=${encodeURIComponent(userId!)}`;
+    const res = await fetch(`/api/profile/avatar-url?${query}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) throw new Error(await readError(res, 'Could not load this picture.'));
@@ -142,15 +170,17 @@ export async function getAvatarUrl(storageKey: string): Promise<string> {
     const { url, expiresIn } = await res.json();
     // Re-signed a minute early, so a URL is never handed to an <img> with
     // seconds left on it.
-    urlCache.set(storageKey, { url, expiresAt: Date.now() + (expiresIn - 60) * 1000 });
+    if ((cacheGeneration.get(cacheKey) ?? 0) === generation) {
+      urlCache.set(cacheKey, { url, expiresAt: Date.now() + (expiresIn - 60) * 1000 });
+    }
     return url as string;
   })();
 
-  inFlight.set(storageKey, work);
+  inFlight.set(cacheKey, work);
   try {
     return await work;
   } finally {
-    inFlight.delete(storageKey);
+    if (inFlight.get(cacheKey) === work) inFlight.delete(cacheKey);
   }
 }
 
@@ -161,6 +191,11 @@ export async function getAvatarUrl(storageKey: string): Promise<string> {
  * would not collide, but the OLD key must not keep serving a valid URL to an
  * object that has just been deleted.
  */
-export function forgetAvatarUrl(storageKey: string | null | undefined): void {
-  if (storageKey) urlCache.delete(storageKey);
+export function forgetAvatarUrl(storageKey: string | null | undefined, userId?: string | null): void {
+  for (const cacheKey of [storageKey ? `key:${storageKey}` : null, userId ? `user:${userId}` : null]) {
+    if (!cacheKey) continue;
+    urlCache.delete(cacheKey);
+    cacheGeneration.set(cacheKey, (cacheGeneration.get(cacheKey) ?? 0) + 1);
+    inFlight.delete(cacheKey);
+  }
 }

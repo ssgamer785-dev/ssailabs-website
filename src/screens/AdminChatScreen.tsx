@@ -7,7 +7,7 @@ import { useAuth } from '../lib/auth-context';
 import { supabase } from '../lib/supabase';
 import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { useConversation } from '../lib/chat/useConversation';
-import { useVoiceRecorder } from '../lib/chat/useVoiceRecorder';
+import { useVoiceRecorder, type VoiceRecording } from '../lib/chat/useVoiceRecorder';
 import { formatDuration, type MediaKind } from '../lib/chat/types';
 import { PhoneShell } from '../components/PhoneShell';
 import { MessageBubble } from '../components/chat/MessageBubble';
@@ -65,6 +65,7 @@ export function AdminChatScreen() {
   const { user, isAdmin } = useAuth();
   const [params] = useSearchParams();
   const conversationId = params.get('c');
+  const targetMessageId = params.get('m');
   // Admins open a specific student's thread via ?c=<id>; students get their own.
   const chat = useConversation(conversationId ?? undefined);
   const chatReady = !!chat.conversationId && !chat.loading;
@@ -85,14 +86,34 @@ export function AdminChatScreen() {
 
   const [msg, setMsg] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
+  const [voicePreview, setVoicePreview] = useState<{ clip: VoiceRecording; url: string } | null>(null);
+  const [sendingVoice, setSendingVoice] = useState(false);
+  useEffect(() => () => { if (voicePreview) URL.revokeObjectURL(voicePreview.url); }, [voicePreview]);
   const fileInput = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   /** Height before prepending an older page, so we can restore the position. */
   const restoreHeight = useRef<number | null>(null);
+  const targetPages = useRef(0);
+  const targetReached = useRef(false);
 
   const { messages, markRead, loadOlder, hasMore, loadingOlder, peerTyping, connection, peerOnline } = chat;
+
+  useEffect(() => { targetPages.current = 0; targetReached.current = false; }, [targetMessageId]);
+  useEffect(() => {
+    if (!targetMessageId || chat.loading) return;
+    if (messages.some(message => message.id === targetMessageId)) {
+      if (targetReached.current) return;
+      targetReached.current = true;
+      document.getElementById(`message-${targetMessageId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } else if (hasMore && !loadingOlder && targetPages.current < 25) {
+      targetPages.current++;
+      void loadOlder();
+    } else if ((!hasMore || targetPages.current >= 25) && !loadingOlder) {
+      setNotice('This message is no longer available.');
+    }
+  }, [targetMessageId, chat.loading, messages, hasMore, loadingOlder, loadOlder]);
 
   // Keep the newest message in view, but never yank the user out of history.
   useEffect(() => {
@@ -153,8 +174,18 @@ export function AdminChatScreen() {
     }
     const clip = await recorder.stop();
     if (!clip) return;
-    atBottom.current = true;
-    await chat.sendMedia(clip.blob, 'voice', 'voice-note', clip.durationSeconds);
+    setVoicePreview({ clip, url: URL.createObjectURL(clip.blob) });
+  }
+
+  async function sendVoicePreview() {
+    if (!voicePreview || sendingVoice || !chatReady) return;
+    setSendingVoice(true);
+    const extension = /mp4/i.test(voicePreview.clip.mimeType) ? 'm4a' : /aac/i.test(voicePreview.clip.mimeType) ? 'aac' : /ogg/i.test(voicePreview.clip.mimeType) ? 'ogg' : 'webm';
+    try {
+      atBottom.current = true;
+      await chat.sendMedia(voicePreview.clip.blob, 'voice', `voice-note.${extension}`, voicePreview.clip.durationSeconds);
+      setVoicePreview(null);
+    } finally { setSendingVoice(false); }
   }
 
   // Our own socket state comes first — "Online" would be a lie while we are
@@ -220,6 +251,7 @@ export function AdminChatScreen() {
             <MessageBubble
               key={m.clientId}
               message={m}
+              highlighted={m.id === targetMessageId}
               out={m.senderId === user?.id}
               incomingIsAdmin={!isAdmin}
               incomingName={peer?.name ?? 'Member'}
@@ -262,7 +294,13 @@ export function AdminChatScreen() {
         style={{ display: 'none' }}
       />
 
-      {!recorder.recording ? (
+      {voicePreview ? (
+        <div style={{ ...css('flex:none;display:flex;align-items:center;gap:8px;padding:12px 18px;background:var(--surface)'), paddingBottom: `calc(24px + env(safe-area-inset-bottom, 0px) + ${keyboardInset}px)` }}>
+          <button type="button" onClick={() => setVoicePreview(null)} disabled={sendingVoice} style={css('color:var(--danger-ink);font-size:12px;font-weight:700')}>Cancel</button>
+          <audio controls preload="metadata" src={voicePreview.url} style={css('flex:1;min-width:0;height:42px')} />
+          <button type="button" onClick={() => void sendVoicePreview()} disabled={sendingVoice} style={css('padding:10px 12px;border-radius:10px;background:var(--accent);color:var(--on-accent);font-size:12px;font-weight:700')}>{sendingVoice ? 'Sending…' : 'Send'}</button>
+        </div>
+      ) : !recorder.recording ? (
         <div style={{ ...css('flex:none;display:flex;align-items:center;gap:9px;background:var(--surface)'), padding: '12px 18px', paddingBottom: `calc(24px + env(safe-area-inset-bottom, 0px) + ${keyboardInset}px)` }}>
           <div onClick={chatReady ? () => fileInput.current?.click() : undefined} aria-disabled={!chatReady} style={css(`width:38px;height:38px;border-radius:50%;background:var(--surface-secondary);display:flex;align-items:center;justify-content:center;cursor:${chatReady ? 'pointer' : 'default'};opacity:${chatReady ? 1 : .45};flex:none`)}>
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth={2.1} strokeLinecap="round"><path d="M12 6v12M6 12h12" /></svg>

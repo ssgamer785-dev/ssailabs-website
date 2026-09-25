@@ -5,6 +5,8 @@ import { Hoverable } from '../lib/Hoverable';
 import { useAuth } from '../lib/auth-context';
 import { PhoneShell } from '../components/PhoneShell';
 import { AuthDivider, GoogleSignInButton } from '../components/ui/GoogleSignInButton';
+import { pendingDestination } from '../lib/notifications/destination';
+import { rememberSession, setRememberSession } from '../lib/supabase';
 
 export function LoginScreen() {
   const navigate = useNavigate();
@@ -12,7 +14,7 @@ export function LoginScreen() {
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [pwShow, setPwShow] = useState(false);
-  const [remember, setRemember] = useState(false);
+  const [remember, setRemember] = useState(rememberSession);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false);
@@ -27,9 +29,10 @@ export function LoginScreen() {
     inFlight.current = true;
     setSubmitting(true);
     try {
+      setRememberSession(remember);
       const { error: signInError } = await signIn(email.trim(), pw);
       if (signInError) { setError(signInError); return; }
-      navigate('/activate', { replace: true });
+      navigate(pendingDestination() ?? '/activate', { replace: true });
     } finally {
       inFlight.current = false;
       setSubmitting(false);
@@ -60,7 +63,7 @@ export function LoginScreen() {
           </div>
         </div>
         <div style={css('margin-top:11px;display:flex;justify-content:flex-end')}>
-          <div style={css('font-size:12.5px;font-weight:600;color:#0B5FEF;cursor:pointer;white-space:nowrap')}>Forgot Password?</div>
+          <button type="button" onClick={() => navigate('/forgot-password')} style={css('font-size:12.5px;font-weight:600;color:#0B5FEF;cursor:pointer;white-space:nowrap')}>Forgot Password?</button>
         </div>
         {error && <div style={css('margin-top:14px;font-size:12.5px;color:#EF4444;line-height:1.4')}>{error}</div>}
         <Hoverable

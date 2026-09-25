@@ -24,7 +24,7 @@ export function BrandHero() {
     <div
       style={css(
         'flex:none;margin:0 20px;border-radius:20px;overflow:hidden;position:relative;' +
-        'background:linear-gradient(145deg,var(--accent-grad-a) 0%,var(--accent-grad-b) 100%);' +
+        'background:linear-gradient(145deg,#102f68 0%,#071c43 100%);' +
         // A blue-tinted shadow, not a generic dark one — the same rgb the FAB
         // and the original Market Overview card used under their own accent
         // surfaces, so a premium blue card here casts a shadow the rest of
@@ -67,7 +67,7 @@ export function BrandHero() {
         {/* The real mark, on a translucent plate so it reads on the gradient.
             object-fit:contain, so a non-square asset is never distorted. */}
         <a
-          href="https://share.google/8tinuVwbPEerqwAgZ"
+          href="https://share.google/nYPfH4WT6rOW64y7P"
           target="_blank"
           rel="noopener noreferrer"
           aria-label="Open The Traders Planet Google Business Profile"
@@ -90,7 +90,7 @@ export function BrandHero() {
             THE TRADERS PLANET
           </div>
           <div style={css('font-size:19px;font-weight:800;letter-spacing:-.5px;line-height:1.18;text-wrap:balance')}>
-            Where Traders Are Built
+            WHERE TRADERS ARE BUILT
           </div>
         </div>
       </div>

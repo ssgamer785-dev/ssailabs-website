@@ -59,8 +59,12 @@ export function useVoiceRecorder(): UseVoiceRecorder {
   const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const startedAt = useRef(0);
   const cancelledRef = useRef(false);
+  const startingRef = useRef(false);
+  const attemptRef = useRef(0);
+  const mimeRef = useRef('');
 
   const teardown = useCallback(() => {
+    attemptRef.current += 1;
     clearInterval(timerRef.current);
     // Releases the mic indicator — important on mobile.
     streamRef.current?.getTracks().forEach(t => t.stop());
@@ -72,9 +76,17 @@ export function useVoiceRecorder(): UseVoiceRecorder {
   useEffect(() => () => teardown(), [teardown]);
 
   const start = useCallback(async () => {
+    if (startingRef.current || recorderRef.current) return;
+    startingRef.current = true;
+    const attempt = ++attemptRef.current;
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (attempt !== attemptRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      streamRef.current = stream;
       const mimeType = pickMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
 
@@ -82,8 +94,8 @@ export function useVoiceRecorder(): UseVoiceRecorder {
       cancelledRef.current = false;
       recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
 
-      streamRef.current = stream;
       recorderRef.current = recorder;
+      mimeRef.current = recorder.mimeType || mimeType;
       startedAt.current = Date.now();
       setSeconds(0);
       recorder.start();
@@ -95,6 +107,8 @@ export function useVoiceRecorder(): UseVoiceRecorder {
     } catch (e) {
       setError(micErrorMessage(e));
       teardown();
+    } finally {
+      startingRef.current = false;
     }
   }, [teardown]);
 
@@ -106,7 +120,7 @@ export function useVoiceRecorder(): UseVoiceRecorder {
     }
 
     const durationSeconds = Math.max(1, Math.round((Date.now() - startedAt.current) / 1000));
-    const mimeType = recorder.mimeType || 'audio/webm';
+    const mimeType = recorder.mimeType || mimeRef.current || chunksRef.current[0]?.type || 'application/octet-stream';
 
     const blob = await new Promise<Blob | null>(resolve => {
       recorder.onstop = () => {

@@ -22,32 +22,34 @@ export function initialsOf(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-export function Avatar({ name, avatarKey, size, bg, fg, fontSize }: {
+export function Avatar({ name, avatarKey, avatarUserId, size, bg, fg, fontSize }: {
   name: string;
   avatarKey: string | null | undefined;
+  /** Resolves the signed avatar URL server-side without exposing profile fields. */
+  avatarUserId?: string | null;
   size: number;
   bg?: string;
   fg?: string;
   fontSize?: number;
 }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
+  const identity = avatarKey ? `key:${avatarKey}` : avatarUserId ? `user:${avatarUserId}` : '';
+  const [resolved, setResolved] = useState<{ identity: string; url: string } | null>(null);
+  const [failedIdentity, setFailedIdentity] = useState('');
 
   useEffect(() => {
-    setUrl(null);
-    setFailed(false);
-    if (!avatarKey) return;
+    if (!identity) return;
+    setFailedIdentity('');
 
     let active = true;
-    getAvatarUrl(avatarKey)
-      .then(resolved => { if (active) setUrl(resolved); })
+    getAvatarUrl(avatarKey, avatarUserId)
+      .then(url => { if (active) setResolved({ identity, url }); })
       // A picture that will not load is not worth an error message next to
       // someone's name; the initials are a complete answer on their own.
-      .catch(() => { if (active) setFailed(true); });
+      .catch(() => { if (active) setFailedIdentity(identity); });
     return () => { active = false; };
-  }, [avatarKey]);
+  }, [identity, avatarKey, avatarUserId]);
 
-  const showImage = !!url && !failed;
+  const showImage = !!identity && resolved?.identity === identity && failedIdentity !== identity;
 
   return (
     <div
@@ -63,10 +65,10 @@ export function Avatar({ name, avatarKey, size, bg, fg, fontSize }: {
     >
       {showImage ? (
         <img
-          src={url}
+          src={resolved.url}
           alt={name ? `${name}'s profile picture` : 'Profile picture'}
           decoding="async"
-          onError={() => setFailed(true)}
+          onError={() => setFailedIdentity(identity)}
           style={css('width:100%;height:100%;object-fit:cover;display:block')}
         />
       ) : (

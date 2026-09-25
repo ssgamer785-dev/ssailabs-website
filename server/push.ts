@@ -22,11 +22,15 @@ function sameSecret(actual: unknown, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function destination(row: { kind: string; related_post_id: string | null; related_conversation_id: string | null }): string {
+function destination(row: { kind: string; related_post_id: string | null; related_conversation_id: string | null; related_message_id?: string | null; related_comment_id?: string | null }): string {
   if (row.kind === 'chat' && row.related_conversation_id && UUID.test(row.related_conversation_id)) {
-    return `/chat/admin?c=${encodeURIComponent(row.related_conversation_id)}`;
+    const message = row.related_message_id && UUID.test(row.related_message_id) ? `&m=${encodeURIComponent(row.related_message_id)}` : '';
+    return `/chat/admin?c=${encodeURIComponent(row.related_conversation_id)}${message}`;
   }
-  if (row.related_post_id && UUID.test(row.related_post_id)) return `/post?post=${encodeURIComponent(row.related_post_id)}`;
+  if (row.related_post_id && UUID.test(row.related_post_id)) {
+    const comment = row.related_comment_id && UUID.test(row.related_comment_id) ? `&comment=${encodeURIComponent(row.related_comment_id)}` : '';
+    return `/post?post=${encodeURIComponent(row.related_post_id)}${comment}`;
+  }
   return '/notifications';
 }
 
@@ -76,7 +80,7 @@ export function pushRouter(): Router {
     }
     const db = getAdmin()!;
     const { data: row, error: rowError } = await db.from('notifications')
-      .select('id,user_id,kind,title,body,related_post_id,related_conversation_id')
+      .select('*')
       .eq('id', id).single();
     if (rowError || !row) return res.status(404).json({ error: 'Notification not found.' });
     const { data: subscriptions, error: subError } = await db.from('push_subscriptions')

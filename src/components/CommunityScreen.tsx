@@ -6,10 +6,12 @@ import { useAuth } from '../lib/auth-context';
 import { useFeed, type FeedPost } from '../lib/community/useFeed';
 import { useRefreshHandler } from './PhoneShell';
 import { useComments } from '../lib/community/useComments';
-import { PostMedia, timeAgo } from './community/PostMedia';
+import { PostMedia } from './community/PostMedia';
+import { formatDateTime } from '../lib/format-date-time';
+import { linkifiedText } from './ui/LinkifiedText';
 import { PollCard } from './community/PollCard';
 import { resolveAuthorName } from '../lib/community/author-name';
-import { initialsOf } from './ui/Avatar';
+import { Avatar } from './ui/Avatar';
 import logo from '../assets/traders-planet-logo.jpg';
 import { AuthenticatedBottomNav } from './ui/AuthenticatedBottomNav';
 
@@ -21,17 +23,6 @@ function MaskAvatar({ size, online }: { size: number; online: boolean }) {
           <circle cx={12} cy={8.4} r={3.3} />
           <path d="M5.6 19.6c0-3.4 2.9-5.8 6.4-5.8s6.4 2.4 6.4 5.8" />
         </svg>
-      </div>
-      {online && <div style={{ position: 'absolute', right: -1, bottom: -1, width: 10, height: 10, borderRadius: '50%', background: 'var(--success)', border: '2px solid var(--border-on-accent)' }} />}
-    </div>
-  );
-}
-
-function InitialAvatar({ text, size, bg, color, online }: { text: string; size: number; bg: string; color: string; online: boolean }) {
-  return (
-    <div style={{ position: 'relative', flex: 'none' }}>
-      <div style={{ width: size, height: size, borderRadius: '50%', background: bg, color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: Math.round(size * 0.38), fontWeight: 700 }}>
-        {text}
       </div>
       {online && <div style={{ position: 'absolute', right: -1, bottom: -1, width: 10, height: 10, borderRadius: '50%', background: 'var(--success)', border: '2px solid var(--border-on-accent)' }} />}
     </div>
@@ -444,7 +435,6 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
     official, isAdminViewer: admin, isMine: post.isMine, reveal,
     isAnonymous: post.isAnonymous, authorName: post.authorName, myName: userName,
   });
-  const initials = initialsOf(shownName);
 
   const role = official
     ? 'Admin'
@@ -470,7 +460,7 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
             <img src={logo} alt="" aria-hidden="true" decoding="async" style={css('width:31px;height:31px;object-fit:contain;display:block')} />
           </div>
         ) : showRealName ? (
-          <InitialAvatar text={initials} size={36} bg="var(--avatar-bg)" color="var(--avatar-ink)" online={false} />
+          <Avatar name={shownName} avatarKey={null} avatarUserId={post.authorId} size={36} />
         ) : (
           <MaskAvatar size={36} online={false} />
         )}
@@ -485,7 +475,7 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
           <div style={css('font-size:11px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>{role}</div>
         </div>
 
-        <time style={css('flex:none;font-size:11px;color:var(--text-faint);white-space:nowrap')}>{timeAgo(post.createdAt)}</time>
+        <time dateTime={post.createdAt} style={css('flex:none;max-width:118px;font-size:10px;color:var(--text-faint);white-space:normal;text-align:right;line-height:1.25')}>{formatDateTime(post.createdAt)}</time>
         {(post.isMine || admin) && <button type="button" aria-label="Post options" onClick={e => { e.stopPropagation(); press.setConfirming(true); }} style={css('font-size:19px;color:var(--text-muted);padding:2px 5px;line-height:1')}>⋯</button>}
       </header>
 
@@ -496,7 +486,7 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
             <div style={css('font-size:15px;font-weight:700;letter-spacing:-.3px;line-height:1.3;text-wrap:pretty')}>{post.title}</div>
           )}
           {post.body && (
-            <div style={css('font-size:13.5px;line-height:1.5;color:var(--text-secondary);white-space:pre-wrap;word-break:break-word')}>{post.body}</div>
+            <div style={css('font-size:13.5px;line-height:1.5;color:var(--text-secondary);white-space:pre-wrap;word-break:break-word')}>{linkifiedText(post.body)}</div>
           )}
         </div>
       )}

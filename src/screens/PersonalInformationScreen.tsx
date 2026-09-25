@@ -4,7 +4,8 @@ import { Hoverable } from '../lib/Hoverable';
 import { useAuth } from '../lib/auth-context';
 import {
   MAX_NAME_LENGTH, forgetAvatarUrl, removeAvatar, requestAvatarUploadUrl,
-  setAvatarKey, updateFullName, uploadAvatar, validateFullName,
+  setAvatarKey, updateFullName, updatePhoneNumber, uploadAvatar, validateFullName,
+  normalizeIndianMobile, validateIndianMobile,
 } from '../lib/profile-api';
 import { PhoneShell } from '../components/PhoneShell';
 import { AppBackButton } from '../components/ui/AppBackButton';
@@ -46,6 +47,9 @@ export function PersonalInformationScreen() {
   const [name, setName] = useState('');
   const [savingName, setSavingName] = useState(false);
   const [nameSaved, setNameSaved] = useState(false);
+  const [phone, setPhone] = useState('');
+  const [savingPhone, setSavingPhone] = useState(false);
+  const [phoneSaved, setPhoneSaved] = useState(false);
 
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
@@ -62,6 +66,7 @@ export function PersonalInformationScreen() {
   useEffect(() => {
     if (seeded.current || !profile) return;
     setName(profile.full_name ?? '');
+    setPhone(profile.phone ?? '');
     seeded.current = true;
   }, [profile]);
 
@@ -69,6 +74,8 @@ export function PersonalInformationScreen() {
 
   const dirty = !!profile && name.trim() !== (profile.full_name ?? '').trim();
   const nameProblem = dirty ? validateFullName(name) : null;
+  const dirtyPhone = !!profile && phone.trim() !== (profile.phone ?? '').trim();
+  const phoneProblem = dirtyPhone ? validateIndianMobile(phone) : null;
 
   const saveName = useCallback(async () => {
     if (!user || savingName || !dirty) return;
@@ -82,6 +89,20 @@ export function PersonalInformationScreen() {
     setNameSaved(true);
     window.setTimeout(() => setNameSaved(false), 2400);
   }, [user, savingName, dirty, name, refreshProfile]);
+
+  const savePhone = useCallback(async () => {
+    if (!user || savingPhone || !dirtyPhone || phoneProblem) return;
+    setError(null);
+    setPhoneSaved(false);
+    setSavingPhone(true);
+    const result = await updatePhoneNumber(user.id, phone);
+    setSavingPhone(false);
+    if (!result.ok) { setError(result.message ?? 'Could not save your mobile number.'); return; }
+    setPhone(normalizeIndianMobile(phone) ?? phone);
+    await refreshProfile();
+    setPhoneSaved(true);
+    window.setTimeout(() => setPhoneSaved(false), 2400);
+  }, [user, savingPhone, dirtyPhone, phoneProblem, phone, refreshProfile]);
 
   const pickPicture = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const picked = e.target.files?.[0];
@@ -113,7 +134,7 @@ export function PersonalInformationScreen() {
       // bytes land is a broken image everywhere this person is drawn.
       const ok = await setAvatarKey(user.id, ticket.storageKey);
       if (!ok) throw new Error('The picture uploaded but could not be saved to your profile.');
-      forgetAvatarUrl(previousKey);
+      forgetAvatarUrl(previousKey, user.id);
       await refreshProfile();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not upload that picture.');
@@ -133,7 +154,7 @@ export function PersonalInformationScreen() {
     const result = await removeAvatar();
     setRemoving(false);
     if (!result.ok) { setError(result.message ?? 'Could not remove the picture.'); return; }
-    forgetAvatarUrl(previousKey);
+    forgetAvatarUrl(previousKey, user?.id);
     await refreshProfile();
   }, [removing, profile, refreshProfile]);
 
@@ -262,6 +283,46 @@ export function PersonalInformationScreen() {
             hoverStyle={css('background:var(--accent-hover)')}
           >
             {savingName ? 'Saving…' : 'Save name'}
+          </Hoverable>
+        </Field>
+
+        <div style={css('height:1px;background:var(--surface-divider)')} />
+
+        <Field label="Mobile number (optional)">
+          <input
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
+            value={phone}
+            onChange={event => { setPhone(event.target.value); setPhoneSaved(false); }}
+            onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void savePhone(); } }}
+            maxLength={20}
+            placeholder="+91 98765 43210"
+            aria-label="Mobile number"
+            aria-invalid={!!phoneProblem}
+            style={{
+              ...css('width:100%;min-width:0;height:48px;border-radius:12px;padding:0 14px;font-size:15px;background:var(--surface-secondary)'),
+              border: `1px solid ${phoneProblem ? 'var(--danger-border)' : 'var(--border-4)'}`,
+            }}
+          />
+          <div style={css('min-height:18px;font-size:11.5px;line-height:1.45')}>
+            {phoneProblem ? <span style={css('color:var(--danger-ink)')}>{phoneProblem}</span>
+              : phoneSaved ? <span style={css('color:var(--success-ink)')}>Saved.</span>
+                : <span style={css('color:var(--text-faint)')}>Optional. Visible only in your personal information.</span>}
+          </div>
+          <Hoverable
+            onClick={savePhone}
+            role="button"
+            aria-disabled={!dirtyPhone || !!phoneProblem || savingPhone}
+            className="pressable"
+            style={{
+              ...css('height:46px;border-radius:12px;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:var(--on-accent);cursor:pointer'),
+              opacity: !dirtyPhone || phoneProblem || savingPhone ? 0.45 : 1,
+              pointerEvents: !dirtyPhone || phoneProblem || savingPhone ? 'none' : 'auto',
+            }}
+            hoverStyle={css('background:var(--accent-hover)')}
+          >
+            {savingPhone ? 'Saving…' : 'Save mobile number'}
           </Hoverable>
         </Field>
 

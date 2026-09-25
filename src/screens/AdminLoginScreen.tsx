@@ -6,6 +6,7 @@ import { PhoneShell } from '../components/PhoneShell';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth-context';
+import { pendingDestination } from '../lib/notifications/destination';
 
 /**
  * The single admin's sign-in. Username and password, nothing else.
@@ -66,7 +67,7 @@ export function AdminLoginScreen() {
       }
 
       await refreshProfile();
-      navigate('/admin/activation-codes', { replace: true });
+      navigate(pendingDestination() ?? '/admin/activation-codes', { replace: true });
     } catch {
       setError('Could not reach the server. Check your connection and try again.');
     } finally {

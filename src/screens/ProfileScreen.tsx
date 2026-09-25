@@ -134,8 +134,6 @@ export function ProfileScreen() {
           label="Name Visibility" trailing={myIdentity} onClick={() => navigate('/profile/name-visibility')}
         />
         <div style={css('height:1px;background:var(--surface-divider);margin:0 22px')} />
-        <Row icon={<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={rowIcon}><rect x="5" y="10.4" width="14" height="9.6" rx="2.6" /><path d="M8.2 10.4V8a3.8 3.8 0 0 1 7.6 0v2.4" /></svg>} label="Change Password" />
-        <div style={css('height:1px;background:var(--surface-divider);margin:0 22px')} />
         <Row
           icon={<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={rowIcon}><path d="M18 16.4H6l1.4-2.3V11a4.6 4.6 0 0 1 9.2 0v3.1z" /><path d="M10.3 19.2a1.9 1.9 0 0 0 3.4 0" /></svg>}
           label="Notifications" onClick={() => navigate('/notifications')}

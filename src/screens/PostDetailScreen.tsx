@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
@@ -7,13 +7,15 @@ import { useAppState } from '../lib/app-state';
 import { usePost } from '../lib/community/usePost';
 import { useComments } from '../lib/community/useComments';
 import { PhoneShell } from '../components/PhoneShell';
-import { PostMedia, PdfRow, timeAgo } from '../components/community/PostMedia';
+import { PostMedia, PdfRow } from '../components/community/PostMedia';
+import { formatDateTime } from '../lib/format-date-time';
 import { PollCard } from '../components/community/PollCard';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 import { Avatar } from '../components/ui/Avatar';
 import { resolveAuthorName } from '../lib/community/author-name';
 import logo from '../assets/traders-planet-logo.jpg';
+import { linkifiedText } from '../components/ui/LinkifiedText';
 
 /**
  * One post, opened from the feed.
@@ -45,12 +47,34 @@ function StatusLine({ children }: { children: React.ReactNode }) {
 
 export function PostDetailScreen() {
   const [params] = useSearchParams();
+  const commentsRef = useRef<HTMLDivElement>(null);
   const postId = params.get('post');
+  const commentsRequested = params.get('comments') === '1';
+  const targetCommentId = params.get('comment');
+  const targetPages = useRef(0);
+  const targetReached = useRef(false);
+  const [targetUnavailable, setTargetUnavailable] = useState(false);
   const { isAdmin } = useAuth();
   const { reveal, userName } = useAppState();
 
   const { post, loading, notFound, error, toggleLike, toggleBookmark, refresh } = usePost(postId);
   const comments = useComments(postId);
+  useEffect(() => {
+    if (!commentsRequested || loading || comments.loading) return;
+    commentsRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [commentsRequested, loading, comments.loading]);
+  useEffect(() => { targetPages.current = 0; targetReached.current = false; setTargetUnavailable(false); }, [targetCommentId]);
+  useEffect(() => {
+    if (!targetCommentId || loading || comments.loading) return;
+    if (comments.comments.some(comment => comment.id === targetCommentId)) {
+      if (targetReached.current) return;
+      targetReached.current = true;
+      document.getElementById(`comment-${targetCommentId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } else if (comments.hasMore && !comments.loadingMore && targetPages.current < 25) {
+      targetPages.current++;
+      void comments.loadMore();
+    } else if ((!comments.hasMore || targetPages.current >= 25) && !comments.loadingMore) setTargetUnavailable(true);
+  }, [targetCommentId, loading, comments.loading, comments.comments, comments.hasMore, comments.loadingMore, comments.loadMore]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [confirmCommentId, setConfirmCommentId] = useState<string | null>(null);
@@ -151,7 +175,7 @@ export function PostDetailScreen() {
               <img src={logo} alt="The Traders Planet" style={css('width:30px;height:30px;object-fit:contain')} />
             </div>
           ) : (
-            <Avatar name={authorDisplayName} avatarKey={post.authorAvatarKey} size={34} />
+            <Avatar name={authorDisplayName} avatarKey={post.authorAvatarKey} avatarUserId={post.isAnonymous && !isAdmin ? null : post.authorId} size={34} />
           )}
           <div style={css('flex:1;display:flex;flex-direction:column;gap:1px;min-width:0')}>
             <div style={css('display:flex;align-items:center;gap:5px;min-width:0')}>
@@ -173,7 +197,7 @@ export function PostDetailScreen() {
             </div>
           </div>
           <div style={css('font-size:11.5px;color:var(--text-faint);flex:none;white-space:nowrap')}>
-            {timeAgo(post.createdAt)}
+            <time dateTime={post.createdAt}>{formatDateTime(post.createdAt)}</time>
           </div>
         </div>
 
@@ -185,7 +209,7 @@ export function PostDetailScreen() {
         )}
         {post.body && (
           <div style={css('flex:none;margin-top:6px;font-size:13.5px;line-height:1.55;color:var(--text-secondary);white-space:pre-wrap;word-break:break-word')}>
-            {post.body}
+            {linkifiedText(post.body)}
           </div>
         )}
 
@@ -287,16 +311,18 @@ export function PostDetailScreen() {
         )}
 
         {/* ---- comments ---- */}
-        <div style={css('flex:none;margin-top:18px;font-size:13.5px;font-weight:700;letter-spacing:-.2px')}>
+        <div ref={commentsRef} style={css('flex:none;margin-top:18px;font-size:13.5px;font-weight:700;letter-spacing:-.2px')}>
           Comments
         </div>
+        {targetUnavailable && <div role="status" style={css('margin-top:8px;font-size:12px;color:var(--text-muted)')}>This comment is no longer available.</div>}
 
-        {comments.loading ? (
-          <div style={css('flex:none;margin-top:10px;font-size:12.5px;color:var(--text-faint)')}>Loading comments…</div>
-        ) : comments.error ? (
+        {comments.error && (
           <div role="alert" style={css('flex:none;margin-top:10px;font-size:12.5px;color:var(--danger-ink);line-height:1.5')}>
             {comments.error}
           </div>
+        )}
+        {comments.loading ? (
+          <div style={css('flex:none;margin-top:10px;font-size:12.5px;color:var(--text-faint)')}>Loading comments…</div>
         ) : comments.comments.length === 0 ? (
           <div style={css('flex:none;margin-top:10px;font-size:12.5px;color:var(--text-faint)')}>
             No comments yet — be the first to reply.
@@ -304,13 +330,15 @@ export function PostDetailScreen() {
         ) : comments.comments.map(c => (
           <div
             key={c.id}
+            id={`comment-${c.id}`}
             onContextMenu={e => { if (c.isMine || isAdmin) { e.preventDefault(); setConfirmCommentId(c.id); } }}
             style={{
               ...css('flex:none;margin-top:8px;background:var(--surface-inset);border-radius:12px;padding:11px 12px;display:flex;align-items:flex-start;gap:10px'),
               opacity: c.pending ? 0.6 : 1,
+              outline: c.id === targetCommentId ? '2px solid var(--accent)' : undefined,
             }}
           >
-            <Avatar name={c.authorName} avatarKey={null} size={30} fontSize={12} />
+            <Avatar name={c.authorName} avatarKey={null} avatarUserId={c.isAnonymous && !isAdmin ? null : c.authorId} size={30} fontSize={12} />
             <div style={css('flex:1;display:flex;flex-direction:column;gap:3px;min-width:0')}>
               <div style={css('font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
                 {c.authorName}
@@ -323,14 +351,17 @@ export function PostDetailScreen() {
               )}
             </div>
             <div style={css('font-size:10.5px;color:var(--text-faint);flex:none;white-space:nowrap')}>
-              {c.pending ? 'sending…' : timeAgo(c.createdAt)}
+              {c.pending ? 'sending…' : <time dateTime={c.createdAt}>{formatDateTime(c.createdAt)}</time>}
             </div>
             {(c.isMine || isAdmin) && !c.pending && <div style={css('display:flex;flex-direction:column;align-items:flex-end;gap:5px')}>
               <button type="button" aria-label="Comment options" onClick={() => setConfirmCommentId(c.id)} style={css('color:var(--text-muted);font-size:18px;line-height:1')}>⋯</button>
               {confirmCommentId === c.id && <div style={css('display:flex;gap:8px;font-size:11px')}>
                 <button type="button" disabled={deletingCommentId === c.id} onClick={() => {
                   setDeletingCommentId(c.id);
-                  void comments.deleteComment(c.id).finally(() => { setDeletingCommentId(null); setConfirmCommentId(null); });
+                  void comments.deleteComment(c.id)
+                    .then(() => setConfirmCommentId(null))
+                    .catch(() => {})
+                    .finally(() => setDeletingCommentId(null));
                 }} style={css('color:var(--danger-ink);font-weight:700')}>{deletingCommentId === c.id ? 'Deleting…' : 'Delete'}</button>
                 <button type="button" onClick={() => setConfirmCommentId(null)} style={css('color:var(--text-muted)')}>Cancel</button>
               </div>}

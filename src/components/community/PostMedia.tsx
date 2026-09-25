@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { css } from '../../lib/css';
 import { getPostMediaUrl } from '../../lib/community/media-api';
 import { useLazyMediaUrl } from '../../lib/media/useLazyMediaUrl';
 import type { FeedPost } from '../../lib/community/useFeed';
 import { MediaActions } from '../media/MediaActions';
+import { ImageViewer } from '../media/ImageViewer';
+import { DocumentViewer } from '../media/DocumentViewer';
+import { useAudioPlayer } from '../../lib/chat/useAudioPlayer';
+import { formatDuration } from '../../lib/chat/types';
+import { VideoViewer } from '../media/VideoViewer';
 
 function bytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -20,20 +25,10 @@ function bytes(n: number): string {
  * — a poster frame until someone taps, and no video bytes before that.
  */
 function PostVideo({ post, height }: { post: FeedPost; height: number }) {
-  const [wanted, setWanted] = useState(false);
-  const [playing, setPlaying] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
 
   const poster = useLazyMediaUrl(post.posterKey, getPostMediaUrl);
-  const media = useLazyMediaUrl(post.storageKey, getPostMediaUrl, { armed: wanted });
-
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!el || !wanted || !media.url) return;
-    el.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
-  }, [wanted, media.url]);
-
-  const showVideo = wanted && !!media.url;
+  const media = useLazyMediaUrl(post.storageKey, getPostMediaUrl, { armed: viewerOpen });
 
   return (
     <div
@@ -43,34 +38,24 @@ function PostVideo({ post, height }: { post: FeedPost; height: number }) {
       // Stop here: the card around this opens the post, and a tap on the video
       // means "play it", not "take me somewhere else". Everywhere else on the
       // card still navigates exactly as it did before.
-      onClick={e => { e.stopPropagation(); if (!wanted) setWanted(true); }}
-      style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: 'var(--ink-chip)', cursor: showVideo ? 'default' : 'pointer' }}
+      onClick={e => { e.stopPropagation(); setViewerOpen(true); }}
+      role="button"
+      tabIndex={0}
+      aria-label={`Play ${post.fileName ?? 'video'}`}
+      onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setViewerOpen(true); } }}
+      style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: 'var(--ink-chip)', cursor: 'pointer' }}
     >
-      {poster.url && !showVideo && (
+      {poster.url && (
         <img src={poster.url} onError={poster.retry} alt={post.fileName ?? 'Video'} decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
       )}
-      {showVideo && (
-        <video
-          ref={videoRef}
-          src={media.url ?? undefined}
-          poster={poster.url ?? undefined}
-          controls
-          playsInline
-          preload="none"
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
-          onError={media.retry}
-          style={css('width:100%;height:100%;object-fit:cover;display:block')}
-        />
-      )}
-      {!showVideo && (
+      {(
         <div style={css('position:absolute;inset:0;display:flex;align-items:center;justify-content:center')}>
-          {wanted && !media.failed ? (
+          {viewerOpen && media.loading ? (
             <div style={css('width:34px;height:34px;border-radius:50%;border:2.5px solid rgba(255,255,255,.35);border-top-color:var(--border-on-accent);animation:tp-spin .8s linear infinite')}>
               <style>{'@keyframes tp-spin{to{transform:rotate(360deg)}}'}</style>
             </div>
           ) : media.failed ? (
-            <div style={css('font-size:11.5px;color:var(--danger-ink-2)')}>Could not load this video</div>
+            <button type="button" onClick={event => { event.stopPropagation(); media.forceRetry(); }} style={css('font-size:11.5px;color:var(--on-accent);background:rgba(0,0,0,.65);padding:9px 12px;border-radius:10px')}>Try again</button>
           ) : (
             <div style={css('width:52px;height:52px;border-radius:50%;background:rgba(var(--shadow-rgb),.55);display:flex;align-items:center;justify-content:center')}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--on-accent)" style={css('margin-left:2px')}><path d="M8.5 5.5l10 6.5-10 6.5z" /></svg>
@@ -78,12 +63,21 @@ function PostVideo({ post, height }: { post: FeedPost; height: number }) {
           )}
         </div>
       )}
-      {!playing && !poster.url && !showVideo && (
+      {!poster.url && (
         <div style={css('position:absolute;left:10px;bottom:10px;font-size:10.5px;color:rgba(255,255,255,.75)')}>Video</div>
       )}
       <div style={css('position:absolute;right:8px;bottom:8px;z-index:2;background:var(--surface);padding:6px 8px;border-radius:8px')}>
         <MediaActions storageKey={post.storageKey} fileName={post.fileName} getUrl={getPostMediaUrl} />
       </div>
+      {viewerOpen && <VideoViewer
+        src={media.url}
+        poster={poster.url}
+        fileName={post.fileName}
+        loading={media.loading}
+        error={media.failed ? media.error ?? 'Could not load this video.' : null}
+        onRetry={media.forceRetry}
+        onClose={() => setViewerOpen(false)}
+      />}
     </div>
   );
 }
@@ -113,6 +107,7 @@ function NoMedia({ height, purged }: { height: number; purged: boolean }) {
  * real document — never a stand-in for one that is not there.
  */
 export function PostMedia({ post, height }: { post: FeedPost; height: number }) {
+  const [viewerOpen, setViewerOpen] = useState(false);
   const isImage = post.attachment === 'image';
   const isVideo = post.attachment === 'video';
   const image = useLazyMediaUrl(
@@ -137,17 +132,20 @@ export function PostMedia({ post, height }: { post: FeedPost; height: number }) 
 
   if (isImage && post.storageKey && !post.mediaPurged) {
     return (
-      <div ref={image.ref} style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: 'var(--surface-sunken-2)' }}>
+      <div ref={image.ref} onClick={e => e.stopPropagation()} style={{ position: 'relative', minHeight: image.url && !image.failed ? undefined : height, borderRadius: 12, overflow: 'hidden', background: 'var(--surface-sunken-2)' }}>
         {image.failed || !image.url ? (
-          <div style={css('width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:var(--text-faint)')}>
-            {image.failed ? 'Could not load attachment' : 'Loading…'}
+          <div style={{ ...css('width:100%;display:flex;flex-direction:column;gap:8px;align-items:center;justify-content:center;font-size:11.5px;color:var(--text-faint);text-align:center;padding:16px'), minHeight: height }}>
+            {image.failed ? <><span role="alert">{image.error ?? 'Could not load attachment'}</span><button type="button" onClick={image.forceRetry} disabled={image.loading} style={css('color:var(--accent-ink);font-weight:700;padding:8px')}>Try again</button></> : 'Loading…'}
           </div>
         ) : (
-          <img src={image.url} onError={image.retry} alt={post.fileName ?? 'Attachment'} loading="lazy" decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
+          <button type="button" onClick={() => setViewerOpen(true)} aria-label="View full image" style={css('display:block;width:100%;cursor:zoom-in;padding:0;border:0;background:transparent')}>
+            <img src={image.url} onError={image.retry} alt={post.fileName ?? 'Attachment'} loading="lazy" decoding="async" style={css('width:100%;max-height:70vh;height:auto;object-fit:contain;display:block;background:var(--surface-sunken-2)')} />
+          </button>
         )}
         <div style={css('position:absolute;right:8px;bottom:8px;background:var(--surface);padding:6px 8px;border-radius:8px')}>
           <MediaActions storageKey={post.storageKey} fileName={post.fileName} getUrl={getPostMediaUrl} />
         </div>
+        {viewerOpen && <ImageViewer storageKey={post.storageKey} fileName={post.fileName} getUrl={getPostMediaUrl} onClose={() => setViewerOpen(false)} />}
       </div>
     );
   }
@@ -157,29 +155,36 @@ export function PostMedia({ post, height }: { post: FeedPost; height: number }) 
   // Say so, rather than filling the space with a generated chart.
   return <NoMedia height={height} purged={post.mediaPurged} />;
 }
-
 function VoicePost({ post }: { post: FeedPost }) {
-  const { ref, url, failed, retry } = useLazyMediaUrl(post.mediaPurged ? null : post.storageKey, getPostMediaUrl);
-  return <div ref={ref} style={css('background:var(--surface);border:1px solid var(--border-2);border-radius:12px;padding:13px;display:flex;flex-direction:column;gap:8px')}>
+  const { playing, loading, progress, elapsed, duration, error, toggle, seek } = useAudioPlayer(
+    `post:${post.id}`, async () => post.storageKey ? getPostMediaUrl(post.storageKey, true) : null,
+  );
+  return <div onClick={event => event.stopPropagation()} style={css('background:var(--surface);border:1px solid var(--border-2);border-radius:12px;padding:13px;display:flex;flex-direction:column;gap:8px')}>
     <div style={css('font-size:12px;font-weight:700;color:var(--text-primary)')}>Voice message</div>
-    {post.mediaPurged ? <span style={css('font-size:11px;color:var(--text-faint)')}>Removed (6-month retention)</span>
-      : failed ? <span style={css('font-size:11px;color:var(--danger-ink)')}>Could not load voice message</span>
-      : url ? <audio controls preload="metadata" src={url} onError={retry} style={css('width:100%;height:38px')} />
-      : <span style={css('font-size:11px;color:var(--text-faint)')}>Loading…</span>}
-    {!post.mediaPurged && <MediaActions storageKey={post.storageKey} fileName={post.fileName} getUrl={getPostMediaUrl} />}
+    {post.mediaPurged ? <span style={css('font-size:11px;color:var(--text-faint)')}>Removed (6-month retention)</span> : <>
+      <div style={css('display:flex;align-items:center;gap:10px')}>
+        <button type="button" aria-label={playing ? 'Pause voice message' : 'Play voice message'} onClick={() => void toggle()}
+          style={css('width:44px;height:44px;border-radius:50%;background:var(--accent);color:var(--on-accent);font-size:18px;flex:none')}>
+          {loading ? '…' : playing ? 'Ⅱ' : '▶'}
+        </button>
+        <div style={css('flex:1;min-width:0;display:flex;flex-direction:column;gap:2px')}>
+          <input type="range" min={0} max={100} value={Math.round(progress * 100)} aria-label="Voice message progress"
+            onChange={event => seek(Number(event.target.value) / 100)} style={css('width:100%;accent-color:var(--accent)')} />
+          <span style={css('font-size:11px;color:var(--text-muted)')}>{formatDuration(elapsed)} / {formatDuration(duration)}</span>
+        </div>
+      </div>
+      {error && <span role="alert" style={css('font-size:11px;color:var(--danger-ink)')}>{error}</span>}
+    </>}
   </div>;
 }
 
 /** A document attachment — PDF or one of the office formats. */
 export function PdfRow({ post }: { post: FeedPost }) {
-  const { ref } = useLazyMediaUrl(
-    post.mediaPurged ? null : post.storageKey,
-    getPostMediaUrl,
-  );
+  const [open, setOpen] = useState(false);
   const isPdf = post.attachment === 'pdf';
 
   return (
-    <div ref={ref} style={css('background:var(--surface);border:1px solid var(--border-2);border-radius:12px;padding:11px 12px;display:flex;align-items:center;gap:11px')}>
+    <div onClick={post.storageKey && !post.mediaPurged ? event => { event.stopPropagation(); setOpen(true); } : undefined} style={css('background:var(--surface);border:1px solid var(--border-2);border-radius:12px;padding:11px 12px;display:flex;align-items:center;gap:11px;cursor:pointer')}>
       <div style={{
         ...css('width:34px;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex:none'),
         background: isPdf ? 'var(--danger-soft)' : 'var(--accent-tint)',
@@ -195,19 +200,7 @@ export function PdfRow({ post }: { post: FeedPost }) {
         </div>
       </div>
       {!post.mediaPurged && <MediaActions storageKey={post.storageKey} fileName={post.fileName} getUrl={getPostMediaUrl} />}
+      {open && post.storageKey && <DocumentViewer storageKey={post.storageKey} fileName={post.fileName} isPdf={isPdf} getUrl={getPostMediaUrl} onClose={() => setOpen(false)} />}
     </div>
   );
-}
-
-/** "2h ago" / "3d ago" — the relative stamp the cards already used. */
-export function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
 }

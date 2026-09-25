@@ -180,7 +180,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     await unsubscribePush().catch(() => {});
-    await supabase.auth.signOut();
+    // The default is global and revokes this account's sessions on every device.
+    await supabase.auth.signOut({ scope: 'local' });
   }, []);
 
   // Bypasses the in-flight collapse on purpose: it is called straight after a

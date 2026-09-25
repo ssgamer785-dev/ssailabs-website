@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { css } from '../../lib/css';
 import { formatDuration, type ChatMessage } from '../../lib/chat/types';
 import { useMediaUrl, usePosterUrl } from './useMediaUrl';
 import { FailedNote, MetaRow } from './bubble-parts';
 import { MediaActions } from '../media/MediaActions';
 import { getMediaUrl } from '../../lib/chat/media-api';
+import { VideoViewer } from '../media/VideoViewer';
 
 const SIZE = 184;
 const RING = 3;
@@ -72,60 +73,33 @@ export function CircularVideoBubble({ message, out, onRetry }: {
   out: boolean;
   onRetry: () => void;
 }) {
-  const [wanted, setWanted] = useState(false);
-  const [playing, setPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [elapsed, setElapsed] = useState(0);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
 
   const poster = usePosterUrl(message);
-  // `armed` only once the viewer has asked for it — this is what keeps the
-  // video bytes off the wire until then.
-  const media = useMediaUrl(message, wanted);
+  const media = useMediaUrl(message, viewerOpen);
 
   const uploading = message.status === 'uploading';
   const failed = message.status === 'failed';
   const total = message.durationSeconds ?? 0;
 
-  // Autoplay once the source is ready, but only because a tap asked for it.
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!el || !wanted || !media.url) return;
-    el.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
-  }, [wanted, media.url]);
-
-  function toggle() {
+  function openViewer() {
     if (message.mediaPurged || uploading) return;
     if (failed) {
       onRetry();
       return;
     }
-    if (!wanted) {
-      setWanted(true);
-      return;
-    }
-    const el = videoRef.current;
-    if (!el) return;
-    if (el.paused) {
-      el.play().then(() => setPlaying(true)).catch(() => {});
-    } else {
-      el.pause();
-      setPlaying(false);
-    }
+    setViewerOpen(true);
   }
 
-  const showVideo = wanted && !!media.url && !message.mediaPurged;
-  const loadingVideo = wanted && !media.url && !media.failed && !message.mediaPurged;
-  const ringFraction = uploading ? (message.progress ?? 0) : progress;
+  const ringFraction = message.progress ?? 0;
   const ringColor = uploading ? 'var(--accent-ink)' : failed ? 'var(--danger-ink)' : 'rgba(255,255,255,.9)';
 
   return (
     <div style={css('display:flex;flex-direction:column;gap:6px;align-items:flex-end')}>
       <div
-        // Both hooks watch the same element: the poster resolves as soon as the
-        // circle nears the viewport, the video only once a tap has armed it.
+        // The poster is lightweight; video bytes are requested only on open.
         ref={node => { poster.ref(node); media.ref(node); }}
-        onClick={toggle}
+        onClick={openViewer}
         style={{
           position: 'relative',
           width: SIZE,
@@ -145,7 +119,7 @@ export function CircularVideoBubble({ message, out, onRetry }: {
           </div>
         ) : (
           <>
-            {poster.url && !showVideo && (
+            {poster.url && (
               <img
                 src={poster.url}
                 onError={poster.retry}
@@ -154,49 +128,28 @@ export function CircularVideoBubble({ message, out, onRetry }: {
                 style={css('width:100%;height:100%;object-fit:cover;display:block')}
               />
             )}
-            {showVideo && (
-              <video
-                ref={videoRef}
-                src={media.url ?? undefined}
-                poster={poster.url ?? undefined}
-                playsInline
-                // Never preloads: the src only exists after a tap.
-                preload="none"
-                onError={media.retry}
-                onTimeUpdate={e => {
-                  const el = e.currentTarget;
-                  setElapsed(el.currentTime);
-                  if (el.duration) setProgress(el.currentTime / el.duration);
-                }}
-                onEnded={() => { setPlaying(false); setProgress(0); setElapsed(0); }}
-                onPause={() => setPlaying(false)}
-                onPlay={() => setPlaying(true)}
-                style={css('width:100%;height:100%;object-fit:cover;display:block')}
-              />
-            )}
-
             <div style={css('position:absolute;inset:0;display:flex;align-items:center;justify-content:center')}>
               {uploading ? (
                 <div style={css('font-size:14px;font-weight:700;color:var(--on-accent);text-shadow:0 1px 6px rgba(var(--shadow-rgb),.5)')}>
                   {Math.round((message.progress ?? 0) * 100)}%
                 </div>
-              ) : loadingVideo ? (
+              ) : viewerOpen && media.loading ? (
                 <Spinner />
               ) : media.failed ? (
-                <div style={css('font-size:11px;color:var(--danger-ink-2);text-align:center;padding:0 24px;line-height:1.4')}>
-                  Could not load this video
-                </div>
-              ) : !playing ? (
+                <button type="button" onClick={event => { event.stopPropagation(); media.forceRetry(); }} style={css('font-size:11px;color:var(--on-accent);background:rgba(0,0,0,.65);padding:8px 10px;border-radius:10px')}>
+                  Try again
+                </button>
+              ) : (
                 <PlayGlyph paused />
-              ) : null}
+              )}
             </div>
 
-            {(uploading || progress > 0) && <ProgressRing fraction={ringFraction} color={ringColor} />}
+            {uploading && <ProgressRing fraction={ringFraction} color={ringColor} />}
 
             {total > 0 && !uploading && (
               <div style={css('position:absolute;left:0;right:0;bottom:12px;display:flex;justify-content:center;pointer-events:none')}>
                 <div style={css('padding:2px 9px;border-radius:999px;background:rgba(var(--shadow-rgb),.55);font-size:10.5px;font-weight:600;color:var(--on-accent);letter-spacing:.1px')}>
-                  {formatDuration(playing || progress > 0 ? elapsed : total)}
+                  {formatDuration(total)}
                 </div>
               </div>
             )}
@@ -209,6 +162,15 @@ export function CircularVideoBubble({ message, out, onRetry }: {
         <FailedNote message={message} onRetry={onRetry} />
         <MetaRow message={message} out={out} />
       </div>
+      {viewerOpen && <VideoViewer
+        src={media.url}
+        poster={poster.url}
+        fileName={message.fileName}
+        loading={media.loading}
+        error={media.failed ? media.error ?? 'Could not load this video.' : null}
+        onRetry={media.forceRetry}
+        onClose={() => setViewerOpen(false)}
+      />}
     </div>
   );
 }

@@ -3,13 +3,10 @@ import { useCallback } from 'react';
 /**
  * The chime that marks a newly arrived notification.
  *
- * Synthesised rather than loaded from a file. That is not a shortcut for a
- * missing asset — it is what makes the sound the right shape: two struck
- * partials a fifth apart, each on its own exponential decay, is a bell, and a
- * bell is what a notification should sound like. A file would add ~20 KB to
- * every page load and still be a fixed recording of exactly this.
+ * An original, short three-note Web Audio effect kept separate from the
+ * existing refresh recording.
  *
- * Deliberately quiet and short (~0.7 s, peak gain 0.16). A notification chime
+ * Deliberately quiet and short (~0.7 s). A notification chime
  * is heard many times a day; anything louder stops being a signal and becomes
  * something the user turns off.
  *
@@ -19,13 +16,11 @@ import { useCallback } from 'react';
  * chime is not worth an error, because the notification itself still arrives.
  */
 
-/** A5 and E6 — a perfect fifth, the interval that reads as "bell" rather than "alarm". */
+/** Original, gently rising three-note chime; separate from the refresh sound. */
 const PARTIALS: { hz: number; gain: number; delay: number; decay: number }[] = [
-  { hz: 880.0,  gain: 0.16, delay: 0,     decay: 0.62 },
-  { hz: 1318.5, gain: 0.11, delay: 0.085, decay: 0.55 },
-  // A quiet octave above the root, struck with the second note. It is what
-  // stops the pair sounding like two beeps and starts it sounding struck.
-  { hz: 1760.0, gain: 0.04, delay: 0.085, decay: 0.30 },
+  { hz: 659.25, gain: 0.09, delay: 0, decay: 0.28 },
+  { hz: 987.77, gain: 0.08, delay: 0.12, decay: 0.35 },
+  { hz: 1318.5, gain: 0.055, delay: 0.25, decay: 0.42 },
 ];
 
 const ATTACK_SECONDS = 0.006;
@@ -66,9 +61,21 @@ function context(): AudioContext | null {
 const chimed = new Set<string>();
 const CHIMED_CAP = 200;
 let lastChimeAt = 0;
+const SOUND_SETTING = 'tp:notification-sound';
+
+export function notificationSoundEnabled(): boolean {
+  try { return localStorage.getItem(SOUND_SETTING) !== 'off'; }
+  catch { return true; }
+}
+
+export function setNotificationSoundEnabled(enabled: boolean): void {
+  try { localStorage.setItem(SOUND_SETTING, enabled ? 'on' : 'off'); }
+  catch { /* Private browsing may disable storage. */ }
+}
 
 /** Plays the chime once for `id`; a repeat call with the same id does nothing. */
 export function playNotificationChime(id?: string): void {
+  if (!notificationSoundEnabled()) return;
   if (id) {
     if (chimed.has(id)) return;
     chimed.add(id);
@@ -82,6 +89,7 @@ export function playNotificationChime(id?: string): void {
 
   if (Date.now() - lastChimeAt < 900) return;
   lastChimeAt = Date.now();
+  const playedAt = lastChimeAt;
 
   const audio = context();
   if (!audio) return;
@@ -127,7 +135,10 @@ export function playNotificationChime(id?: string): void {
     }
 
     // Longest partial plus its delay, plus the stop margin above.
-    window.setTimeout(() => tone.disconnect(), 900);
+    window.setTimeout(() => {
+      tone.disconnect();
+      if (lastChimeAt === playedAt && audio.state === 'running') void audio.suspend().catch(() => {});
+    }, 900);
   } catch {
     /* no audio in this environment; the notification still arrived */
   }
@@ -137,7 +148,11 @@ export function playNotificationChime(id?: string): void {
 export function installNotificationAudioUnlock(): void {
   const unlock = () => {
     const audio = context();
-    if (audio?.state === 'suspended') void audio.resume().catch(() => {});
+    if (audio?.state === 'suspended') {
+      void audio.resume().then(() => {
+        if (Date.now() - lastChimeAt >= 900 && audio.state === 'running') return audio.suspend();
+      }).catch(() => {});
+    }
     document.removeEventListener('pointerdown', unlock);
     document.removeEventListener('keydown', unlock);
   };

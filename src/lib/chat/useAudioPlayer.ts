@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 let sharedAudio: HTMLAudioElement | null = null;
 const listeners = new Set<() => void>();
 let activeKey: string | null = null;
+let signedAt = 0;
 
 function getAudio(): HTMLAudioElement {
   if (!sharedAudio) {
@@ -17,6 +18,10 @@ function getAudio(): HTMLAudioElement {
     sharedAudio.addEventListener('timeupdate', notify);
     sharedAudio.addEventListener('play', notify);
     sharedAudio.addEventListener('pause', notify);
+    sharedAudio.addEventListener('loadedmetadata', notify);
+    sharedAudio.addEventListener('waiting', notify);
+    sharedAudio.addEventListener('canplay', notify);
+    sharedAudio.addEventListener('error', notify);
     sharedAudio.addEventListener('ended', () => { activeKey = null; notify(); });
   }
   return sharedAudio;
@@ -28,8 +33,11 @@ export interface UseAudioPlayer {
   progress: number;
   /** Seconds elapsed, for the running timer on the bubble. */
   elapsed: number;
+  duration: number;
   loading: boolean;
+  error: string | null;
   toggle: () => Promise<void>;
+  seek: (fraction: number) => void;
 }
 
 /**
@@ -40,6 +48,7 @@ export interface UseAudioPlayer {
 export function useAudioPlayer(key: string, resolveSrc: () => Promise<string | null>): UseAudioPlayer {
   const [, force] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const resolveRef = useRef(resolveSrc);
   resolveRef.current = resolveSrc;
 
@@ -58,26 +67,39 @@ export function useAudioPlayer(key: string, resolveSrc: () => Promise<string | n
 
   const toggle = useCallback(async () => {
     const el = getAudio();
-    if (activeKey === key) {
-      if (el.paused) await el.play().catch(() => {});
-      else el.pause();
+    if (activeKey === key && !error && !el.error && Date.now() - signedAt < 12 * 60 * 1000) {
+      if (el.paused) {
+        try { await el.play(); }
+        catch { setError('Playback could not start. Tap to retry.'); }
+      } else el.pause();
       force(n => n + 1);
       return;
     }
 
     setLoading(true);
+    setError(null);
     try {
       const src = await resolveRef.current();
-      if (!src) return;
+      if (!src) throw new Error('Voice message is unavailable.');
       el.pause();
       el.src = src;
       activeKey = key;
-      await el.play().catch(() => {});
+      signedAt = Date.now();
+      await el.play();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not play this voice message.');
     } finally {
       setLoading(false);
       force(n => n + 1);
     }
+  }, [key, error]);
+
+  const seek = useCallback((fraction: number) => {
+    const el = getAudio();
+    if (activeKey !== key || !Number.isFinite(el.duration) || el.duration <= 0) return;
+    el.currentTime = Math.max(0, Math.min(1, fraction)) * el.duration;
+    force(n => n + 1);
   }, [key]);
 
-  return { playing, progress, elapsed, loading, toggle };
+  return { playing, progress, elapsed, duration, loading, error: error ?? (isActive && audio.error ? 'Could not play this format. Tap to retry.' : null), toggle, seek };
 }

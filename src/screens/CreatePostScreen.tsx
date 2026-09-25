@@ -67,6 +67,7 @@ const MAX_POLL_OPTIONS = 10;
 const MIN_POLL_OPTIONS = 2;
 
 export function CreatePostScreen() {
+  const submitRef = useRef(false);
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const { reveal, toggleReveal, userName } = useAppState();
@@ -154,7 +155,7 @@ export function CreatePostScreen() {
   async function stopVoice() {
     const clip = await recorder.stop();
     if (!clip) return;
-    const extension = clip.mimeType.includes('mp4') || clip.mimeType.includes('aac') ? 'm4a' : 'webm';
+    const extension = clip.mimeType.includes('mp4') ? 'm4a' : clip.mimeType.includes('aac') ? 'aac' : clip.mimeType.includes('ogg') ? 'ogg' : 'webm';
     const voiceFile = new File([clip.blob], `Voice message.${extension}`, { type: clip.mimeType });
     setPollMode(false);
     setFile(voiceFile);
@@ -166,7 +167,7 @@ export function CreatePostScreen() {
   }
 
   async function submit() {
-    if (busy || !user) return;
+    if (busy || submitRef.current || !user) return;
 
     if (editId && file) {
       setError('Attachments cannot be changed while editing a post.');
@@ -178,15 +179,18 @@ export function CreatePostScreen() {
       if (!postText.trim()) { setError('A poll needs a question.'); return; }
       if (filled.length < MIN_POLL_OPTIONS) { setError(`A poll needs at least ${MIN_POLL_OPTIONS} options.`); return; }
 
+      submitRef.current = true;
       setBusy(true);
       setError(null);
-      const result = await createPollPost({
-        channel,
-        question: postText,
-        options: pollOptions,
-        isAnonymous: channel === 'students' ? !reveal : false,
-      });
-      setBusy(false);
+      let result;
+      try {
+        result = await createPollPost({
+          channel,
+          question: postText,
+          options: pollOptions,
+          isAnonymous: channel === 'students' ? !reveal : false,
+        });
+      } finally { submitRef.current = false; setBusy(false); }
       if (!result.ok) { setError(result.message ?? 'Could not create the poll.'); return; }
       navigate(channel === 'official' ? '/community' : '/community?tab=students', { replace: true });
       return;
@@ -196,6 +200,7 @@ export function CreatePostScreen() {
       setError('Write something or attach a file first.');
       return;
     }
+    submitRef.current = true;
     setBusy(true);
     setError(null);
     setCanRetry(false);
@@ -260,6 +265,7 @@ export function CreatePostScreen() {
       setProgress(null);
       setCanRetry(!!file);
     } finally {
+      submitRef.current = false;
       setBusy(false);
     }
   }
@@ -420,7 +426,7 @@ export function CreatePostScreen() {
               <audio src={previewUrl} controls preload="metadata" style={css('width:100%')} />
             </div>
           ) : previewUrl ? (
-            <img src={previewUrl} alt="Attachment preview" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
+            <img src={previewUrl} alt="Attachment preview" style={css('width:100%;height:100%;object-fit:contain;display:block;background:var(--surface-sunken-2)')} />
           ) : (
             <div style={css('width:100%;height:100%;background:var(--surface-sunken-2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:0 12px')}>
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--text-faint)" strokeWidth={1.7} strokeLinejoin="round"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg>

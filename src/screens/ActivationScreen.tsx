@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { pendingDestination } from '../lib/notifications/destination';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { PhoneShell } from '../components/PhoneShell';
@@ -29,7 +30,7 @@ export function ActivationScreen() {
   // Someone who is already through should never see this screen — arriving
   // here by back button or a stale link goes straight on.
   useEffect(() => {
-    if (isActivated) navigate('/home', { replace: true });
+    if (isActivated) navigate(pendingDestination() ?? '/home', { replace: true });
   }, [isActivated, navigate]);
 
   // Eight characters and a fixed shape: worth focusing, not worth a keyboard
@@ -56,7 +57,7 @@ export function ActivationScreen() {
     // before navigating; otherwise RequireActivated still sees the stale row
     // and bounces straight back here.
     await refreshProfile();
-    navigate('/home', { replace: true });
+    navigate(pendingDestination() ?? '/home', { replace: true });
   }, [code, navigate, ready, refreshProfile, submitting]);
 
   return (
