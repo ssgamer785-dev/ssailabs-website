@@ -18,19 +18,21 @@ export function VideoViewer({
   onClose: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const onCloseRef = useRef(onClose);
   const [playing, setPlaying] = useState(false);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onCloseRef.current(); };
     document.addEventListener('keydown', onKey);
     return () => {
       document.body.style.overflow = previousOverflow;
       document.removeEventListener('keydown', onKey);
       videoRef.current?.pause();
     };
-  }, [onClose]);
+  }, []);
 
   const enterFullscreen = () => {
     const video = videoRef.current as WebkitVideo | null;
