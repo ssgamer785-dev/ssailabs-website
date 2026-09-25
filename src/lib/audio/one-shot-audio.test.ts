@@ -41,7 +41,7 @@ class FakeContext {
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 
 describe('one-shot refresh sound lifecycle', () => {
-  it('queues repeated refreshes sequentially and releases each source and context', async () => {
+  it('starts one effect without a delayed backlog and releases its context', async () => {
     const contexts: FakeContext[] = [];
     let loads = 0;
     const player = createOneShotAudioPlayer({
@@ -54,17 +54,16 @@ describe('one-shot refresh sound lifecycle', () => {
     await flush();
 
     expect(loads).toBe(1);
-    expect(contexts[0].sources.map(source => source.startedAt)).toEqual([0.01, 2.01]);
-    expect(player.state()).toEqual({ queued: 0, active: 2, hasContext: true });
+    expect(contexts[0].sources.map(source => source.startedAt)).toEqual([0]);
+    expect(player.state()).toEqual({ queued: 0, active: 1, hasContext: true });
 
     contexts[0].sources[0].finish();
     expect(contexts[0].sources[0].disconnected).toBe(1);
-    expect(contexts[0].closeCount).toBe(0);
-    contexts[0].sources[1].finish();
     await flush();
     expect(contexts[0].closeCount).toBe(1);
     expect(player.state()).toEqual({ queued: 0, active: 0, hasContext: false });
 
+    await new Promise(resolve => setTimeout(resolve, 110));
     player.playFromGesture();
     await flush();
     expect(contexts).toHaveLength(2);
@@ -104,7 +103,7 @@ describe('one-shot refresh sound lifecycle', () => {
 
     player.playFromGesture();
     expect(contexts[1].sources).toHaveLength(1);
-    expect(contexts[1].sources[0].startedAt).toBe(0.01);
+    expect(contexts[1].sources[0].startedAt).toBe(0);
     expect(contexts[1].state).toBe('suspended');
     contexts[1].resumePending?.();
     await flush();
@@ -117,5 +116,42 @@ describe('one-shot refresh sound lifecycle', () => {
     const asset = await readFile(new URL('../../assets/money-sound-for-trader.m4a', import.meta.url));
     const hash = createHash('sha256').update(asset).digest('hex').toUpperCase();
     expect(hash).toBe('C8F71D46FDB23B2CCEF8C1264575E550A23D27E4DC399123334C60D3980C0BA8');
+  });
+
+  it('survives 1,000 rapid refresh events without scheduling a sound backlog', async () => {
+    const contexts: FakeContext[] = [];
+    const player = createOneShotAudioPlayer({
+      createContext: () => { const context = new FakeContext(); contexts.push(context); return context; },
+      loadBuffer: async () => ({ duration: 2 }),
+    });
+    await player.preload();
+    for (let i = 0; i < 1_000; i++) player.playFromGesture();
+    await flush();
+    expect(contexts.flatMap(context => context.sources)).toHaveLength(1);
+    expect(player.state()).toEqual({ queued: 0, active: 1, hasContext: true });
+    contexts[1].sources[0].finish();
+    await flush();
+    expect(player.state()).toEqual({ queued: 0, active: 0, hasContext: false });
+    expect(contexts[1].closeCount).toBe(1);
+  });
+
+  it('restarts a later deliberate gesture immediately and stops the prior source', async () => {
+    const contexts: FakeContext[] = [];
+    const player = createOneShotAudioPlayer({
+      createContext: () => { const context = new FakeContext(); contexts.push(context); return context; },
+      loadBuffer: async () => ({ duration: 2 }),
+    });
+    await player.preload();
+    player.playFromGesture();
+    const first = contexts[1].sources[0];
+    await new Promise(resolve => setTimeout(resolve, 110));
+    player.playFromGesture();
+    expect(contexts[1].sources).toHaveLength(2);
+    expect(first.disconnected).toBe(1);
+    expect(contexts[1].sources[1].startedAt).toBe(0);
+    expect(player.state().active).toBe(1);
+    contexts[1].sources[1].finish();
+    await flush();
+    expect(contexts[1].closeCount).toBe(1);
   });
 });

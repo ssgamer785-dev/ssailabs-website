@@ -210,7 +210,13 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       if (state.busy || !refreshHandlers.size || !atTop(e.target) || e.deltaY >= 0) return;
       pull(state.target + Math.min(20, -e.deltaY * 0.6));
       clearTimeout(state.wheelTimer);
-      state.wheelTimer = window.setTimeout(release, 140);
+      if (state.target >= THRESHOLD) {
+        // Fire inside the wheel gesture. Deferring until the wheel-idle timer
+        // loses user activation and makes the sound audibly late or silent.
+        void fire();
+      } else {
+        state.wheelTimer = window.setTimeout(settle, 140);
+      }
     };
 
     frame.addEventListener('touchstart', onTouchStart, { passive: true });

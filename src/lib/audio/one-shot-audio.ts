@@ -19,11 +19,7 @@ type OneShotContext = {
   createBufferSource: () => OneShotSource;
 };
 
-/**
- * Plays complete, non-overlapping UI effects. Resume is called synchronously
- * from the initiating gesture; the context is closed after the final buffer
- * ends so a short effect cannot leave an active audio session behind.
- */
+/** A short UI effect: at most one pending or playing source, never a backlog. */
 export function createOneShotAudioPlayer(options: {
   createContext: () => OneShotContext | null;
   loadBuffer: (context: OneShotContext) => Promise<BufferLike>;
@@ -32,70 +28,69 @@ export function createOneShotAudioPlayer(options: {
   let bufferPromise: Promise<BufferLike> | null = null;
   let cachedBuffer: BufferLike | null = null;
   let preloadPromise: Promise<void> | null = null;
-  let queued = 0;
-  let active = 0;
-  let nextStartAt = 0;
-  const sources = new Set<OneShotSource>();
-
-  const finishSource = (source: OneShotSource) => {
-    if (!sources.delete(source)) return;
-    source.onended = null;
-    source.disconnect();
-    active = Math.max(0, active - 1);
-  };
-
-  const cancel = (target: OneShotContext) => {
-    if (context !== target) return;
-    queued = 0;
-    for (const source of [...sources]) {
-      finishSource(source);
-      try { source.stop(); } catch { /* It may have ended between checks. */ }
-    }
-    release(target);
-  };
+  let pending = false;
+  let source: OneShotSource | null = null;
+  let generation = 0;
+  let lastGestureAt = -Infinity;
 
   const release = (target: OneShotContext) => {
-    if (context !== target || queued > 0 || active > 0) return;
+    if (context !== target || pending || source) return;
     context = null;
     bufferPromise = null;
-    nextStartAt = 0;
     void target.close().catch(() => {});
+  };
+
+  const stopSource = () => {
+    const previous = source;
+    if (!previous) return;
+    source = null;
+    previous.onended = null;
+    try { previous.stop(); } catch { /* It may already have ended. */ }
+    previous.disconnect();
+  };
+
+  const cancel = (target: OneShotContext, request: number) => {
+    if (context !== target || generation !== request) return;
+    pending = false;
+    stopSource();
+    release(target);
   };
 
   const getBuffer = (target: OneShotContext) => {
     if (cachedBuffer) return Promise.resolve(cachedBuffer);
     if (!bufferPromise) {
-      bufferPromise = options.loadBuffer(target).catch(error => {
+      bufferPromise = options.loadBuffer(target).then(sound => {
+        cachedBuffer = sound;
+        return sound;
+      }).catch(error => {
         bufferPromise = null;
         throw error;
-      }).then(sound => { cachedBuffer = sound; return sound; });
+      });
     }
     return bufferPromise;
   };
 
-  const schedule = (target: OneShotContext, sound: BufferLike) => {
-    if (context !== target || target.state === 'closed') return;
-    while (queued > 0) {
-      queued -= 1;
-      const source = target.createBufferSource();
-      source.buffer = sound as AudioBuffer;
-      source.connect(target.destination);
-      const startAt = Math.max(target.currentTime + 0.01, nextStartAt);
-      nextStartAt = startAt + sound.duration;
-      active += 1;
-      sources.add(source);
-      source.onended = () => { finishSource(source); release(target); };
-      try {
-        source.start(startAt);
-      } catch {
-        finishSource(source);
-      }
-    }
-    release(target);
+  const start = (target: OneShotContext, sound: BufferLike, request: number) => {
+    if (context !== target || generation !== request || target.state === 'closed') return;
+    pending = false;
+    stopSource();
+    const next = target.createBufferSource();
+    next.buffer = sound as AudioBuffer;
+    next.connect(target.destination);
+    source = next;
+    next.onended = () => {
+      if (source !== next) return;
+      source = null;
+      next.onended = null;
+      next.disconnect();
+      release(target);
+    };
+    try { next.start(target.currentTime); }
+    catch { cancel(target, request); }
   };
 
   return {
-    /** Fetch and decode before an interaction so a later gesture starts at once. */
+    /** Pre-decode before a gesture; never hold a persistent HTML media player. */
     async preload() {
       if (cachedBuffer) return;
       if (preloadPromise) return preloadPromise;
@@ -108,57 +103,54 @@ export function createOneShotAudioPlayer(options: {
       catch { preloadPromise = null; }
     },
 
-    /** Call only from a user gesture. */
+    /** Invoke in the refresh gesture. Repeated taps restart promptly without queuing. */
     playFromGesture() {
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      // Duplicate touch/pointer events and stress bursts are one eligible gesture.
+      if (now - lastGestureAt < 100) return;
+      lastGestureAt = now;
       if (!context || context.state === 'closed') {
         context = options.createContext();
         bufferPromise = null;
-        nextStartAt = 0;
       }
       const target = context;
       if (!target) return;
-
-      queued += 1;
-      // This call must happen before awaiting decode so Safari sees the gesture.
-      const resumed = target.state === 'running'
-        ? Promise.resolve()
-        : target.resume();
+      const request = ++generation;
+      pending = true;
+      stopSource();
+      // Resume must be requested in the browser's user-activation task.
+      let resumed: Promise<void>;
+      try { resumed = target.state === 'running' ? Promise.resolve() : target.resume(); }
+      catch { cancel(target, request); return; }
       if (cachedBuffer) {
-        // Schedule synchronously inside the gesture. AudioContext can queue a
-        // source while resume is resolving; playback begins as soon as the
-        // browser permits the context to run.
-        schedule(target, cachedBuffer);
-        void resumed.then(() => { if (target.state !== 'running') cancel(target); }).catch(() => cancel(target));
+        start(target, cachedBuffer, request);
+        void resumed.then(() => {
+          if (generation === request && target.state !== 'running') cancel(target, request);
+        }).catch(() => cancel(target, request));
         return;
       }
       void Promise.all([resumed, getBuffer(target)]).then(([, sound]) => {
-        if (context === target && target.state !== 'closed') schedule(target, sound);
-        else cancel(target);
-      }).catch(() => cancel(target));
+        if (target.state === 'running') start(target, sound, request);
+        else cancel(target, request);
+      }).catch(() => cancel(target, request));
     },
 
-    /** Try only when browser policy already permits autoplay; never prompt. */
+    /** Best effort on reload: browser autoplay restrictions still apply. */
     tryAutoplay() {
       if (context) return;
       const target = options.createContext();
       if (!target) return;
       context = target;
       bufferPromise = null;
-      nextStartAt = 0;
-      if (target.state !== 'running') {
-        release(target);
-        return;
-      }
-      queued = 1;
-      void getBuffer(target).then(sound => schedule(target, sound)).catch(() => {
-        queued = 0;
-        release(target);
-      });
+      if (target.state !== 'running') { release(target); return; }
+      const request = ++generation;
+      pending = true;
+      void getBuffer(target).then(sound => start(target, sound, request))
+        .catch(() => cancel(target, request));
     },
 
-    /** Introspection kept small and useful for lifecycle regression tests. */
     state() {
-      return { queued, active, hasContext: context !== null };
+      return { queued: pending ? 1 : 0, active: source ? 1 : 0, hasContext: context !== null };
     },
   };
 }

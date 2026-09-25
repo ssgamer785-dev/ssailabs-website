@@ -25,6 +25,16 @@ export {
 
 const UNKNOWN: Record<string, PresenceStatus> = {};
 
+async function ensureRealtimeSession(userId: string): Promise<boolean> {
+  const { data, error } = await supabase.auth.getSession();
+  if (error || data.session?.user.id !== userId) return false;
+  // The SDK normally forwards auth events to Realtime, but an observer can
+  // mount before its asynchronous initial token update completes. Await the
+  // callback-backed token before joining an RLS-protected private channel.
+  await supabase.realtime.setAuth();
+  return true;
+}
+
 /**
  * Publishes this authenticated account's connection while the app is mounted.
  * Every tab/device gets a distinct Presence key; observers consider the account
@@ -47,32 +57,69 @@ export function PresenceRuntime() {
 
     let active = true;
     let subscribed = false;
+    let tracking = false;
     let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let warned = false;
 
-    const trackHeartbeat = () => {
-      if (!active || !subscribed || document.visibilityState === 'hidden') return;
-      void channel.track({ heartbeatAt: new Date().toISOString() }).catch(() => {
-        // Realtime will reconcile the session on reconnect. Do not create a
-        // local online fallback when the authenticated Presence write fails.
-      });
+    const retrySoon = () => {
+      if (!active || !subscribed || retryTimer) return;
+      retryTimer = setTimeout(() => {
+        retryTimer = undefined;
+        void trackHeartbeat();
+      }, 2_000);
     };
 
-    channel.subscribe(status => {
+    const trackHeartbeat = async () => {
+      if (!active || !subscribed || tracking || document.visibilityState === 'hidden') return;
+      tracking = true;
+      try {
+        // track() resolves to 'error' or 'timed out' on RLS/auth failures; it
+        // does not necessarily reject. Ignoring that result left every reader
+        // with an empty, apparently offline Presence state.
+        const result = await channel.track({ heartbeatAt: new Date().toISOString() });
+        if (!active) return;
+        if (result === 'ok') { warned = false; return; }
+        if (!warned) console.warn('[presence] Account heartbeat was not accepted:', result);
+        warned = true;
+        // getSession refreshes an expired access token when possible. The
+        // Supabase client forwards refreshed tokens to Realtime automatically.
+        await supabase.auth.getSession();
+        retrySoon();
+      } catch {
+        if (active && !warned) console.warn('[presence] Account heartbeat transport failed.');
+        warned = true;
+        retrySoon();
+      } finally {
+        tracking = false;
+      }
+    };
+
+    const onStatus = (status: string, error?: Error) => {
       if (!active) return;
       if (status === 'SUBSCRIBED') {
         subscribed = true;
         if (heartbeatTimer) clearInterval(heartbeatTimer);
-        trackHeartbeat();
-        heartbeatTimer = setInterval(trackHeartbeat, PRESENCE_HEARTBEAT_MS);
+        void trackHeartbeat();
+        heartbeatTimer = setInterval(() => { void trackHeartbeat(); }, PRESENCE_HEARTBEAT_MS);
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        if (status !== 'CLOSED') console.warn('[presence] Account channel unavailable:', status, error?.name ?? 'unknown');
         subscribed = false;
         if (heartbeatTimer) clearInterval(heartbeatTimer);
         heartbeatTimer = undefined;
+        if (retryTimer) clearTimeout(retryTimer);
+        retryTimer = undefined;
       }
+    };
+    void ensureRealtimeSession(user.id).then(ready => {
+      if (active && ready) channel.subscribe(onStatus);
+      else if (active) console.warn('[presence] Account channel has no authenticated session.');
+    }).catch(() => {
+      if (active) console.warn('[presence] Account channel authentication failed.');
     });
 
     const resume = () => {
-      if (document.visibilityState === 'visible') trackHeartbeat();
+      if (document.visibilityState === 'visible') void trackHeartbeat();
     };
     document.addEventListener('visibilitychange', resume);
     window.addEventListener('online', resume);
@@ -81,6 +128,7 @@ export function PresenceRuntime() {
       active = false;
       subscribed = false;
       if (heartbeatTimer) clearInterval(heartbeatTimer);
+      if (retryTimer) clearTimeout(retryTimer);
       document.removeEventListener('visibilitychange', resume);
       window.removeEventListener('online', resume);
       // Realtime removes Presence automatically on channel leave; untrack first
@@ -124,7 +172,7 @@ export function usePresence(targets: readonly PresenceTarget[]): Record<string, 
       const channel = supabase.channel(topic, {
         config: {
           private: true,
-          presence: { key: `tp-observer-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}` },
+          presence: { key: `tp-observer-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`, enabled: true },
         },
       });
 
@@ -140,18 +188,30 @@ export function usePresence(targets: readonly PresenceTarget[]): Record<string, 
         flags.synced = true;
         update();
       });
-      channel.subscribe(status => {
+      const onStatus = (status: string, error?: Error) => {
         if (!active) return;
         if (status === 'SUBSCRIBED') {
           flags.connected = true;
           update();
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          if (status !== 'CLOSED') console.warn('[presence] Observer channel unavailable:', status, error?.name ?? 'unknown');
           flags.connected = false;
           flags.synced = false;
           update();
         }
-      });
-      return { key, channel, flags };
+      };
+      return { key, channel, flags, onStatus };
+    });
+
+    void ensureRealtimeSession(user.id).then(ready => {
+      if (!active) return;
+      if (!ready) {
+        console.warn('[presence] Observer channels have no authenticated session.');
+        return;
+      }
+      for (const { channel, onStatus } of channels) channel.subscribe(onStatus);
+    }).catch(() => {
+      if (active) console.warn('[presence] Observer channel authentication failed.');
     });
 
     const expiryTimer = setInterval(() => {
