@@ -94,7 +94,7 @@ function AttachmentChips({ post }: { post: FeedPost }) {
   const isVideo = post.attachment === 'video';
   const isImage = post.attachment === 'image';
   const key = post.mediaPurged ? null : post.posterKey ?? (isImage ? post.storageKey : null);
-  const { ref, url } = useLazyMediaUrl(key, getPostMediaUrl);
+  const { ref, url, retry } = useLazyMediaUrl(key, getPostMediaUrl);
 
   if (post.mediaPurged || post.attachment === 'none') return null;
 
@@ -110,7 +110,7 @@ function AttachmentChips({ post }: { post: FeedPost }) {
     return (
       <div ref={ref} style={css('position:relative;width:31px;height:31px;border-radius:9px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer')}>
         {url
-          ? <img src={url} alt="" decoding="async" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
+          ? <img src={url} onError={retry} alt="" decoding="async" style={css('width:100%;height:100%;object-fit:contain;display:block')} />
           : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.8} strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3.4" /><circle cx="9" cy="10" r="1.7" /><path d="M4.6 17.4l4.5-4.3 3.3 3.1 2.6-2.4 4.4 4" /></svg>}
       </div>
     );
@@ -120,7 +120,7 @@ function AttachmentChips({ post }: { post: FeedPost }) {
 
   return (
     <div ref={ref} style={css('position:relative;width:38px;height:31px;border-radius:9px;background:var(--ink-chip);display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer')}>
-      {url && <img src={url} alt="" decoding="async" style={css('position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;opacity:.72')} />}
+      {url && <img src={url} onError={retry} alt="" decoding="async" style={css('position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;opacity:.72')} />}
       <svg width="13" height="13" viewBox="0 0 24 24" fill="var(--on-accent)" style={css('position:relative')}><path d="M8.5 5.5l10 6.5-10 6.5z" /></svg>
     </div>
   );

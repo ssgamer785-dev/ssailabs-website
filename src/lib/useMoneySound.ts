@@ -24,14 +24,16 @@ const moneyPlayer = createOneShotAudioPlayer({
   },
 });
 
-let preloadStarted = false;
+let preloaded = false;
+let preloadInFlight = false;
 let reloadAttempted = false;
 
 /** Pre-decode at boot so a later refresh gesture can schedule without waiting on network I/O. */
 export function preloadMoneyRefreshSound(): void {
-  if (preloadStarted) return;
-  preloadStarted = true;
-  void moneyPlayer.preload();
+  if (preloaded || preloadInFlight) return;
+  preloadInFlight = true;
+  void moneyPlayer.preload().then(ready => { preloaded = ready; })
+    .finally(() => { preloadInFlight = false; });
 }
 
 /** Preserve the previous best-effort reload sound only after auth restored the account preference. */

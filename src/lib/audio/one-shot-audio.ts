@@ -33,7 +33,16 @@ export function createOneShotAudioPlayer(options: {
   let generation = 0;
   let lastGestureAt = -Infinity;
   let preparedCloseTimer: ReturnType<typeof setTimeout> | undefined;
+  let startDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
   let resumePromise: Promise<void> | null = null;
+
+  // An unlock that arrives seconds later is a missed UI effect, not a sound to
+  // replay over the member's next action.
+  const MAX_START_DELAY_MS = 250;
+  const clearStartDeadline = () => {
+    if (startDeadlineTimer) clearTimeout(startDeadlineTimer);
+    startDeadlineTimer = undefined;
+  };
 
   const clearPreparedClose = () => {
     if (preparedCloseTimer) clearTimeout(preparedCloseTimer);
@@ -43,15 +52,18 @@ export function createOneShotAudioPlayer(options: {
   const release = (target: OneShotContext) => {
     if (context !== target || pending || source) return;
     clearPreparedClose();
+    clearStartDeadline();
     context = null;
     bufferPromise = null;
     resumePromise = null;
     void target.close().catch(() => {});
   };
 
-  const resumeContext = (target: OneShotContext): Promise<void> => {
+  const resumeContext = (target: OneShotContext, fromFreshGesture = false): Promise<void> => {
     if (target.state === 'running') return Promise.resolve();
-    if (resumePromise) return resumePromise;
+    // iOS can leave the touch-start resume pending. Touch-end is a separate
+    // user activation; retry in that task instead of awaiting the stale one.
+    if (resumePromise && !fromFreshGesture) return resumePromise;
     const attempt = target.resume();
     resumePromise = attempt;
     void attempt.finally(() => {
@@ -72,6 +84,7 @@ export function createOneShotAudioPlayer(options: {
   const cancel = (target: OneShotContext, request: number) => {
     if (context !== target || generation !== request) return;
     pending = false;
+    clearStartDeadline();
     stopSource();
     release(target);
   };
@@ -90,9 +103,11 @@ export function createOneShotAudioPlayer(options: {
     return bufferPromise;
   };
 
-  const start = (target: OneShotContext, sound: BufferLike, request: number) => {
-    if (context !== target || generation !== request || target.state === 'closed') return;
-    pending = false;
+  const start = (target: OneShotContext, sound: BufferLike, request: number, gestureScheduled = false) => {
+    if (context !== target || generation !== request || target.state === 'closed'
+      || (target.state !== 'running' && !gestureScheduled)) return;
+    pending = target.state !== 'running';
+    if (!pending) clearStartDeadline();
     stopSource();
     const next = target.createBufferSource();
     next.buffer = sound as AudioBuffer;
@@ -101,6 +116,7 @@ export function createOneShotAudioPlayer(options: {
     next.onended = () => {
       if (source !== next) return;
       source = null;
+      pending = false;
       next.onended = null;
       next.disconnect();
       release(target);
@@ -111,11 +127,14 @@ export function createOneShotAudioPlayer(options: {
 
   return {
     /** Pre-decode before a gesture; never hold a persistent HTML media player. */
-    async preload() {
-      if (cachedBuffer) return;
-      if (preloadPromise) return preloadPromise;
+    async preload(): Promise<boolean> {
+      if (cachedBuffer) return true;
+      if (preloadPromise) {
+        try { await preloadPromise; } catch { return false; }
+        return !!cachedBuffer;
+      }
       const target = options.createContext();
-      if (!target) return;
+      if (!target) return false;
       // A gesture arriving during preload must await the same decode, not
       // start a second fetch/decode that can make the sound audibly late.
       const decode = options.loadBuffer(target).then(sound => {
@@ -129,8 +148,8 @@ export function createOneShotAudioPlayer(options: {
       const work = decode.then(() => {})
         .finally(() => { void target.close().catch(() => {}); });
       preloadPromise = work;
-      try { await work; }
-      catch { preloadPromise = null; }
+      try { await work; return true; }
+      catch { preloadPromise = null; return false; }
     },
 
     /** Unlock on the real touch/pointer start, before the later pull release. */
@@ -163,14 +182,22 @@ export function createOneShotAudioPlayer(options: {
       const request = ++generation;
       pending = true;
       stopSource();
+      clearStartDeadline();
+      startDeadlineTimer = setTimeout(() => cancel(target, request), MAX_START_DELAY_MS);
       // Resume must be requested in the browser's user-activation task.
       let resumed: Promise<void>;
-      try { resumed = resumeContext(target); }
+      try { resumed = resumeContext(target, true); }
       catch { cancel(target, request); return; }
       if (cachedBuffer) {
-        start(target, cachedBuffer, request);
-        void resumed.then(() => {
-          if (generation === request && target.state !== 'running') cancel(target, request);
+        // Schedule the predecoded source synchronously inside touch-end. iOS
+        // may require this even while its context is still suspended. The
+        // deadline cancels it if resume cannot complete promptly.
+        start(target, cachedBuffer, request, true);
+        if (target.state !== 'running') void resumed.then(() => {
+          if (context !== target || generation !== request) return;
+          if (target.state !== 'running') { cancel(target, request); return; }
+          pending = false;
+          clearStartDeadline();
         }).catch(() => cancel(target, request));
         return;
       }

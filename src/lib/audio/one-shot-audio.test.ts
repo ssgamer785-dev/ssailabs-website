@@ -84,7 +84,7 @@ describe('one-shot refresh sound lifecycle', () => {
     expect(player.state()).toEqual({ queued: 0, active: 0, hasContext: false });
   });
 
-  it('schedules a preloaded sound synchronously during the refresh gesture', async () => {
+  it('schedules a predecoded source inside a suspended iOS gesture, then unlocks it', async () => {
     const contexts: FakeContext[] = [];
     let loads = 0;
     const player = createOneShotAudioPlayer({
@@ -108,8 +108,83 @@ describe('one-shot refresh sound lifecycle', () => {
     contexts[1].resumePending?.();
     await flush();
     expect(contexts[1].state).toBe('running');
+    expect(contexts[1].sources).toHaveLength(1);
     expect(loads).toBe(1);
     contexts[1].sources[0].finish();
+  });
+
+  it('drops an unlock that arrives too late instead of playing on the next gesture', async () => {
+    const context = new FakeContext('suspended');
+    context.deferResume = true;
+    const player = createOneShotAudioPlayer({
+      createContext: () => context,
+      loadBuffer: async () => ({ duration: 2 }),
+    });
+    player.playFromGesture();
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(context.closeCount).toBe(1);
+    context.resumePending?.();
+    await flush();
+    expect(context.sources).toHaveLength(0);
+    expect(player.state()).toEqual({ queued: 0, active: 0, hasContext: false });
+  });
+
+  it('stops a predecoded suspended source before a late iOS resume can replay it', async () => {
+    const contexts: FakeContext[] = [];
+    const player = createOneShotAudioPlayer({
+      createContext: () => {
+        const context = new FakeContext(contexts.length ? 'suspended' : 'running');
+        if (contexts.length) context.deferResume = true;
+        contexts.push(context);
+        return context;
+      },
+      loadBuffer: async () => ({ duration: 2 }),
+    });
+    await player.preload();
+    player.playFromGesture();
+    expect(contexts[1].sources).toHaveLength(1);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(contexts[1].sources[0].disconnected).toBe(1);
+    contexts[1].resumePending?.();
+    await flush();
+    expect(player.state()).toEqual({ queued: 0, active: 0, hasContext: false });
+  });
+
+  it('retries iOS resume synchronously on touch-end when touch-start resume is still pending', async () => {
+    const contexts: FakeContext[] = [];
+    const player = createOneShotAudioPlayer({
+      createContext: () => {
+        const context = new FakeContext(contexts.length ? 'suspended' : 'running');
+        if (contexts.length) context.deferResume = true;
+        contexts.push(context);
+        return context;
+      },
+      loadBuffer: async () => ({ duration: 2 }),
+    });
+    await player.preload();
+    player.prepareFromGesture();
+    expect(contexts[1].resumeCount).toBe(1);
+    player.playFromGesture();
+    expect(contexts[1].resumeCount).toBe(2);
+    expect(contexts[1].sources).toHaveLength(1);
+    contexts[1].resumePending?.();
+    await flush();
+    expect(player.state()).toEqual({ queued: 0, active: 1, hasContext: true });
+    contexts[1].sources[0].finish();
+  });
+
+  it('retries preloading after a temporary fetch or decode failure', async () => {
+    let attempts = 0;
+    const player = createOneShotAudioPlayer({
+      createContext: () => new FakeContext(),
+      loadBuffer: async () => {
+        if (++attempts === 1) throw new Error('temporarily offline');
+        return { duration: 2 };
+      },
+    });
+    expect(await player.preload()).toBe(false);
+    expect(await player.preload()).toBe(true);
+    expect(attempts).toBe(2);
   });
 
   it('unlocks on pointer start and reuses that context when the pull is released', async () => {

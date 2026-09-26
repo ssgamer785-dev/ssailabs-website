@@ -28,9 +28,11 @@ interface Entry<C extends PresenceChannelLike> {
   tracking: boolean;
   warned: boolean;
   live: boolean;
+  starting: boolean;
   heartbeatTimer?: ReturnType<typeof setInterval>;
   expiryTimer?: ReturnType<typeof setInterval>;
   retryTimer?: ReturnType<typeof setTimeout>;
+  setupRetryTimer?: ReturnType<typeof setTimeout>;
 }
 
 /** One SDK channel and one pre-subscribe listener per topic in this browser tab. */
@@ -39,7 +41,7 @@ export function createPresenceManager<C extends PresenceChannelLike>(deps: {
   removeChannel: (channel: C) => Promise<unknown>;
   readState: (channel: C) => PresenceHeartbeat[];
   ensureAuth: (ownerId: string) => Promise<boolean>;
-  visible: () => boolean;
+  retryDelayMs?: number;
   warn?: (message: string, detail?: string) => void;
 }) {
   const entries = new Map<string, Entry<C>>();
@@ -56,8 +58,10 @@ export function createPresenceManager<C extends PresenceChannelLike>(deps: {
   };
 
   const track = async (entry: Entry<C>) => {
+    // A connected background tab is still a valid session. Mobile browsers
+    // naturally suspend this timer; its heartbeat then expires after 90 s.
     if (!entry.live || !entry.channel || !entry.connected || !entry.publishers
-      || !deps.visible() || entry.tracking) return;
+      || entry.tracking) return;
     entry.tracking = true;
     try {
       const result = await entry.channel.track({ heartbeatAt: new Date().toISOString() });
@@ -88,23 +92,47 @@ export function createPresenceManager<C extends PresenceChannelLike>(deps: {
     entry.heartbeatTimer = setInterval(() => { void track(entry); }, PRESENCE_HEARTBEAT_MS);
   };
 
+  const retrySetup = (entry: Entry<C>) => {
+    if (!entry.live || entry.setupRetryTimer) return;
+    entry.setupRetryTimer = setTimeout(async () => {
+      entry.setupRetryTimer = undefined;
+      if (!entry.live || entry.connected) return;
+      if (entry.channel) {
+        const failed = entry.channel;
+        entry.channel = null;
+        const removal = deps.removeChannel(failed).then(() => {}, () => {});
+        removals.set(entry.topic, removal);
+        await removal;
+        if (removals.get(entry.topic) === removal) removals.delete(entry.topic);
+      }
+      void start(entry);
+    }, deps.retryDelayMs ?? 5_000);
+  };
+
   const start = async (entry: Entry<C>) => {
+    if (entry.starting || entry.channel || !entry.live) return;
+    entry.starting = true;
+    try {
     // A fast logout/login must not inherit an old SDK channel for this topic.
     await removals.get(entry.topic);
-    if (!entry.live || !await deps.ensureAuth(entry.ownerId) || !entry.live) return;
+    if (!entry.live) return;
+    if (!await deps.ensureAuth(entry.ownerId)) { retrySetup(entry); return; }
+    if (!entry.live) return;
     const channel = deps.channel(entry.topic);
     entry.channel = channel;
     // RealtimeChannel.on('presence') throws after subscribe(). Register once,
     // before anyone (publisher or observer) joins the shared channel.
     channel.on('presence', { event: 'sync' }, () => {
-      if (!entry.live) return;
+      if (!entry.live || entry.channel !== channel) return;
       entry.synced = true;
       publishStatus(entry);
     });
     if (!entry.live) return;
     channel.subscribe((status, error) => {
-      if (!entry.live) return;
+      if (!entry.live || entry.channel !== channel) return;
       if (status === 'SUBSCRIBED') {
+        if (entry.setupRetryTimer) clearTimeout(entry.setupRetryTimer);
+        entry.setupRetryTimer = undefined;
         entry.connected = true;
         publishStatus(entry);
         startHeartbeat(entry);
@@ -115,9 +143,27 @@ export function createPresenceManager<C extends PresenceChannelLike>(deps: {
         entry.heartbeatTimer = undefined;
         publishStatus(entry);
         if (status !== 'CLOSED') warn('Presence channel unavailable', `${status}:${error?.name ?? 'unknown'}`);
+        retrySetup(entry);
       }
     });
     entry.expiryTimer = setInterval(() => publishStatus(entry), Math.min(15_000, PRESENCE_STALE_AFTER_MS / 4));
+    } catch {
+      if (entry.live) {
+        warn('Presence channel setup failed');
+        if (entry.channel) {
+          const failed = entry.channel;
+          entry.channel = null;
+          const removal = deps.removeChannel(failed).then(() => {}, () => {});
+          removals.set(entry.topic, removal);
+          void removal.finally(() => {
+            if (removals.get(entry.topic) === removal) removals.delete(entry.topic);
+          });
+        }
+        retrySetup(entry);
+      }
+    } finally {
+      entry.starting = false;
+    }
   };
 
   const acquire = (
@@ -133,12 +179,10 @@ export function createPresenceManager<C extends PresenceChannelLike>(deps: {
       entry = {
         ownerId, topic, channel: null, refs: 0, publishers: 0,
         listeners: new Set(), status: 'unknown', connected: false,
-        synced: false, tracking: false, warned: false, live: true,
+        synced: false, tracking: false, warned: false, live: true, starting: false,
       };
       entries.set(key, entry);
-      void start(entry).catch(() => {
-        if (entry?.live) warn('Presence channel setup failed');
-      });
+      void start(entry);
     }
     const current = entry;
     current.refs++;
@@ -172,6 +216,7 @@ export function createPresenceManager<C extends PresenceChannelLike>(deps: {
       if (current.heartbeatTimer) clearInterval(current.heartbeatTimer);
       if (current.expiryTimer) clearInterval(current.expiryTimer);
       if (current.retryTimer) clearTimeout(current.retryTimer);
+      if (current.setupRetryTimer) clearTimeout(current.setupRetryTimer);
       if (!current.channel) return;
       const removal = deps.removeChannel(current.channel).then(() => {}, () => {
         warn('Presence channel cleanup failed');
@@ -186,7 +231,13 @@ export function createPresenceManager<C extends PresenceChannelLike>(deps: {
   return {
     acquire,
     refreshPublishers() {
-      for (const entry of entries.values()) if (entry.publishers) void track(entry);
+      for (const entry of entries.values()) if (entry.publishers) {
+        if (!entry.channel) {
+          if (entry.setupRetryTimer) clearTimeout(entry.setupRetryTimer);
+          entry.setupRetryTimer = undefined;
+          void start(entry);
+        } else void track(entry);
+      }
     },
     activeTopics() { return entries.size; },
   };

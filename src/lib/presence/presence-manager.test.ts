@@ -52,7 +52,7 @@ function harness() {
     },
     readState: channel => Object.values(channel.state).flat(),
     ensureAuth: async () => true,
-    visible: () => true,
+    retryDelayMs: 1,
   });
   return { manager, channels, created, removed: () => removed };
 }
@@ -129,6 +129,46 @@ describe('shared private Presence channel lifecycle', () => {
     expect(seen.at(-1)).toBe('online');
     channel.status?.('CHANNEL_ERROR', new Error('disconnected'));
     expect(seen.at(-1)).toBe('unknown');
+    release();
+  });
+
+  it('recreates a failed channel and ignores late callbacks from the old one', async () => {
+    const test = harness();
+    const seen: PresenceStatus[] = [];
+    const release = test.manager.acquire('admin-id', { kind: 'student', userId: 'student-id' }, false, value => seen.push(value));
+    await flush();
+    const first = test.created[0];
+    first.status?.('CHANNEL_ERROR', new Error('disconnected'));
+    expect(seen.at(-1)).toBe('unknown');
+    await new Promise(resolve => setTimeout(resolve, 10));
+    await flush();
+    expect(test.created).toHaveLength(2);
+    const replacement = test.created[1];
+    replacement.state.remote = [{ heartbeatAt: new Date().toISOString() }];
+    replacement.sync?.();
+    expect(seen.at(-1)).toBe('online');
+    first.status?.('CHANNEL_ERROR', new Error('old socket'));
+    expect(seen.at(-1)).toBe('online');
+    release();
+  });
+
+  it('recovers a publisher after its first session check fails', async () => {
+    let authenticated = false;
+    const channels: FakeChannel[] = [];
+    const manager = createPresenceManager({
+      channel: () => { const channel = new FakeChannel(); channels.push(channel); return channel; },
+      removeChannel: async () => {},
+      readState: channel => Object.values(channel.state).flat(),
+      ensureAuth: async () => authenticated,
+    });
+    const release = manager.acquire('admin-id', { kind: 'admin' }, true);
+    await flush();
+    expect(channels).toHaveLength(0);
+    authenticated = true;
+    manager.refreshPublishers();
+    await flush();
+    expect(channels).toHaveLength(1);
+    expect(channels[0].trackCount).toBe(1);
     release();
   });
 });

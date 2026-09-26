@@ -1,11 +1,10 @@
 import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { css } from '../lib/css';
 import { cancelMoneyRefreshPreparation, prepareMoneyRefreshSound, useMoneySound } from '../lib/useMoneySound';
+import { accumulateWheelPull, resistedPullDistance, REFRESH_PULL_THRESHOLD } from '../lib/refresh-gesture';
 
 /** Drag distance, after resistance, that arms the refresh. */
-const THRESHOLD = 64;
-/** How far the sheet can be dragged, however hard you pull. */
-const MAX_PULL = 96;
+const THRESHOLD = REFRESH_PULL_THRESHOLD;
 /** The indicator stays up at least this long, so a fast refresh still reads. */
 const MIN_SPIN_MS = 450;
 
@@ -76,6 +75,7 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       /** A pull is only live once we have committed to it, never mid-scroll. */
       pulling: false, busy: false,
       startX: 0, startY: 0, tracking: false, pointerDrag: false,
+      wheelTriggered: false, wheelDistance: 0,
       wheelTimer: 0 as unknown as number,
     };
 
@@ -141,7 +141,7 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       if (state.busy) return;
       state.pulling = true;
       // Rubber band: the further you are, the less each pixel buys.
-      const eased = MAX_PULL * (1 - Math.exp(-distance / MAX_PULL));
+      const eased = resistedPullDistance(distance);
       state.target = Math.max(0, eased);
       run();
     };
@@ -161,7 +161,8 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
 
     // ---- touch: the path that has to feel right ----------------------------
     const onTouchStart = (e: TouchEvent) => {
-      if (state.busy || e.touches.length !== 1 || !refreshHandlers.size) return;
+      if (state.busy || !refreshHandlers.size) return;
+      if (e.touches.length !== 1) { state.tracking = false; settle(); return; }
       state.tracking = atTop(e.target);
       if (state.tracking) prepareMoneyRefreshSound();
       state.startX = e.touches[0].clientX;
@@ -187,7 +188,8 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       pull(dy);
     };
 
-    const onTouchEnd = () => {
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length) return;
       state.tracking = false;
       release();
     };
@@ -214,21 +216,33 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       state.pointerDrag = false;
       release();
     };
+    const onPointerCancel = () => { state.pointerDrag = false; settle(); };
 
     const onWheel = (e: WheelEvent) => {
       // Ctrl/Cmd + wheel is a zoom gesture, not a scroll: without this it also
       // drags the refresh sheet open while app-zoom.ts is cancelling the zoom.
       if (e.ctrlKey || e.metaKey) return;
-      if (state.busy || !refreshHandlers.size || !atTop(e.target) || e.deltaY >= 0) return;
-      prepareMoneyRefreshSound();
-      pull(state.target + Math.min(20, -e.deltaY * 0.6));
+      if (!refreshHandlers.size || !atTop(e.target) || e.deltaY >= 0) return;
+      // Track the entire wheel burst, including momentum after the fetch has
+      // completed. Otherwise one long swipe can fire a second refresh/sound.
       clearTimeout(state.wheelTimer);
+      state.wheelTimer = window.setTimeout(() => {
+        state.wheelTriggered = false;
+        state.wheelDistance = 0;
+        if (!state.busy) settle();
+      }, 400);
+      if (state.busy || state.wheelTriggered) return;
+      prepareMoneyRefreshSound();
+      // Accumulate RAW wheel movement. Feeding the already eased target back
+      // through pull() converged below the 64px threshold, so wheel refresh
+      // could never fire even after a long swipe.
+      state.wheelDistance = accumulateWheelPull(state.wheelDistance, e.deltaY);
+      pull(state.wheelDistance);
       if (state.target >= THRESHOLD) {
         // Fire inside the wheel gesture. Deferring until the wheel-idle timer
         // loses user activation and makes the sound audibly late or silent.
+        state.wheelTriggered = true;
         void fire();
-      } else {
-        state.wheelTimer = window.setTimeout(settle, 140);
       }
     };
 
@@ -240,6 +254,7 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
     frame.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
     return () => {
       frame.removeEventListener('touchstart', onTouchStart);
       frame.removeEventListener('touchmove', onTouchMove);
@@ -249,6 +264,7 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       frame.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
       if (state.raf) cancelAnimationFrame(state.raf);
       clearTimeout(state.wheelTimer);
       cancelMoneyRefreshPreparation();

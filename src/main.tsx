@@ -12,6 +12,9 @@ import { preloadMoneyRefreshSound } from './lib/useMoneySound';
 lockAppZoom();
 installNotificationAudioUnlock();
 preloadMoneyRefreshSound();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') preloadMoneyRefreshSound();
+});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

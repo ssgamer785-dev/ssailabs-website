@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppStateProvider } from './lib/app-state';
 import { AuthProvider } from './lib/auth-context';
@@ -8,34 +9,36 @@ import { WelcomeScreen } from './screens/WelcomeScreen';
 import { ActivationScreen } from './screens/ActivationScreen';
 import { MembershipRequestScreen } from './screens/MembershipRequestScreen';
 import { AdminLoginScreen } from './screens/AdminLoginScreen';
-import { AdminActivationCodesScreen } from './screens/AdminActivationCodesScreen';
-import { AdminMembershipRequestsScreen } from './screens/AdminMembershipRequestsScreen';
 import { LoginScreen } from './screens/LoginScreen';
 import { ForgotPasswordScreen } from './screens/ForgotPasswordScreen';
 import { ResetPasswordScreen } from './screens/ResetPasswordScreen';
 import { SignupScreen } from './screens/SignupScreen';
-import { HomeScreen } from './screens/HomeScreen';
-import { CommunityPage } from './screens/CommunityPage';
-import { CreatePostScreen } from './screens/CreatePostScreen';
-import { RiskCalculatorScreen } from './screens/RiskCalculatorScreen';
-import { EconomicCalendarScreen } from './screens/EconomicCalendarScreen';
-import { ChatListScreen } from './screens/ChatListScreen';
-import { AdminChatRoute } from './screens/AdminChatScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
-import { PostDetailScreen } from './screens/PostDetailScreen';
-import { NotificationsScreen } from './screens/NotificationsScreen';
-import { AdminInboxScreen } from './screens/AdminInboxScreen';
 import { NameVisibilityScreen } from './screens/NameVisibilityScreen';
-import { PersonalInformationScreen } from './screens/PersonalInformationScreen';
-import { PrivacyPolicyScreen } from './screens/PrivacyPolicyScreen';
-import { TermsScreen } from './screens/TermsScreen';
+import { AuthLoading } from './components/AuthLoading';
 import { HelpSupportScreen } from './screens/HelpSupportScreen';
 import { PushNotifications } from './components/PushNotifications';
 import { LifecycleSplash } from './components/LifecycleSplash';
 import { NotificationNavigation } from './components/NotificationNavigation';
 import { AudioPreferencesRuntime } from './components/AudioPreferencesRuntime';
-import { HapticsScreen } from './screens/HapticsScreen';
 import { PresenceRuntime } from './lib/presence/usePresence';
+
+const AdminActivationCodesScreen = lazy(() => import('./screens/AdminActivationCodesScreen').then(module => ({ default: module.AdminActivationCodesScreen })));
+const HomeScreen = lazy(() => import('./screens/HomeScreen').then(module => ({ default: module.HomeScreen })));
+const ChatListScreen = lazy(() => import('./screens/ChatListScreen').then(module => ({ default: module.ChatListScreen })));
+const AdminMembershipRequestsScreen = lazy(() => import('./screens/AdminMembershipRequestsScreen').then(module => ({ default: module.AdminMembershipRequestsScreen })));
+const CommunityPage = lazy(() => import('./screens/CommunityPage').then(module => ({ default: module.CommunityPage })));
+const CreatePostScreen = lazy(() => import('./screens/CreatePostScreen').then(module => ({ default: module.CreatePostScreen })));
+const RiskCalculatorScreen = lazy(() => import('./screens/RiskCalculatorScreen').then(module => ({ default: module.RiskCalculatorScreen })));
+const EconomicCalendarScreen = lazy(() => import('./screens/EconomicCalendarScreen').then(module => ({ default: module.EconomicCalendarScreen })));
+const AdminChatRoute = lazy(() => import('./screens/AdminChatScreen').then(module => ({ default: module.AdminChatRoute })));
+const PostDetailScreen = lazy(() => import('./screens/PostDetailScreen').then(module => ({ default: module.PostDetailScreen })));
+const NotificationsScreen = lazy(() => import('./screens/NotificationsScreen').then(module => ({ default: module.NotificationsScreen })));
+const AdminInboxScreen = lazy(() => import('./screens/AdminInboxScreen').then(module => ({ default: module.AdminInboxScreen })));
+const PersonalInformationScreen = lazy(() => import('./screens/PersonalInformationScreen').then(module => ({ default: module.PersonalInformationScreen })));
+const PrivacyPolicyScreen = lazy(() => import('./screens/PrivacyPolicyScreen').then(module => ({ default: module.PrivacyPolicyScreen })));
+const TermsScreen = lazy(() => import('./screens/TermsScreen').then(module => ({ default: module.TermsScreen })));
+const HapticsScreen = lazy(() => import('./screens/HapticsScreen').then(module => ({ default: module.HapticsScreen })));
 
 export default function App() {
   return (
@@ -48,7 +51,7 @@ export default function App() {
           <NotificationNavigation />
           <PushNotifications />
           <PresenceRuntime />
-          <Routes>
+          <Suspense fallback={<AuthLoading />}><Routes>
             <Route path="/" element={<SplashScreen />} />
             {/* The entry point for anyone signed out. */}
             <Route path="/welcome" element={<RedirectIfAuthed><WelcomeScreen /></RedirectIfAuthed>} />
@@ -88,7 +91,7 @@ export default function App() {
             <Route path="/haptics" element={<RequireActivated><HapticsScreen /></RequireActivated>} />
             <Route path="/admin-inbox" element={<RequireAdmin><AdminInboxScreen /></RequireAdmin>} />
             <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          </Routes></Suspense>
         </BrowserRouter>
       </AppStateProvider>
       </AuthProvider>

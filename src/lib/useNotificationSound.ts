@@ -10,7 +10,7 @@ const PARTIALS = [
 const ATTACK_SECONDS = 0.006;
 const CHIMED_CAP = 300;
 const SOUND_DURATION_SECONDS = 0.68;
-const MAX_QUEUED_SECONDS = 1.55;
+const MAX_UNLOCK_DELAY_MS = 250;
 
 type AudioContextConstructor = typeof AudioContext;
 let ctx: AudioContext | null = null;
@@ -52,22 +52,21 @@ export function setNotificationSoundEnabled(enabled: boolean): void {
   setAudioPreference('notificationSound', enabled);
 }
 
-/** Plays at most once per event id, queues only a short burst, and never overlaps tones. */
+/** Plays at most once per event id and drops bursts rather than playing late. */
 export function playNotificationChime(id?: string): void {
   if (id && !markNotificationSoundSeen(id)) return;
   if (!notificationSoundEnabled()) return;
   const audio = context();
   if (!audio) return;
 
-  try {
-    // Do not suspend after each effect. The old suspend caused the next
-    // Realtime event to attempt an autoplay-blocked resume and then dedupe it.
-    const ready = audio.state === 'running' ? Promise.resolve() : audio.resume();
-    void ready.then(() => {
+  const requestedAt = performance.now();
+  const schedule = () => {
+    try {
       if (ctx !== audio || audio.state !== 'running') return;
+      if (performance.now() - requestedAt > MAX_UNLOCK_DELAY_MS) return;
       const now = audio.currentTime;
-      const startAt = Math.max(now + 0.005, lastScheduledEnd);
-      if (startAt - now > MAX_QUEUED_SECONDS) return;
+      if (now < lastScheduledEnd) return;
+      const startAt = now + 0.005;
       lastScheduledEnd = startAt + SOUND_DURATION_SECONDS + 0.06;
 
       const tone = audio.createBiquadFilter();
@@ -97,10 +96,14 @@ export function playNotificationChime(id?: string): void {
         oscillator.start(start);
         oscillator.stop(start + partial.decay + 0.02);
       }
-    }).catch(() => {
-      // Browser audio policy may block a resume. The next genuine gesture can unlock it.
-    });
-  } catch { /* Notifications remain visible when audio is unsupported. */ }
+    } catch { /* Notifications remain visible when audio is unsupported. */ }
+  };
+  if (audio.state === 'running') { schedule(); return; }
+  try {
+    // Browser audio policy may block this; the next genuine gesture unlocks the
+    // context, but never replays this old event as a delayed chime.
+    void audio.resume().then(schedule).catch(() => {});
+  } catch { /* OS/browser audio policy */ }
 }
 
 /** Called directly from a real user gesture (also from the push Allow button). */

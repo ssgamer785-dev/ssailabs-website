@@ -123,7 +123,16 @@ export function useNotifications(): UseNotifications {
         })
       .subscribe();
 
-    return () => { active = false; supabase.removeChannel(sub); };
+    const onRecoveredEvent = (event: Event) => {
+      if ((event as CustomEvent<{ userId?: string }>).detail?.userId === userId) void refresh();
+    };
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onRecoveredEvent);
+
+    return () => {
+      active = false;
+      window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onRecoveredEvent);
+      void supabase.removeChannel(sub);
+    };
   }, [userId, refresh]);
 
   const markRead = useCallback(async (id: string) => {

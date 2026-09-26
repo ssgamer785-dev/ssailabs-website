@@ -88,7 +88,8 @@ export function pushRouter(): Router {
     if (subError) throw subError;
 
     webpush.setVapidDetails(env('VAPID_SUBJECT')!, env('VAPID_PUBLIC_KEY')!, env('VAPID_PRIVATE_KEY')!);
-    const payload = JSON.stringify({ id: row.id, title: row.title, body: row.body ?? '', url: destination(row) });
+    const description = [row.title, row.body].filter(Boolean).join(' · ').slice(0, 180);
+    const payload = JSON.stringify({ id: row.id, title: 'THE TRADERS PLANET', body: description, url: destination(row) });
     let failed = 0;
     for (const sub of subscriptions ?? []) {
       const { error: claimError } = await db.from('push_deliveries').insert({

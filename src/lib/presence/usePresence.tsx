@@ -53,7 +53,6 @@ const manager = createPresenceManager({
   removeChannel: channel => supabase.removeChannel(channel),
   readState: channel => Object.values(channel.presenceState<PresenceHeartbeat>()).flat(),
   ensureAuth: ensureRealtimeSession,
-  visible: () => document.visibilityState === 'visible',
   warn: (message, detail) => console.warn(`[presence] ${message}`, detail ?? ''),
 });
 
@@ -64,7 +63,12 @@ export function PresenceRuntime() {
   useEffect(() => {
     if (!user?.id || (role !== 'admin' && role !== 'student')) return;
     const release = manager.acquire(user.id, ownPresenceTarget(user.id, role === 'admin'), true);
-    const resume = () => manager.refreshPublishers();
+    const resume = () => {
+      if (document.visibilityState !== 'visible') return;
+      void ensureRealtimeSession(user.id).then(ready => {
+        if (ready) manager.refreshPublishers();
+      });
+    };
     document.addEventListener('visibilitychange', resume);
     window.addEventListener('online', resume);
     return () => {
