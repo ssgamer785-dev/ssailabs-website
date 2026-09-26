@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+02_reset_r2_media.ts
+02_reset_r2_media.local-untracked.ts
+r2-reset-manifest-*.json
+scripts/reset-app-data.mjs
+supabase/.temp/

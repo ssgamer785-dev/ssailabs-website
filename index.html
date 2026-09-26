@@ -2,14 +2,71 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
-    <title>S.S AI LABS - Technology, AI & Digital Growth Agency</title>
+    <!-- maximum-scale/user-scalable keep the shell at 1:1 on mobile. iOS Safari
+         ignores user-scalable for accessibility, which is why the gesture
+         handlers in src/lib/app-zoom.ts exist rather than relying on this. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no"
+    />
+
+    <!-- Restores a saved dark theme before the first paint. Without this the
+         page paints light from index.css, React mounts, and the theme flips a
+         frame later — a white flash on every reload for anyone using dark.
+         Inline and synchronous on purpose: a deferred module would be too late.
+         The key matches THEME_STORAGE_KEY in src/lib/theme.tsx. -->
+    <script>
+      try {
+        if (localStorage.getItem('tp-theme') === 'dark') {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      } catch (e) {}
+    </script>
+
+    <!-- Tab and home-screen branding. Nothing was declared here before, so the
+         browser fell back to requesting /favicon.ico, which the SPA catch-all
+         in server.ts answers with index.html — the tab kept whatever generic
+         icon the host had. These icons are cut from the mark in
+         src/assets/traders-planet-logo.jpg; the wordmark under it is
+         illegible below about 64px, so the tile reuses the mark alone on the
+         logo's own background. Files live in public/, so Vite copies them to
+         the site root unhashed and /favicon.ico resolves for real. -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" content="#0C091E" />
+
+    <!-- Poppins is the app's typeface and is self-hosted: the @font-face in
+         src/index.css points at src/assets/fonts/Poppins-Regular.ttf, so the
+         font ships with the bundle instead of being fetched from a third
+         party that a network can block. -->
+    <title>The Traders Planet</title>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <!-- A dynamic import, not a plain <script src>, so a failure the app
+         itself cannot recover from — e.g. required configuration missing at
+         build time — is catchable here. main.tsx and everything it imports
+         normally mount into #root within this promise and this .catch()
+         never runs; it exists only so a hard failure shows something instead
+         of leaving #root permanently empty with no visible sign anything
+         went wrong. The real error still goes to the console for
+         diagnosis — this message is deliberately generic for the visitor. -->
+    <script type="module">
+      import('/src/main.tsx').catch((err) => {
+        console.error('The app failed to start:', err);
+        const root = document.getElementById('root');
+        if (root) {
+          root.innerHTML =
+            '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;' +
+            'padding:24px;text-align:center;background:#0C091E;color:#fff;' +
+            'font-family:system-ui,-apple-system,sans-serif;font-size:15px;line-height:1.5">' +
+            'Something went wrong loading The Traders Planet. Please try again shortly.' +
+            '</div>';
+        }
+      });
+    </script>
   </body>
 </html>
