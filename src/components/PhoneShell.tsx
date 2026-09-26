@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { css } from '../lib/css';
-import { useMoneySound } from '../lib/useMoneySound';
+import { cancelMoneyRefreshPreparation, prepareMoneyRefreshSound, useMoneySound } from '../lib/useMoneySound';
 
 /** Drag distance, after resistance, that arms the refresh. */
 const THRESHOLD = 64;
@@ -104,7 +104,12 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
     };
     const run = () => { if (!state.raf) state.raf = requestAnimationFrame(tick); };
 
-    const settle = () => { state.target = 0; state.pulling = false; run(); };
+    const settle = () => {
+      state.target = 0;
+      state.pulling = false;
+      cancelMoneyRefreshPreparation();
+      run();
+    };
 
     /** Runs every registered reload, once, and holds the indicator until done. */
     const fire = async () => {
@@ -158,6 +163,7 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
     const onTouchStart = (e: TouchEvent) => {
       if (state.busy || e.touches.length !== 1 || !refreshHandlers.size) return;
       state.tracking = atTop(e.target);
+      if (state.tracking) prepareMoneyRefreshSound();
       state.startX = e.touches[0].clientX;
       state.startY = e.touches[0].clientY;
     };
@@ -171,6 +177,7 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       if (!state.pulling) {
         if (dy <= 0 || Math.abs(dx) > Math.abs(dy) || !atTop(e.target)) {
           state.tracking = false;
+          cancelMoneyRefreshPreparation();
           return;
         }
         if (dy < 8) return;                         // wait for real intent
@@ -184,12 +191,17 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       state.tracking = false;
       release();
     };
+    const onTouchCancel = () => {
+      state.tracking = false;
+      settle();
+    };
 
     // ---- pointer + wheel: desktop parity, unchanged in spirit --------------
     const onPointerDown = (e: PointerEvent) => {
       if (e.pointerType === 'touch') return;        // touch handlers own that
       if (state.busy || e.button || !refreshHandlers.size || !atTop(e.target)) return;
       state.pointerDrag = true;
+      prepareMoneyRefreshSound();
       state.startY = e.clientY;
     };
     const onPointerMove = (e: PointerEvent) => {
@@ -208,6 +220,7 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       // drags the refresh sheet open while app-zoom.ts is cancelling the zoom.
       if (e.ctrlKey || e.metaKey) return;
       if (state.busy || !refreshHandlers.size || !atTop(e.target) || e.deltaY >= 0) return;
+      prepareMoneyRefreshSound();
       pull(state.target + Math.min(20, -e.deltaY * 0.6));
       clearTimeout(state.wheelTimer);
       if (state.target >= THRESHOLD) {
@@ -222,7 +235,7 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
     frame.addEventListener('touchstart', onTouchStart, { passive: true });
     frame.addEventListener('touchmove', onTouchMove, { passive: false });
     frame.addEventListener('touchend', onTouchEnd, { passive: true });
-    frame.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    frame.addEventListener('touchcancel', onTouchCancel, { passive: true });
     frame.addEventListener('wheel', onWheel, { passive: true });
     frame.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('pointermove', onPointerMove);
@@ -231,13 +244,14 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       frame.removeEventListener('touchstart', onTouchStart);
       frame.removeEventListener('touchmove', onTouchMove);
       frame.removeEventListener('touchend', onTouchEnd);
-      frame.removeEventListener('touchcancel', onTouchEnd);
+      frame.removeEventListener('touchcancel', onTouchCancel);
       frame.removeEventListener('wheel', onWheel);
       frame.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       if (state.raf) cancelAnimationFrame(state.raf);
       clearTimeout(state.wheelTimer);
+      cancelMoneyRefreshPreparation();
       // The loop is gone; without this the sheet keeps its last painted height.
       bar.style.height = '0px';
       bar.style.opacity = '0';

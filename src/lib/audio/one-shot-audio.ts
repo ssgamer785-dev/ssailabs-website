@@ -32,12 +32,32 @@ export function createOneShotAudioPlayer(options: {
   let source: OneShotSource | null = null;
   let generation = 0;
   let lastGestureAt = -Infinity;
+  let preparedCloseTimer: ReturnType<typeof setTimeout> | undefined;
+  let resumePromise: Promise<void> | null = null;
+
+  const clearPreparedClose = () => {
+    if (preparedCloseTimer) clearTimeout(preparedCloseTimer);
+    preparedCloseTimer = undefined;
+  };
 
   const release = (target: OneShotContext) => {
     if (context !== target || pending || source) return;
+    clearPreparedClose();
     context = null;
     bufferPromise = null;
+    resumePromise = null;
     void target.close().catch(() => {});
+  };
+
+  const resumeContext = (target: OneShotContext): Promise<void> => {
+    if (target.state === 'running') return Promise.resolve();
+    if (resumePromise) return resumePromise;
+    const attempt = target.resume();
+    resumePromise = attempt;
+    void attempt.finally(() => {
+      if (resumePromise === attempt) resumePromise = null;
+    }).catch(() => {});
+    return attempt;
   };
 
   const stopSource = () => {
@@ -96,11 +116,36 @@ export function createOneShotAudioPlayer(options: {
       if (preloadPromise) return preloadPromise;
       const target = options.createContext();
       if (!target) return;
-      const work = options.loadBuffer(target).then(sound => { cachedBuffer = sound; })
+      // A gesture arriving during preload must await the same decode, not
+      // start a second fetch/decode that can make the sound audibly late.
+      const decode = options.loadBuffer(target).then(sound => {
+        cachedBuffer = sound;
+        return sound;
+      }).catch(error => {
+        if (bufferPromise === decode) bufferPromise = null;
+        throw error;
+      });
+      bufferPromise = decode;
+      const work = decode.then(() => {})
         .finally(() => { void target.close().catch(() => {}); });
       preloadPromise = work;
       try { await work; }
       catch { preloadPromise = null; }
+    },
+
+    /** Unlock on the real touch/pointer start, before the later pull release. */
+    prepareFromGesture() {
+      if (!context || context.state === 'closed') context = options.createContext();
+      const target = context;
+      if (!target) return;
+      if (target.state !== 'running') void resumeContext(target).catch(() => {});
+      if (!cachedBuffer) void getBuffer(target).catch(() => {});
+      clearPreparedClose();
+      preparedCloseTimer = setTimeout(() => release(target), 5_000);
+    },
+
+    cancelPreparation() {
+      if (context) release(context);
     },
 
     /** Invoke in the refresh gesture. Repeated taps restart promptly without queuing. */
@@ -111,16 +156,16 @@ export function createOneShotAudioPlayer(options: {
       lastGestureAt = now;
       if (!context || context.state === 'closed') {
         context = options.createContext();
-        bufferPromise = null;
       }
       const target = context;
       if (!target) return;
+      clearPreparedClose();
       const request = ++generation;
       pending = true;
       stopSource();
       // Resume must be requested in the browser's user-activation task.
       let resumed: Promise<void>;
-      try { resumed = target.state === 'running' ? Promise.resolve() : target.resume(); }
+      try { resumed = resumeContext(target); }
       catch { cancel(target, request); return; }
       if (cachedBuffer) {
         start(target, cachedBuffer, request);

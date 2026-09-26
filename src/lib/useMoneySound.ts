@@ -56,3 +56,12 @@ export function useMoneySound() {
 export function playMoneyRefreshSound(): void {
   if (audioPreferenceEnabled('refreshSound')) moneyPlayer.playFromGesture();
 }
+
+/** Prepare Web Audio during the pointer/touch start that precedes a pull. */
+export function prepareMoneyRefreshSound(): void {
+  if (audioPreferenceEnabled('refreshSound')) moneyPlayer.prepareFromGesture();
+}
+
+export function cancelMoneyRefreshPreparation(): void {
+  moneyPlayer.cancelPreparation();
+}

@@ -112,6 +112,52 @@ describe('one-shot refresh sound lifecycle', () => {
     contexts[1].sources[0].finish();
   });
 
+  it('unlocks on pointer start and reuses that context when the pull is released', async () => {
+    const contexts: FakeContext[] = [];
+    const player = createOneShotAudioPlayer({
+      createContext: () => {
+        const context = new FakeContext(contexts.length ? 'suspended' : 'running');
+        if (contexts.length) context.deferResume = true;
+        contexts.push(context);
+        return context;
+      },
+      loadBuffer: async () => ({ duration: 2 }),
+    });
+    await player.preload();
+    player.prepareFromGesture();
+    expect(contexts[1].resumeCount).toBe(1);
+    contexts[1].resumePending?.();
+    await flush();
+    player.playFromGesture();
+    expect(contexts[1].resumeCount).toBe(1);
+    expect(contexts[1].sources[0].startedAt).toBe(0);
+    contexts[1].sources[0].finish();
+    expect(contexts[1].closeCount).toBe(1);
+  });
+
+  it('shares an unfinished preload with the first refresh instead of decoding twice', async () => {
+    const contexts: FakeContext[] = [];
+    let finishLoad: ((sound: { duration: number }) => void) | undefined;
+    let loads = 0;
+    const player = createOneShotAudioPlayer({
+      createContext: () => { const context = new FakeContext(); contexts.push(context); return context; },
+      loadBuffer: () => {
+        loads += 1;
+        return new Promise(resolve => { finishLoad = resolve; });
+      },
+    });
+    const preload = player.preload();
+    player.prepareFromGesture();
+    player.playFromGesture();
+    expect(loads).toBe(1);
+    finishLoad?.({ duration: 2 });
+    await preload;
+    await flush();
+    expect(contexts[1].sources).toHaveLength(1);
+    contexts[1].sources[0].finish();
+    expect(contexts[1].closeCount).toBe(1);
+  });
+
   it('keeps the original refresh recording byte-for-byte unchanged', async () => {
     const asset = await readFile(new URL('../../assets/money-sound-for-trader.m4a', import.meta.url));
     const hash = createHash('sha256').update(asset).digest('hex').toUpperCase();
