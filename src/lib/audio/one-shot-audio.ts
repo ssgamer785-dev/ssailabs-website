@@ -34,6 +34,7 @@ export function createOneShotAudioPlayer(options: {
   let lastGestureAt = -Infinity;
   let preparedCloseTimer: ReturnType<typeof setTimeout> | undefined;
   let startDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  let playbackWatchdogTimer: ReturnType<typeof setTimeout> | undefined;
   let resumePromise: Promise<void> | null = null;
 
   // An unlock that arrives seconds later is a missed UI effect, not a sound to
@@ -48,11 +49,16 @@ export function createOneShotAudioPlayer(options: {
     if (preparedCloseTimer) clearTimeout(preparedCloseTimer);
     preparedCloseTimer = undefined;
   };
+  const clearPlaybackWatchdog = () => {
+    if (playbackWatchdogTimer) clearTimeout(playbackWatchdogTimer);
+    playbackWatchdogTimer = undefined;
+  };
 
   const release = (target: OneShotContext) => {
     if (context !== target || pending || source) return;
     clearPreparedClose();
     clearStartDeadline();
+    clearPlaybackWatchdog();
     context = null;
     bufferPromise = null;
     resumePromise = null;
@@ -73,6 +79,7 @@ export function createOneShotAudioPlayer(options: {
   };
 
   const stopSource = () => {
+    clearPlaybackWatchdog();
     const previous = source;
     if (!previous) return;
     source = null;
@@ -118,14 +125,34 @@ export function createOneShotAudioPlayer(options: {
       source = null;
       pending = false;
       next.onended = null;
+      clearPlaybackWatchdog();
       next.disconnect();
       release(target);
     };
-    try { next.start(target.currentTime); }
+    try {
+      next.start(target.currentTime);
+      // WebKit can leave a context reporting "running" while its clock and
+      // onended callback stop. Never reuse that silent context indefinitely.
+      playbackWatchdogTimer = setTimeout(
+        () => cancel(target, request),
+        Math.max(0, sound.duration) * 1_000 + 1_000,
+      );
+    }
     catch { cancel(target, request); }
   };
 
   return {
+    /** Discard a browser-interrupted output session; keep the decoded sound. */
+    resetOutput() {
+      const target = context;
+      generation += 1;
+      lastGestureAt = -Infinity;
+      pending = false;
+      clearPreparedClose();
+      clearStartDeadline();
+      stopSource();
+      if (target) release(target);
+    },
     /** Pre-decode before a gesture; never hold a persistent HTML media player. */
     async preload(): Promise<boolean> {
       if (cachedBuffer) return true;

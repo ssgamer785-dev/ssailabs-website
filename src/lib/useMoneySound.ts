@@ -67,3 +67,8 @@ export function prepareMoneyRefreshSound(): void {
 export function cancelMoneyRefreshPreparation(): void {
   moneyPlayer.cancelPreparation();
 }
+
+/** A hidden/page-cached tab must not reuse a silent WebKit output context. */
+export function resetMoneyRefreshAudioSession(): void {
+  moneyPlayer.resetOutput();
+}

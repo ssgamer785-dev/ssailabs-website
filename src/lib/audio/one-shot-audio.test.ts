@@ -70,6 +70,49 @@ describe('one-shot refresh sound lifecycle', () => {
     expect(contexts[1].sources).toHaveLength(1);
   });
 
+  it('drops a playing context when the app backgrounds and reuses only the decoded buffer', async () => {
+    const contexts: FakeContext[] = [];
+    let loads = 0;
+    const player = createOneShotAudioPlayer({
+      createContext: () => { const context = new FakeContext(); contexts.push(context); return context; },
+      loadBuffer: async () => { loads += 1; return { duration: 2 }; },
+    });
+    await player.preload();
+    player.playFromGesture();
+    const interrupted = contexts[1].sources[0];
+    expect(player.state().active).toBe(1);
+
+    player.resetOutput();
+    player.resetOutput(); // visibilitychange and pagehide can both fire
+    expect(interrupted.disconnected).toBe(1);
+    expect(contexts[1].closeCount).toBe(1);
+    expect(player.state()).toEqual({ queued: 0, active: 0, hasContext: false });
+
+    await new Promise(resolve => setTimeout(resolve, 110));
+    player.playFromGesture();
+    expect(contexts[2].sources).toHaveLength(1);
+    expect(loads).toBe(1);
+    contexts[2].sources[0].finish();
+  });
+
+  it('releases a WebKit context that reports running but never fires onended', async () => {
+    const contexts: FakeContext[] = [];
+    const player = createOneShotAudioPlayer({
+      createContext: () => { const context = new FakeContext(); contexts.push(context); return context; },
+      loadBuffer: async () => ({ duration: 0.01 }),
+    });
+    await player.preload();
+    player.playFromGesture();
+    expect(contexts[1].sources).toHaveLength(1);
+    // Simulates a suspended output clock: the fake source never calls onended.
+    await new Promise(resolve => setTimeout(resolve, 1_060));
+    expect(contexts[1].closeCount).toBe(1);
+    expect(player.state()).toEqual({ queued: 0, active: 0, hasContext: false });
+    player.playFromGesture();
+    expect(contexts[2].sources).toHaveLength(1);
+    contexts[2].sources[0].finish();
+  });
+
   it('does not leave a suspended autoplay context or stale queued sound', () => {
     const context = new FakeContext('suspended');
     const player = createOneShotAudioPlayer({

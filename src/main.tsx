@@ -4,7 +4,7 @@ import App from './App';
 import { lockAppZoom } from './lib/app-zoom';
 import './index.css';
 import { installNotificationAudioUnlock } from './lib/useNotificationSound';
-import { preloadMoneyRefreshSound } from './lib/useMoneySound';
+import { preloadMoneyRefreshSound, resetMoneyRefreshAudioSession } from './lib/useMoneySound';
 
 // Installed here rather than in a component effect: it is app-wide and
 // lifetime-long, and StrictMode double-invokes effects, which would register
@@ -14,7 +14,10 @@ installNotificationAudioUnlock();
 preloadMoneyRefreshSound();
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') preloadMoneyRefreshSound();
+  else resetMoneyRefreshAudioSession();
 });
+window.addEventListener('pagehide', resetMoneyRefreshAudioSession);
+window.addEventListener('pageshow', preloadMoneyRefreshSound);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
