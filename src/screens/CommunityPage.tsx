@@ -4,7 +4,7 @@ import { CommunityScreen } from '../components/CommunityScreen';
 import { PhoneShell } from '../components/PhoneShell';
 
 export function CommunityPage() {
-  const { reveal, toggleReveal, userName } = useAppState();
+  const { reveal, userName } = useAppState();
   const [params] = useSearchParams();
   // The Students feed already exists behind the tab control; reading it off the
   // URL lets a link that says "Students Community" actually land on it. No
@@ -13,7 +13,7 @@ export function CommunityPage() {
 
   return (
     <PhoneShell>
-      <CommunityScreen initialTab={initialTab} reveal={reveal} onToggleReveal={toggleReveal} userName={userName} />
+      <CommunityScreen initialTab={initialTab} reveal={reveal} userName={userName} />
     </PhoneShell>
   );
 }

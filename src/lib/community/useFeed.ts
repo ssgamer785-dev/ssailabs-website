@@ -110,6 +110,8 @@ export interface UseFeed {
   loadMore: () => Promise<void>;
   toggleLike: (postId: string) => Promise<void>;
   deletePost: (post: FeedPost) => Promise<void>;
+  /** Switches one of your own posts between named and anonymous. */
+  setPostAnonymity: (postId: string, anonymous: boolean) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -270,6 +272,20 @@ export function useFeed(channel: PostChannel): UseFeed {
     }
   }, [posts, user]);
 
+  /** Switches one of your own Students posts between named and anonymous. */
+  const setPostAnonymity = useCallback(async (postId: string, anonymous: boolean) => {
+    const target = posts.find(p => p.id === postId);
+    if (!target || !target.isMine) return;
+    setPosts(prev => prev.map(p => p.id !== postId ? p : { ...p, isAnonymous: anonymous }));
+    const { error: upError } = await supabase.from('posts').update({ is_anonymous: anonymous }).eq('id', postId);
+    if (upError) {
+      setPosts(prev => prev.map(p => p.id !== postId ? p : { ...p, isAnonymous: target.isAnonymous }));
+      setError('Could not change how this post is signed. Please try again.');
+      return;
+    }
+    void refresh();
+  }, [posts, refresh]);
+
   const deletePost = useCallback(async (post: FeedPost) => {
     const previous = posts;
     setPosts(prev => prev.filter(p => p.id !== post.id));
@@ -292,5 +308,5 @@ export function useFeed(channel: PostChannel): UseFeed {
     }
   }, [posts]);
 
-  return { posts, loading, loadingMore, error, hasMore, loadMore, toggleLike, deletePost, refresh };
+  return { posts, loading, loadingMore, error, hasMore, loadMore, toggleLike, deletePost, setPostAnonymity, refresh };
 }

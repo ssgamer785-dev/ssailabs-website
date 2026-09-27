@@ -47,11 +47,11 @@ function SharedTag() {
   );
 }
 
-function SwitchEl({ on, onClick }: { on: boolean; onClick: () => void }) {
+function SwitchEl({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
   return (
-    <div onClick={onClick} style={{ width: 42, height: 25, borderRadius: 999, flex: 'none', cursor: 'pointer', padding: 3, display: 'flex', alignItems: 'center', justifyContent: on ? 'flex-end' : 'flex-start', background: on ? 'var(--accent)' : 'var(--switch-track)', transition: 'background .18s ease' }}>
+    <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={e => { e.stopPropagation(); onClick(); }} style={{ width: 42, height: 25, borderRadius: 999, flex: 'none', cursor: 'pointer', padding: 3, display: 'flex', alignItems: 'center', justifyContent: on ? 'flex-end' : 'flex-start', background: on ? 'var(--accent)' : 'var(--switch-track)', transition: 'background .18s ease' }}>
       <div style={{ width: 19, height: 19, borderRadius: '50%', background: 'var(--surface)', boxShadow: '0 1px 3px rgba(var(--shadow-rgb),.28)' }} />
-    </div>
+    </button>
   );
 }
 
@@ -239,19 +239,18 @@ function ChannelSwitch({ value, onChange }: {
   );
 }
 
-export function CommunityScreen({ initialTab = 'official', adminView = false, asOthers = false, reveal: revealProp, userName, onToggleReveal }: {
+export function CommunityScreen({ initialTab = 'official', adminView = false, asOthers = false, reveal = false, userName }: {
   initialTab?: 'official' | 'students';
   adminView?: boolean;
   asOthers?: boolean;
+  /** The member's saved default for new replies ("post with my real name"). */
   reveal?: boolean;
   /** The signed-in user's real name; supplied by the caller from the profile. */
   userName: string;
-  onToggleReveal?: () => void;
 }) {
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
   const [tab, setTab] = useState(initialTab);
-  const [myReveal, setMyReveal] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const feed = useFeed(tab);
@@ -261,12 +260,6 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
   // session also gets the admin treatment.
   const admin = adminView || (isAdmin && !asOthers);
   const others = asOthers;
-  const reveal = revealProp !== undefined ? revealProp : myReveal;
-
-  function handleToggleReveal() {
-    if (onToggleReveal) onToggleReveal();
-    else setMyReveal(v => !v);
-  }
 
   const isOfficial = tab === 'official';
   const isStudents = tab === 'students';
@@ -349,7 +342,7 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
                 others={others}
                 reveal={reveal}
                 userName={userName}
-                onToggleReveal={handleToggleReveal}
+                onToggleAnonymity={() => feed.setPostAnonymity(post.id, !post.isAnonymous)}
                 onOpen={() => navigate(`/post?post=${post.id}`)}
                 onToggleLike={() => feed.toggleLike(post.id)}
                 onDelete={() => feed.deletePost(post)}
@@ -402,14 +395,16 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
  * heart to like, long-press (or right-click) your own post to delete, the
  * name-visibility switch on your own student post, and the inline reply.
  */
-function PostCard({ post, official, admin, others, reveal, userName, onToggleReveal, onOpen, onToggleLike, onDelete }: {
+function PostCard({ post, official, admin, others, reveal, userName, onToggleAnonymity, onOpen, onToggleLike, onDelete }: {
   post: FeedPost;
   official: boolean;
   admin: boolean;
   others: boolean;
+  /** Default for a new inline reply. */
   reveal: boolean;
   userName: string;
-  onToggleReveal: () => void;
+  /** Switches this (own) post between named and anonymous. */
+  onToggleAnonymity: () => void;
   onOpen: () => void;
   onToggleLike: () => void;
   onDelete: () => Promise<void>;
@@ -431,9 +426,10 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
   // rather than logic duplicated per screen, which is exactly how this used
   // to show "Unknown User" on your own revealed post: this screen and Post
   // Detail each re-implemented the rule and each got the same detail wrong.
-  const showRealName = official || admin || (post.isMine && reveal) || !post.isAnonymous;
+  // Your own post is shown exactly as others see it: its own flag decides.
+  const showRealName = official || admin || !post.isAnonymous;
   const shownName = resolveAuthorName({
-    official, isAdminViewer: admin, isMine: post.isMine, reveal,
+    official, isAdminViewer: admin, isMine: post.isMine,
     isAnonymous: post.isAnonymous, authorName: post.authorName, myName: userName,
   });
   const body = displayPostBody(post.title, post.body);
@@ -441,9 +437,7 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
   const role = official
     ? 'Admin'
     : post.isMine
-      ? (admin
-          ? (reveal ? 'You · name shared' : 'You · appears as Unknown User')
-          : others ? 'Student' : (reveal ? 'You · name visible' : 'You · posting anonymously'))
+      ? (others ? 'Student' : (post.isAnonymous ? 'You · appears as Unknown User' : 'You · name shared'))
       : (admin && post.isAnonymous ? 'Student · appears as Unknown User' : 'Student');
 
   const hasAttachment = post.attachment !== 'none';
@@ -472,7 +466,7 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
             <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
               {shownName}
             </div>
-            {official ? VERIFIED : post.isMine && reveal ? <SharedTag /> : post.isAnonymous ? <LockMark /> : null}
+            {official ? VERIFIED : post.isMine && !post.isAnonymous ? <SharedTag /> : post.isAnonymous ? <LockMark /> : null}
           </div>
           <div style={css('font-size:11px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>{role}</div>
         </div>
@@ -522,10 +516,10 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleRev
           <div style={css('flex:1;min-width:0;display:flex;flex-direction:column;gap:2px')}>
             <div style={css('font-size:12px;font-weight:700;letter-spacing:-.15px;white-space:nowrap')}>Show my real name on this post</div>
             <div style={css('font-size:11px;color:var(--text-muted);line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
-              {reveal ? `Others now see ${userName}` : 'Others see you as Unknown User'}
+              {post.isAnonymous ? 'Others see you as Unknown User' : `Others see ${userName}`}
             </div>
           </div>
-          <SwitchEl on={reveal} onClick={onToggleReveal} />
+          <SwitchEl on={!post.isAnonymous} onClick={onToggleAnonymity} label="Show my real name on this post" />
         </div>
       )}
 

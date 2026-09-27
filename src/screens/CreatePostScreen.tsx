@@ -70,7 +70,11 @@ export function CreatePostScreen() {
   const submitRef = useRef(false);
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const { reveal, toggleReveal, userName } = useAppState();
+  const { reveal: revealDefault, userName } = useAppState();
+  // This post's own choice, starting from the member's saved default. Flipping
+  // it here does not change the default (that lives on Name Visibility).
+  const [reveal, setReveal] = useState(revealDefault);
+  const toggleReveal = () => setReveal(v => !v);
   const { user, isAdmin } = useAuth();
   const recorder = useVoiceRecorder();
 

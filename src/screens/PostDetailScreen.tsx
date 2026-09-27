@@ -156,7 +156,7 @@ export function PostDetailScreen() {
   // One shared decision (resolveAuthorName) rather than logic re-implemented
   // per screen — see its own doc comment for why that duplication was the bug.
   const authorDisplayName = resolveAuthorName({
-    official, isAdminViewer: isAdmin, isMine: post.isMine, reveal,
+    official, isAdminViewer: isAdmin, isMine: post.isMine,
     isAnonymous: post.isAnonymous, authorName: post.authorName, myName: userName,
   });
 

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
@@ -21,7 +22,15 @@ function LinkRow({ label, sub, onClick }: { label: string; sub: string; onClick:
 
 export function NameVisibilityScreen() {
   const navigate = useNavigate();
-  const { userName, reveal, toggleReveal } = useAppState();
+  const { userName, reveal, setRevealPreference } = useAppState();
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const toggleReveal = async () => {
+    if (saving) return;
+    setSaving(true); setSaveError(null);
+    setSaveError(await setRevealPreference(!reveal));
+    setSaving(false);
+  };
   const { isAdmin } = useAuth();
 
   return (
@@ -36,9 +45,12 @@ export function NameVisibilityScreen() {
           <div style={css('font-size:13.5px;font-weight:700;letter-spacing:-.2px;white-space:nowrap')}>Post with my real name</div>
           <div style={css('font-size:11.5px;color:var(--text-muted);line-height:1.4')}>Members will see <strong style={css('color:var(--text-secondary);font-weight:700')}>{reveal ? userName : 'Unknown User'}</strong> · admins always see your real name</div>
         </div>
-        <div onClick={toggleReveal} style={{ width: 44, height: 26, borderRadius: 999, flex: 'none', cursor: 'pointer', padding: 3, display: 'flex', alignItems: 'center', justifyContent: reveal ? 'flex-end' : 'flex-start', background: reveal ? 'var(--accent)' : 'var(--switch-track)', transition: 'background .18s ease' }}>
+        <button type="button" role="switch" aria-checked={reveal} aria-label="Post with my real name" disabled={saving} onClick={() => { void toggleReveal(); }} style={{ width: 44, height: 26, borderRadius: 999, flex: 'none', cursor: 'pointer', padding: 3, display: 'flex', alignItems: 'center', justifyContent: reveal ? 'flex-end' : 'flex-start', background: reveal ? 'var(--accent)' : 'var(--switch-track)', transition: 'background .18s ease', opacity: saving ? 0.7 : 1 }}>
           <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--surface)', boxShadow: '0 1px 3px rgba(var(--shadow-rgb),.28)' }} />
-        </div>
+        </button>
+      </div>
+      <div role="status" style={css('flex:none;margin:6px 22px 0;font-size:11.5px;line-height:1.4;color:' + (saveError ? 'var(--danger-ink)' : 'var(--text-faint)'))}>
+        {saveError ?? 'Applies to new posts and comments. Each existing post keeps its own setting, which you can change on the post.'}
       </div>
 
       {/* These used to be two "view as someone else" previews of the Students

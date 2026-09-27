@@ -3,8 +3,8 @@
  * Community feed and Post Detail) each made separately, and disagreed on.
  *
  * The rule, everywhere: an admin viewer always sees the real name; the author
- * always sees their own current name on their own post when their reveal
- * toggle is on; everyone else sees the row's own display_name, which the
+ * sees exactly what others see on their own post (their current name if it is
+ * named, "Unknown User" if it is anonymous); everyone else sees the row's own display_name, which the
  * database has already resolved (the real name if the post was posted
  * revealed, "Unknown User" if it was posted anonymously).
  *
@@ -24,9 +24,7 @@ export function resolveAuthorName(args: {
   isAdminViewer: boolean;
   /** Whether the person looking at this wrote the post. */
   isMine: boolean;
-  /** The viewer's OWN current name-visibility toggle, from useAppState(). */
-  reveal: boolean;
-  /** The post's own persisted anonymity flag. */
+  /** The post's own persisted anonymity flag — what every other member sees. */
   isAnonymous: boolean;
   /** The database's display_name / author_name for this post (posts_feed / post_by_id). */
   authorName: string;
@@ -35,14 +33,11 @@ export function resolveAuthorName(args: {
 }): string {
   if (args.official) return 'The Traders Planet';
 
-  // Your own post, shown revealed right now: your current name, never the
-  // frozen row snapshot. Admins are excluded because they already receive the
-  // live real name in `authorName` regardless of anonymity (posts_feed /
-  // post_by_id resolve it server-side for them), so there is nothing to
-  // override — using `myName` there would just be a longer way to the exact
-  // same value, and would stop matching `authorName` if the two ever drifted.
-  if (!args.isAdminViewer && args.isMine && args.reveal) return args.myName;
+  // Your own post shows what the post really is. It used to follow your
+  // current "post with my real name" preference instead, so an author could
+  // be told "posting anonymously" while every other member saw their name
+  // (and the reverse). A named post shows your current name.
+  if (!args.isAdminViewer && args.isMine) return args.isAnonymous ? 'Unknown User' : args.myName;
 
-  const showRealName = args.isAdminViewer || (args.isMine && args.reveal) || !args.isAnonymous;
-  return showRealName ? args.authorName : 'Unknown User';
+  return args.isAdminViewer || !args.isAnonymous ? args.authorName : 'Unknown User';
 }
