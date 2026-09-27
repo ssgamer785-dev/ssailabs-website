@@ -43,5 +43,28 @@ do $$ begin
   end if;
 end $$;
 
+-- Supabase's Realtime schema, reduced to what the presence policies use
+-- (20260925100000). Without it that migration cannot apply.
+create schema if not exists realtime;
+create table if not exists realtime.messages (
+  id bigserial primary key,
+  topic text not null,
+  extension text not null,
+  payload jsonb,
+  event text,
+  private boolean default true,
+  inserted_at timestamptz not null default now()
+);
+create or replace function realtime.topic()
+returns text
+language sql
+stable
+as $$
+  select nullif(current_setting('realtime.topic', true), '');
+$$;
+alter table realtime.messages enable row level security;
+grant usage on schema realtime to anon, authenticated, service_role;
+grant select, insert on realtime.messages to authenticated;
+
 grant usage on schema public to anon, authenticated, service_role;
 grant usage on schema auth to anon, authenticated, service_role;

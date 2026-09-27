@@ -19,11 +19,17 @@ cleanup() { "${PSQL[@]}" -q -c "drop database if exists $DB;" >/dev/null 2>&1 ||
 trap cleanup EXIT
 
 "${PSQL[@]}" -q -c "create database $DB;"
-"${PSQL[@]}" -d "$DB" -q -f "$HERE/00-supabase-shim.sql" 2>/dev/null
+# Errors must stay visible: this harness once hid every migration failure
+# behind 2>/dev/null and silently stopped at the first migration the shim could
+# not satisfy. Only the local server's logical-replication warning (Supabase
+# runs with wal_level=logical; a test server usually does not) is filtered.
+quiet() { grep -vE 'wal_level is insufficient|^HINT:  Set wal_level' || true; }
+
+"${PSQL[@]}" -d "$DB" -q -f "$HERE/00-supabase-shim.sql" 2> >(quiet >&2)
 
 for migration in "$HERE"/../migrations/*.sql; do
   echo "applying $(basename "$migration")"
-  "${PSQL[@]}" -d "$DB" -q -f "$migration" 2>/dev/null
+  "${PSQL[@]}" -d "$DB" -q -f "$migration" 2> >(quiet >&2)
 done
 
 # Only what lives outside the migration chain. The table and function grants

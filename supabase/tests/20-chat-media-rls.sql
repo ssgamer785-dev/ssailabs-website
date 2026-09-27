@@ -44,9 +44,10 @@ exception when others then
   if position('cannot be reopened' in sqlerrm) > 0 then raise notice 'PASS  (%)', sqlerrm; else raise; end if;
 end $$;
 
-\echo '--- 18. soft delete drops the poster reference too'
+\echo '--- 18. soft delete clears the text but keeps the media keys for the clean-up route'
+-- 20260924174109: keys stay until R2 deletion succeeds; signers refuse deleted rows.
 update public.messages set deleted_at = now() where id = 'bbbbbbbb-0000-0000-0000-0000000000f1';
-select case when poster_key is null and body is null then 'PASS' else 'FAIL' end as t18
+select case when poster_key is not null and storage_key is not null and body is null then 'PASS' else 'FAIL' end as t18
 from public.messages where id = 'bbbbbbbb-0000-0000-0000-0000000000f1';
 commit;
 
