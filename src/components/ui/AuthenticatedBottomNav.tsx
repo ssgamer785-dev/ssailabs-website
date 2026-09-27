@@ -98,7 +98,9 @@ export function AuthenticatedBottomNav() {
           <button
             key={tab}
             type="button"
-            onClick={() => navigate(route)}
+            // Re-tapping the tab you are on replaces the entry instead of
+            // stacking duplicates that Back then has to walk through.
+            onClick={() => navigate(route, { replace: on })}
             aria-current={on ? 'page' : undefined}
             className="pressable"
             style={css(

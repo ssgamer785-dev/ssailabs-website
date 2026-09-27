@@ -9,12 +9,8 @@ import { useAuth } from '../../lib/auth-context';
  * already reachable before this menu did. The menu is a second door onto the
  * app's own map, not a place to put new ones.
  *
- * Admin Inbox is deliberately absent: it is an admin screen (it says so on the
- * page) but its route is not role-gated, so listing it for everyone would put
- * it in front of students for the first time. It stays where it already is.
- *
- * ADMIN_ITEMS below is the opposite case and is why it can be listed at all:
- * both of those routes sit behind RequireAdmin, and every function they call
+ * ADMIN_ITEMS below are listed only for the admin, and can be: every one of
+ * those routes (the Member Inbox included) sits behind RequireAdmin, and every function they call
  * re-checks is_admin() inside Postgres. Hiding them here is a courtesy to
  * students, not the thing that keeps them out.
  */
