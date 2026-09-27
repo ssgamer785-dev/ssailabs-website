@@ -8,13 +8,13 @@ import { AuthDivider, GoogleSignInButton } from '../components/ui/GoogleSignInBu
 
 function EyeToggle({ show, onClick }: { show: boolean; onClick: () => void }) {
   return (
-    <div onClick={onClick} style={css('cursor:pointer;flex:none;display:flex')}>
+    <button type="button" aria-label={show ? 'Hide password' : 'Show password'} aria-pressed={show} onClick={onClick} style={css('cursor:pointer;flex:none;display:flex;padding:6px;margin:-6px')}>
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={show ? '#0B5FEF' : '#94A3B8'} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" style={css('display:block')}>
         <path d="M2.4 12S6 5.9 12 5.9 21.6 12 21.6 12 18 18.1 12 18.1 2.4 12 2.4 12z" />
         <circle cx={12} cy={12} r={2.9} />
         {!show && <path d="M4.5 19.5 19.5 4.5" />}
       </svg>
-    </div>
+    </button>
   );
 }
 
@@ -75,7 +75,7 @@ export function SignupScreen() {
   return (
     <div className="theme-light" style={{ display: 'contents' }}>
       <PhoneShell>
-      <div style={css('flex:1;display:flex;flex-direction:column;padding:0 24px;overflow-y:auto')}>
+      <form noValidate onSubmit={e => { e.preventDefault(); void handleSubmit(); }} style={css('flex:1;display:flex;flex-direction:column;padding:0 24px;overflow-y:auto')}>
         <div style={css('height:52px;flex:none')} />
         <div style={css('font-size:28px;font-weight:800;letter-spacing:-.8px')}>Create Account</div>
         <div style={css('margin-top:9px;font-size:14px;color:#8794A8')}>Start your trading journey</div>
@@ -83,23 +83,23 @@ export function SignupScreen() {
 
         <div style={fieldLabel}>Full Name</div>
         <div style={fieldBox}>
-          <input placeholder="Enter your name" value={fullName} onChange={e => setFullName(e.target.value)} style={fieldInput} />
+          <input name="name" autoComplete="name" aria-label="Full name" placeholder="Enter your name" value={fullName} onChange={e => setFullName(e.target.value)} style={fieldInput} />
         </div>
 
         <div style={{ ...fieldLabel, marginTop: 17 }}>Email</div>
         <div style={fieldBox}>
-          <input placeholder="Enter your email" value={email} onChange={e => setEmail(e.target.value)} style={fieldInput} />
+          <input type="email" name="email" autoComplete="email" inputMode="email" autoCapitalize="none" spellCheck={false} aria-label="Email" placeholder="Enter your email" value={email} onChange={e => setEmail(e.target.value)} style={fieldInput} />
         </div>
 
         <div style={{ ...fieldLabel, marginTop: 17 }}>Password</div>
         <div style={fieldBoxWithTrailing}>
-          <input type={pwShow ? 'text' : 'password'} placeholder="Create a password" value={pw} onChange={e => setPw(e.target.value)} style={fieldInput} />
+          <input type={pwShow ? 'text' : 'password'} name="new-password" autoComplete="new-password" aria-label="Password" placeholder="Create a password" value={pw} onChange={e => setPw(e.target.value)} style={fieldInput} />
           <EyeToggle show={pwShow} onClick={() => setPwShow(v => !v)} />
         </div>
 
         <div style={{ ...fieldLabel, marginTop: 17 }}>Confirm Password</div>
         <div style={fieldBoxWithTrailing}>
-          <input type={pw2Show ? 'text' : 'password'} placeholder="Re-enter your password" value={pw2} onChange={e => setPw2(e.target.value)} style={fieldInput} />
+          <input type={pw2Show ? 'text' : 'password'} name="confirm-password" autoComplete="new-password" enterKeyHint="go" aria-label="Confirm password" placeholder="Re-enter your password" value={pw2} onChange={e => setPw2(e.target.value)} style={fieldInput} />
           <EyeToggle show={pw2Show} onClick={() => setPw2Show(v => !v)} />
         </div>
 
@@ -107,8 +107,10 @@ export function SignupScreen() {
         {info && <div style={css('margin-top:14px;font-size:12.5px;color:#16A34A;line-height:1.4')}>{info}</div>}
 
         <Hoverable
-          onClick={handleSubmit}
+          as="button"
+          type="submit"
           style={{
+            fontFamily: 'inherit',
             ...css('margin-top:22px;height:52px;border-radius:12px;background:#0B5FEF;box-shadow:0 10px 22px rgba(11,95,239,.30);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#FFFFFF;cursor:pointer;letter-spacing:-.2px'),
             opacity: submitting ? 0.65 : 1,
             pointerEvents: submitting ? 'none' : 'auto',
@@ -128,7 +130,7 @@ export function SignupScreen() {
           <div style={css('color:#64748B;white-space:nowrap')}>Already have an account?</div>
           <div onClick={() => navigate('/login')} style={css('color:#0B5FEF;font-weight:700;cursor:pointer;white-space:nowrap')}>Login</div>
         </div>
-      </div>
+      </form>
     </PhoneShell>
     </div>
   );
