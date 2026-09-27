@@ -331,12 +331,20 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
             </div>
           )}
 
-          {feed.error && (
-            <div role="alert" style={css('background:var(--surface);padding:14px 18px;font-size:12px;color:var(--danger-ink);line-height:1.4')}>{feed.error}</div>
+          {feed.error && feed.posts.length > 0 && (
+            <div role="alert" style={css('background:var(--surface);padding:12px 18px;font-size:12px;color:var(--danger-ink);line-height:1.4;display:flex;align-items:center;gap:10px')}>
+              <span style={css('flex:1')}>{feed.error}</span>
+              <button type="button" onClick={() => void feed.refresh()} style={css('flex:none;min-height:36px;padding:0 12px;border-radius:10px;font-size:12px;font-weight:700;color:var(--accent);cursor:pointer')}>Retry</button>
+            </div>
           )}
 
           {feed.loading ? (
             <div style={css('flex:1;display:flex;align-items:center;justify-content:center;font-size:12.5px;color:var(--text-faint)')}>Loading posts…</div>
+          ) : feed.error && feed.posts.length === 0 ? (
+            <div role="alert" style={css('flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:0 34px')}>
+              <div style={css('font-size:13px;color:var(--text-muted);line-height:1.5')}>{feed.error}</div>
+              <button type="button" onClick={() => void feed.refresh()} style={css('min-height:44px;padding:0 20px;border-radius:12px;background:var(--accent);color:var(--on-accent);font-size:13px;font-weight:700;cursor:pointer')}>Retry</button>
+            </div>
           ) : feed.posts.length === 0 ? (
             <div style={css('flex:1;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12.5px;color:var(--text-faint);line-height:1.5;padding:0 34px;text-wrap:pretty')}>
               {CHANNELS[tab].empty}

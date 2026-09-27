@@ -18,6 +18,7 @@ import {
   resumeUpload,
   uploadToR2,
 } from './media-api';
+import { friendlyError } from '../errors';
 
 const PAGE_SIZE = 30;
 const TYPING_TIMEOUT_MS = 3500;
@@ -150,7 +151,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     Promise.resolve(supabase.rpc('get_or_create_my_conversation')).then(({ data, error: rpcError }) => {
       if (!active) return;
       if (rpcError || !data) {
-        setError(rpcError?.message ?? 'Could not open this conversation.');
+        setError(friendlyError(rpcError, 'Could not open this conversation.'));
         setLoading(false);
       } else setConversationId(data as unknown as string);
     }).catch(() => {
@@ -179,7 +180,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
       .limit(PAGE_SIZE);
 
     if (qErr) {
-      setError(qErr.message);
+      setError(friendlyError(qErr, 'Could not load messages.'));
       return;
     }
     const rows = ((data ?? []) as MessageRow[]).map(toMessage);
@@ -218,7 +219,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     setLoadingOlder(false);
 
     if (qErr) {
-      setError(qErr.message);
+      setError(friendlyError(qErr, 'Could not load messages.'));
       return;
     }
     const rows = ((data ?? []) as MessageRow[]).map(toMessage);
@@ -357,7 +358,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     } catch (e) {
       patch(draft.clientId, {
         status: 'failed',
-        error: e instanceof Error ? e.message : 'Could not send. Tap to retry.',
+        error: friendlyError(e, 'Could not send. Tap to retry.'),
       });
     }
   }, [insertRow, patch]);
@@ -443,7 +444,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     } catch (e) {
       patch(draft.clientId, {
         status: 'failed',
-        error: e instanceof Error ? e.message : 'Could not send. Tap to retry.',
+        error: friendlyError(e, 'Could not send. Tap to retry.'),
       });
     }
   }, [insertRow, patch]);
@@ -552,7 +553,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
       if (!message.storageKey || message.mediaPurged) return;
       try { await deleteRemoteMedia(message.id); patch(message.clientId, { mediaPurged: true, storageKey: null }); }
       catch (e) {
-        setError(e instanceof Error ? e.message : 'Could not remove the attachment.');
+        setError(friendlyError(e, 'Could not remove the attachment.'));
         throw e;
       }
       return;
@@ -569,7 +570,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     if (message.uploadStatus === 'pending') {
       try { await deleteRemoteMedia(message.id); }
       catch (e) {
-        setError(e instanceof Error ? e.message : 'Could not remove the upload.');
+        setError(friendlyError(e, 'Could not remove the upload.'));
         throw e;
       }
       setMessages(prev => prev.filter(m => m.clientId !== message.clientId));
@@ -587,7 +588,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
 
     if (delErr) {
       setMessages(previous);
-      setError(delErr.message);
+      setError(friendlyError(delErr, 'Could not delete the message.'));
       throw delErr;
     }
     if (message.storageKey) {

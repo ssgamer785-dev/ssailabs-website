@@ -186,10 +186,15 @@ export function NotificationsScreen() {
       <div className="nav-space" style={css('flex:1;min-height:0;padding:16px 0 0;display:flex;flex-direction:column;overflow-y:auto')}>
         <PushStatusCard />
         {error && (
-          <div style={css('padding:10px 20px;font-size:12px;color:var(--danger-ink);line-height:1.4')}>{error}</div>
+          <div role="alert" style={css('padding:10px 20px;font-size:12px;color:var(--danger-ink);line-height:1.4;display:flex;align-items:center;gap:10px')}>
+            <span style={css('flex:1')}>{error}</span>
+            <button type="button" onClick={() => void refresh()} style={css('flex:none;min-height:36px;padding:0 12px;border-radius:10px;font-size:12px;font-weight:700;color:var(--accent);cursor:pointer')}>Retry</button>
+          </div>
         )}
         {loading ? (
           <div style={css('flex:1;display:flex;align-items:center;justify-content:center;font-size:12.5px;color:var(--text-faint)')}>Loading notifications…</div>
+        ) : notifications.length === 0 && error ? (
+          <div style={css('flex:1')} />
         ) : notifications.length === 0 ? (
           <div style={css('flex:1;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12.5px;color:var(--text-faint);line-height:1.5;padding:0 34px')}>
             You're all caught up. New signals, replies and likes will show up here.

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabase';
 import { useAuth } from '../auth-context';
 import type { NotificationKind } from '../database.types';
+import { friendlyError, withTimeout } from '../errors';
 
 const PAGE_SIZE = 30;
 export const NOTIFICATIONS_CHANGED_EVENT = 'tp:notifications-changed';
@@ -88,15 +89,23 @@ export function useNotifications(): UseNotifications {
 
   const refresh = useCallback(async () => {
     if (!userId) return;
-    const { data, error: qError } = await supabase
-      .from('notifications')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(PAGE_SIZE);
+    let data: unknown[] | null = null;
+    let qError: unknown = null;
+    try {
+      // A request that never settles (a dead connection) used to leave the
+      // screen on "Loading notifications…" for good.
+      ({ data, error: qError } = await withTimeout(supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(PAGE_SIZE), 12_000));
+    } catch (e) {
+      qError = e;
+    }
 
     if (activeUser.current !== userId) return;
-    if (qError) { setError(qError.message); return; }
+    if (qError) { console.error('[notifications] load failed:', qError); setError(friendlyError(qError, 'Could not load notifications.')); return; }
     setNotifications(((data ?? []) as NotificationRow[]).map(toNotification));
     setError(null);
   }, [userId]);

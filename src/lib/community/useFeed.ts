@@ -5,6 +5,7 @@ import type { AttachmentKind, PostChannel, UserRole } from '../database.types';
 import { deletePostMedia } from './media-api';
 import { subscribeCommunityActivity } from './activity';
 import { likeCountDelta } from './like-events';
+import { friendlyError } from '../errors';
 
 const PAGE_SIZE = 15;
 
@@ -98,7 +99,7 @@ export async function fetchFeedPage(
     p_before: before,
     p_limit: limit,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw error;
   return ((data ?? []) as FeedRow[]).map(toPost);
 }
 
@@ -144,7 +145,8 @@ export function useFeed(channel: PostChannel): UseFeed {
       setPosts(rows);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load the feed.');
+      console.error('[community] feed load failed:', e);
+      setError(friendlyError(e, 'Could not load the feed.'));
     }
   }, [fetchPage]);
 
@@ -170,7 +172,8 @@ export function useFeed(channel: PostChannel): UseFeed {
         });
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load more posts.');
+      console.error('[community] feed page failed:', e);
+      setError(friendlyError(e, 'Could not load more posts.'));
     } finally {
       setLoadingMore(false);
     }
@@ -268,7 +271,7 @@ export function useFeed(channel: PostChannel): UseFeed {
         likedByMe: liked,
         likeCount: Math.max(0, p.likeCount + (liked ? 1 : -1)),
       }));
-      setError(mutError.message);
+      setError(friendlyError(mutError, 'Could not update your like.'));
     }
   }, [posts, user]);
 
@@ -295,7 +298,7 @@ export function useFeed(channel: PostChannel): UseFeed {
       try { await deletePostMedia(post.id); }
       catch (e) {
         setPosts(previous);
-        setError(e instanceof Error ? e.message : 'Could not remove the attachment.');
+        setError(friendlyError(e, 'Could not remove the attachment.'));
         throw e;
       }
     }
@@ -303,7 +306,7 @@ export function useFeed(channel: PostChannel): UseFeed {
     const { error: delError } = await supabase.from('posts').delete().eq('id', post.id);
     if (delError) {
       setPosts(previous);
-      setError(delError.message);
+      setError(friendlyError(delError, 'Could not delete the post.'));
       throw delError;
     }
   }, [posts]);

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabase';
 import { subscribeCommunityActivity } from './activity';
 import { useAuth } from '../auth-context';
+import { friendlyError } from '../errors';
 
 const PAGE_SIZE = 20;
 
@@ -80,7 +81,7 @@ export function useComments(postId: string | null): UseComments {
       setComments(prev => [...rows, ...prev.filter(c => c.pending || c.failed)]);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load comments.');
+      setError(friendlyError(e, 'Could not load comments.'));
     }
   }, [fetchPage]);
 
@@ -122,7 +123,7 @@ export function useComments(postId: string | null): UseComments {
         });
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load more comments.');
+      setError(friendlyError(e, 'Could not load more comments.'));
     } finally {
       setLoadingMore(false);
     }
@@ -156,7 +157,7 @@ export function useComments(postId: string | null): UseComments {
 
     if (insError) {
       setComments(prev => prev.map(c => c.id === clientId ? { ...c, pending: false, failed: true } : c));
-      setError(insError.message);
+      setError(friendlyError(insError, 'Your comment was not sent. Please try again.'));
       return;
     }
     // The realtime echo refreshes the page, which replaces the optimistic row.
@@ -173,7 +174,7 @@ export function useComments(postId: string | null): UseComments {
       if (delError || !data?.length) throw new Error(delError?.message ?? 'This comment could not be deleted.');
     } catch (e) {
       setComments(previous);
-      setError(e instanceof Error ? e.message : 'This comment could not be deleted.');
+      setError(friendlyError(e, 'This comment could not be deleted.'));
       throw e;
     }
   }, [comments]);
