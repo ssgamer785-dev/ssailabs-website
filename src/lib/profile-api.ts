@@ -144,11 +144,28 @@ const urlCache = new Map<string, { url: string; expiresAt: number }>();
 const inFlight = new Map<string, Promise<string>>();
 const cacheGeneration = new Map<string, number>();
 
+/**
+ * Members who have no picture. The server's 404 ("Profile picture not found")
+ * is an answer, not a failure to retry: without remembering it, every mount of
+ * every byline asked again, and Production logged a stream of 404s. Only a 404
+ * is remembered; a 401/5xx/network error is retried next time. Cleared by
+ * forgetAvatarUrl, so a member's own new picture shows at once.
+ */
+const NO_PICTURE_TTL_MS = 10 * 60 * 1000;
+const noPicture = new Map<string, number>();
+
+/** The member has no profile picture: show initials, do not retry until the TTL passes. */
+export class NoAvatarError extends Error {
+  constructor() { super('No profile picture.'); this.name = 'NoAvatarError'; }
+}
+
 export async function getAvatarUrl(storageKey?: string | null, userId?: string | null): Promise<string> {
   if (!storageKey && !userId) throw new Error('No profile picture was provided.');
   const cacheKey = storageKey ? `key:${storageKey}` : `user:${userId}`;
   const hit = urlCache.get(cacheKey);
   if (hit && hit.expiresAt > Date.now()) return hit.url;
+  const absentUntil = noPicture.get(cacheKey);
+  if (absentUntil && absentUntil > Date.now()) throw new NoAvatarError();
 
   const pending = inFlight.get(cacheKey);
   if (pending) return pending;
@@ -165,6 +182,10 @@ export async function getAvatarUrl(storageKey?: string | null, userId?: string |
     const res = await fetch(`/api/profile/avatar-url?${query}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
+    if (res.status === 404) {
+      if ((cacheGeneration.get(cacheKey) ?? 0) === generation) noPicture.set(cacheKey, Date.now() + NO_PICTURE_TTL_MS);
+      throw new NoAvatarError();
+    }
     if (!res.ok) throw new Error(await readError(res, 'Could not load this picture.'));
 
     const { url, expiresIn } = await res.json();
@@ -195,6 +216,7 @@ export function forgetAvatarUrl(storageKey: string | null | undefined, userId?: 
   for (const cacheKey of [storageKey ? `key:${storageKey}` : null, userId ? `user:${userId}` : null]) {
     if (!cacheKey) continue;
     urlCache.delete(cacheKey);
+    noPicture.delete(cacheKey);
     cacheGeneration.set(cacheKey, (cacheGeneration.get(cacheKey) ?? 0) + 1);
     inFlight.delete(cacheKey);
   }
