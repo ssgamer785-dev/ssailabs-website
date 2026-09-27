@@ -4,6 +4,7 @@ import { PhoneShell } from '../components/PhoneShell';
 import { css } from '../lib/css';
 import { useAuth } from '../lib/auth-context';
 import { supabase } from '../lib/supabase';
+import { clearPasswordRecovery, hasPasswordRecovery, validateNewPassword } from '../lib/password-policy';
 
 export function ResetPasswordScreen() {
   const navigate = useNavigate();
@@ -16,12 +17,14 @@ export function ResetPasswordScreen() {
 
   async function update() {
     if (inFlight.current) return;
-    if (password.length < 8) { setError('Use at least 8 characters.'); return; }
-    if (password !== confirm) { setError('Passwords do not match.'); return; }
+    const problem = validateNewPassword(password, confirm);
+    if (problem) { setError(problem); return; }
+    if (!hasPasswordRecovery()) { setError('Open the reset link from your email to choose a new password.'); return; }
     inFlight.current = true; setBusy(true); setError(null);
     try {
       const { error: result } = await supabase.auth.updateUser({ password });
       if (result) { setError(result.message); return; }
+      clearPasswordRecovery();
       await supabase.auth.signOut({ scope: 'local' });
       navigate('/login', { replace: true });
     } catch { setError('Could not update your password. Please try again.'); }
@@ -31,7 +34,7 @@ export function ResetPasswordScreen() {
   return <PhoneShell>
     <div style={css('padding:32px 24px;display:flex;flex-direction:column;gap:16px')}>
       <h1 style={css('font-size:23px;font-weight:800')}>Choose a new password</h1>
-      {loading ? <p>Restoring your reset link…</p> : !session ? <>
+      {loading ? <p>Restoring your reset link…</p> : !session || !hasPasswordRecovery() ? <>
         <p role="alert" style={css('font-size:13px;line-height:1.5')}>This reset link has expired or is invalid. Request a new one.</p>
         <button type="button" onClick={() => navigate('/forgot-password')} style={css('color:var(--accent-ink);font-weight:700')}>Request another link</button>
       </> : <>

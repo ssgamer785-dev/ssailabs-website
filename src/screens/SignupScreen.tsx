@@ -5,6 +5,7 @@ import { Hoverable } from '../lib/Hoverable';
 import { useAuth } from '../lib/auth-context';
 import { PhoneShell } from '../components/PhoneShell';
 import { AuthDivider, GoogleSignInButton } from '../components/ui/GoogleSignInButton';
+import { validateNewPassword } from '../lib/password-policy';
 
 function EyeToggle({ show, onClick }: { show: boolean; onClick: () => void }) {
   return (
@@ -46,12 +47,9 @@ export function SignupScreen() {
       setError('Please fill in all fields.');
       return;
     }
-    if (pw.length < 6) {
-      setError('Password must be at least 6 characters.');
-      return;
-    }
-    if (pw !== pw2) {
-      setError('Passwords do not match.');
+    const passwordProblem = validateNewPassword(pw, pw2);
+    if (passwordProblem) {
+      setError(passwordProblem);
       return;
     }
 

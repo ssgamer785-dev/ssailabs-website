@@ -4,6 +4,7 @@ import { supabase } from './supabase';
 import type { Database } from './database.types';
 import { unsubscribePush } from './notifications/push';
 import { profileActionFor, stableUser } from './auth-events';
+import { markPasswordRecovery } from './password-policy';
 
 type Profile = Database['public']['Tables']['profiles']['Row'];
 
@@ -131,6 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
       if (!active) return;
+      if (event === 'PASSWORD_RECOVERY') markPasswordRecovery();
       setSession(newSession);
       const action = profileActionFor(event, newSession?.user?.id, profileRef.current?.id);
       if (action === 'clear') { setProfile(null); setProfileLoading(false); }
