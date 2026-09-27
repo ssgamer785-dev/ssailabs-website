@@ -37,6 +37,7 @@ const pushes: string[] = [];
 let originalSend: typeof S3Client.prototype.send;
 let originalNotify: typeof webpush.sendNotification;
 let fake: FakeSupabase;
+const failWrites: Record<string, 'missing' | 'error'> = {};
 let base: string;
 let server: Server;
 let purgeVictims: Row[] = [];
@@ -106,8 +107,10 @@ beforeEach(async () => {
   purgeVictims = [];
   staleUploads = [];
   expiredPosts = [];
+  for (const table of Object.keys(failWrites)) delete failWrites[table];
   fake = await startFakeSupabase({
     tokens: TOKENS,
+    failWrites,
     tables: world(),
     rpc: {
       select_user_media_to_purge: () => purgeVictims,
@@ -403,5 +406,51 @@ describe('push delivery follows in-app access', () => {
   test('the webhook secret is still required', async () => {
     const res = await call('/api/push/dispatch', null, { type: 'INSERT', table: 'notifications', record: { id: u(311) } }, 'POST', { 'x-push-webhook-secret': 'wrong' });
     expect(res.status).toBe(401);
+  });
+});
+
+describe('upload grants', () => {
+  const grants = () => (fake.tables.media_upload_grants ?? []) as Row[];
+
+  test('a chat upload URL is recorded as a grant for exactly that key, owner, thread, size and poster', async () => {
+    const res = await call('/api/chat/upload-url', 'student-token', { conversationId: CONV, kind: 'video', mimeType: 'video/mp4', sizeBytes: 900_000, posterBytes: 4_000 });
+    expect(res.status).toBe(200);
+    expect(grants()).toEqual([{
+      storage_key: res.body.storageKey, owner_id: STUDENT, scope: 'chat', conversation_id: CONV,
+      kind: 'video', mime_type: 'video/mp4', size_bytes: 900_000,
+      poster_key: res.body.posterKey, poster_size_bytes: 4_000,
+    }]);
+    expect(signedKey(res.body.uploadUrl)).toBe(res.body.storageKey as string);
+  });
+
+  test('a community upload URL is recorded as a post grant with no conversation', async () => {
+    const res = await call('/api/posts/upload-url', 'student-token', { kind: 'image', mimeType: 'image/png', sizeBytes: 50_000 });
+    expect(res.status).toBe(200);
+    expect(grants()).toEqual([{
+      storage_key: res.body.storageKey, owner_id: STUDENT, scope: 'post', conversation_id: null,
+      kind: 'image', mime_type: 'image/png', size_bytes: 50_000, poster_key: null, poster_size_bytes: null,
+    }]);
+  });
+
+  test('a refused upload request records nothing', async () => {
+    expect((await call('/api/chat/upload-url', 'student-token', { conversationId: OTHER_CONV, kind: 'image', mimeType: 'image/png', sizeBytes: 1_000 })).status).toBe(403);
+    expect((await call('/api/chat/upload-url', 'newcomer-token', { conversationId: NEW_CONV, kind: 'image', mimeType: 'image/png', sizeBytes: 1_000 })).status).toBe(403);
+    expect((await call('/api/posts/upload-url', 'newcomer-token', { kind: 'image', mimeType: 'image/png', sizeBytes: 1_000 })).status).toBe(403);
+    expect(grants()).toEqual([]);
+  });
+
+  test('before the grants table exists (API deployed ahead of the migration), uploads still work', async () => {
+    failWrites.media_upload_grants = 'missing';
+    const chat = await call('/api/chat/upload-url', 'student-token', { conversationId: CONV, kind: 'image', mimeType: 'image/png', sizeBytes: 1_000 });
+    const post = await call('/api/posts/upload-url', 'admin-token', { kind: 'image', mimeType: 'image/png', sizeBytes: 1_000 });
+    expect([chat.status, post.status]).toEqual([200, 200]);
+    expect(typeof chat.body.uploadUrl).toBe('string');
+  });
+
+  test('any other failure to record the grant withholds the upload URL', async () => {
+    failWrites.media_upload_grants = 'error';
+    const res = await call('/api/chat/upload-url', 'student-token', { conversationId: CONV, kind: 'image', mimeType: 'image/png', sizeBytes: 1_000 });
+    expect(res.status).toBe(503);
+    expect(res.body.uploadUrl).toBeUndefined();
   });
 });

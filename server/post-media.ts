@@ -12,6 +12,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
 import { posix as posixPath } from 'path';
 import { asyncRoute, authenticate, bucket, deleteObjects, getAdmin, getS3 } from './r2.js';
+import { recordUploadGrant } from './upload-grants.js';
 
 const PUT_URL_TTL_SECONDS = 300;
 const GET_URL_TTL_SECONDS = 900;
@@ -222,6 +223,11 @@ export function postMediaRouter(): Router {
 
     const posterKey = wantsPoster ? `${stem}-poster.jpg` : undefined;
     const posterUploadUrl = posterKey ? await signPut(posterKey, POSTER_MIME, posterBytes) : undefined;
+
+    await recordUploadGrant(getAdmin()!, {
+      storageKey, ownerId: caller.userId, scope: 'post',
+      kind, mimeType, sizeBytes, posterKey, posterSizeBytes: posterKey ? posterBytes : null,
+    });
 
     res.json({ uploadUrl, storageKey, posterUploadUrl, posterKey });
   }));

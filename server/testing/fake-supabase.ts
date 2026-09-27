@@ -37,6 +37,9 @@ function filtersFrom(query: URLSearchParams): { filters: Filter[]; limit: number
     else if (op === 'neq') filters.push(row => String(row[column]) !== value);
     else if (op === 'is') filters.push(row => (value === 'null' ? row[column] == null : String(row[column]) === value));
     else if (op === 'in') { const set = new Set(parseList(value)); filters.push(row => set.has(String(row[column]))); }
+    else if (op === 'lt') filters.push(row => String(row[column] ?? '') < value);
+    else if (op === 'gt') filters.push(row => String(row[column] ?? '') > value);
+    else if (raw === 'not.is.null') filters.push(row => row[column] != null);
     else throw new Error(`fake-supabase: unsupported filter ${column}=${raw}`);
   }
   return { filters, limit };
@@ -47,6 +50,8 @@ export async function startFakeSupabase(options: {
   tokens: Record<string, string>;
   tables?: Record<string, Row[]>;
   rpc?: Record<string, (args: Record<string, unknown>, tables: Record<string, Row[]>) => unknown>;
+  /** Tables whose writes fail: 'missing' answers as PostgREST does for an unknown table. */
+  failWrites?: Record<string, 'missing' | 'error'>;
 }): Promise<FakeSupabase> {
   const tables: Record<string, Row[]> = options.tables ?? {};
   const rpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
@@ -82,6 +87,11 @@ export async function startFakeSupabase(options: {
   });
 
   app.post('/rest/v1/:table', (req, res) => {
+    const failure = options.failWrites?.[req.params.table];
+    if (failure === 'missing') {
+      return res.status(404).json({ code: 'PGRST205', message: `Could not find the table 'public.${req.params.table}' in the schema cache` });
+    }
+    if (failure === 'error') return res.status(503).json({ code: 'XX000', message: 'fake write failure' });
     const table = (tables[req.params.table] ??= []);
     const incoming: Row[] = Array.isArray(req.body) ? req.body : [req.body];
     const conflict = new URL(req.originalUrl, 'http://fake').searchParams.get('on_conflict');
