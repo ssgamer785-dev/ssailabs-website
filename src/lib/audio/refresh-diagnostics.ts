@@ -24,6 +24,24 @@ export function refreshAudioDiagnosticsEnabled(): boolean {
   } catch { return false; }
 }
 
+const MODE_KEY = 'tp:refresh-audio-mode';
+
+/**
+ * Which refresh-audio lifecycle this tab runs, for a side-by-side device test:
+ * "fresh" (default, the current release) opens and closes a context per
+ * refresh; "warm" (?audioMode=warm) keeps one unlocked context while visible.
+ * ?audioMode=fresh returns to the default. Read once at load.
+ */
+export function refreshAudioExperimentMode(): 'fresh' | 'warm' {
+  if (typeof window === 'undefined') return 'fresh';
+  try {
+    const choice = new URLSearchParams(window.location.search).get('audioMode');
+    if (choice === 'warm') sessionStorage.setItem(MODE_KEY, 'warm');
+    if (choice === 'fresh') sessionStorage.removeItem(MODE_KEY);
+    return sessionStorage.getItem(MODE_KEY) === 'warm' ? 'warm' : 'fresh';
+  } catch { return 'fresh'; }
+}
+
 /** Epoch-based, so times from before a reload line up with the ones after it. */
 function now(): number {
   return typeof performance.timeOrigin === 'number' ? performance.timeOrigin + performance.now() : Date.now();

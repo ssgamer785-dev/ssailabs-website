@@ -5,7 +5,7 @@ import { lockAppZoom } from './lib/app-zoom';
 import './index.css';
 import { installNotificationAudioUnlock } from './lib/useNotificationSound';
 import { preloadMoneyRefreshSound, resetMoneyRefreshAudioSession } from './lib/useMoneySound';
-import { traceRefreshAudio } from './lib/audio/refresh-diagnostics';
+import { refreshAudioExperimentMode, traceRefreshAudio } from './lib/audio/refresh-diagnostics';
 import { RefreshAudioDiagnosticPanel } from './components/RefreshAudioDiagnosticPanel';
 
 // Installed here rather than in a component effect: it is app-wide and
@@ -14,7 +14,7 @@ import { RefreshAudioDiagnosticPanel } from './components/RefreshAudioDiagnostic
 lockAppZoom();
 // The first load's pageshow fires before this module runs, so mark boot here.
 // A reload also takes the separate tryAutoplay path, so record which it was.
-traceRefreshAudio('boot', (performance.getEntriesByType?.('navigation')[0] as PerformanceNavigationTiming | undefined)?.type ?? 'unknown');
+traceRefreshAudio('boot', `${(performance.getEntriesByType?.('navigation')[0] as PerformanceNavigationTiming | undefined)?.type ?? 'unknown'} mode=${refreshAudioExperimentMode()}`);
 installNotificationAudioUnlock();
 preloadMoneyRefreshSound();
 document.addEventListener('visibilitychange', () => {

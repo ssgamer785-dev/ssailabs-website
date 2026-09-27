@@ -3,6 +3,7 @@ import {
   clearRefreshAudioDiagnostics,
   getRefreshAudioDiagnostics,
   refreshAudioDiagnosticsEnabled,
+  refreshAudioExperimentMode,
   stopRefreshAudioDiagnostics,
   subscribeRefreshAudioDiagnostics,
   summarizeRefreshAudioDiagnostics,
@@ -27,7 +28,7 @@ function logHeader(events: readonly RefreshAudioDiagnostic[]): string[] {
   const standalone = nav.standalone === true || window.matchMedia?.('(display-mode: standalone)').matches;
   return [
     `ua: ${nav.userAgent}`,
-    `standalone: ${standalone ? 'yes' : 'no'} · audioSession: ${nav.audioSession?.type ?? 'n/a'} · refreshSound pref: ${audioPreferenceEnabled('refreshSound') ? 'on' : 'off'} · activation api: ${userActivationSnapshot() === 'n/a' ? 'no' : 'yes'}`,
+    `standalone: ${standalone ? 'yes' : 'no'} · audioSession: ${nav.audioSession?.type ?? 'n/a'} · audio mode: ${refreshAudioExperimentMode()} · refresh/notification sound: ${audioPreferenceEnabled('refreshSound') ? 'on' : 'off'}/${audioPreferenceEnabled('notificationSound') ? 'on' : 'off'} · activation api: ${userActivationSnapshot() === 'n/a' ? 'no' : 'yes'}`,
     `captured: ${new Date().toISOString()}`,
     `summary: ${summarizeRefreshAudioDiagnostics(events)}`,
     '---',

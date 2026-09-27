@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import moneySound from '../assets/money-sound-for-trader.m4a';
 import { createOneShotAudioPlayer } from './audio/one-shot-audio';
 import { audioPreferenceEnabled } from './audio/preferences';
-import { refreshAudioDiagnosticsEnabled, traceRefreshAudio } from './audio/refresh-diagnostics';
+import { refreshAudioDiagnosticsEnabled, refreshAudioExperimentMode, traceRefreshAudio } from './audio/refresh-diagnostics';
 
 let diagnosticContextSerial = 0;
 /** Contexts created and not yet reported closed: a leak shows up as a climbing number. */
@@ -10,6 +10,7 @@ let diagnosticLiveContexts = 0;
 
 const moneyPlayer = createOneShotAudioPlayer({
   trace: refreshAudioDiagnosticsEnabled() ? traceRefreshAudio : undefined,
+  retainContext: refreshAudioExperimentMode() === 'warm',
   createContext: () => {
     if (typeof window === 'undefined') return null;
     const Constructor = window.AudioContext ?? (window as unknown as {
