@@ -7,6 +7,7 @@ import { installNotificationAudioUnlock } from './lib/useNotificationSound';
 import { handleRefreshAudioLifecycle, preloadMoneyRefreshSound } from './lib/useMoneySound';
 import { installPassiveInputTrace, refreshAudioDiagnosticsEnabled, refreshAudioExperimentMode, traceRefreshAudio } from './lib/audio/refresh-diagnostics';
 import { RefreshAudioDiagnosticPanel } from './components/RefreshAudioDiagnosticPanel';
+import { dropBootSplash } from './lib/boot-splash';
 
 // Installed here rather than in a component effect: it is app-wide and
 // lifetime-long, and StrictMode double-invokes effects, which would register
@@ -39,6 +40,9 @@ window.addEventListener('pageshow', e => { traceRefreshAudio('pageshow', e.persi
 
 // Tells the start-up watchdog in index.html that the app is running.
 (window as Window & { __tpBooted?: boolean }).__tpBooted = true;
+// The React splash normally takes over index.html's splash within a frame or
+// two of mounting; nothing may leave it covering the app if that never happens.
+window.setTimeout(dropBootSplash, 10_000);
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

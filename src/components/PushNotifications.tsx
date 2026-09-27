@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth-context';
-import { isInstalledApp, registerWorker, supportsPush } from '../lib/notifications/push';
+import { isInstalledApp, registerWorker, shareLoadedAssets, supportsPush } from '../lib/notifications/push';
 import { ensureSubscribed, usePushSetup } from '../lib/notifications/usePushSetup';
 import { supabase } from '../lib/supabase';
 import { subscribeCommunityActivity } from '../lib/community/activity';
@@ -38,7 +38,7 @@ export function PushNotifications() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
-    void registerWorker().catch(() => {});
+    void registerWorker().then(registration => { if (registration) return shareLoadedAssets(); }).catch(() => {});
   }, []);
 
   useEffect(() => {

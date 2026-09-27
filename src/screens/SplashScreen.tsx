@@ -4,6 +4,7 @@ import { css } from '../lib/css';
 import { useAuth } from '../lib/auth-context';
 import { PhoneShell } from '../components/PhoneShell';
 import splashArt from '../assets/traders-planet-splash.webp';
+import { barAnimationDelay, bootArtShownAt, bootSplash, releaseBootSplash } from '../lib/boot-splash';
 
 /**
  * The startup splash.
@@ -29,11 +30,13 @@ const ART_W = 853;
 const ART_H = 1844;
 
 /**
- * How long the splash is held at minimum. Auth usually resolves well inside
- * this, so in practice it is what decides the duration — long enough that the
- * screen is read rather than glimpsed, short enough not to feel like a wait.
- * Nothing is padded beyond it: once the app is ready and this has elapsed,
- * the splash leaves.
+ * How long the ARTWORK is held on screen at minimum, counted from when it was
+ * first drawn (by index.html's boot splash when there is one), never from
+ * when React mounted: a clock that started before the picture arrived used to
+ * cut it off moments after it appeared on slow connections (TP-023). Auth
+ * usually resolves well inside this, so in practice it is what decides the
+ * duration. Nothing is padded beyond it: once the app is ready and this has
+ * elapsed, the splash leaves.
  *
  * It sits 200ms past the 2100ms splash-fill animation in index.css on
  * purpose. The bar reaching 100% and the screen starting to leave in the same
@@ -53,8 +56,12 @@ export function SplashScreen() {
   const [artReady, setArtReady] = useState(false);
   const [leaving, setLeaving] = useState(false);
 
-  const mountedAt = useRef(Date.now());
   const imgRef = useRef<HTMLImageElement>(null);
+  // Adopting index.html's splash: same picture, and the bar carries on from
+  // where it is rather than starting again.
+  const [adopted] = useState(() => bootSplash() !== null);
+  const artShownAt = useRef<number | null>(bootArtShownAt());
+  const [barDelay] = useState(() => barAnimationDelay(artShownAt.current));
 
   // Where to go is decided once, by the time auth has settled. Held in a ref
   // so a token refresh part-way through the exit cannot restart the timer.
@@ -72,12 +79,20 @@ export function SplashScreen() {
     if (imgRef.current?.complete) setArtReady(true);
   }, []);
 
+  // The artwork is on screen: hand over from the boot splash, and start the
+  // clock now if the boot splash never showed it.
+  useEffect(() => {
+    if (!artReady) return;
+    if (artShownAt.current === null) artShownAt.current = performance.now();
+    if (adopted) releaseBootSplash(imgRef.current);
+  }, [artReady, adopted]);
+
   const ready = !loading && artReady;
 
-  // Hold until the app is ready *and* the minimum has elapsed, whichever is later.
+  // Hold until the app is ready *and* the artwork has had its minimum, whichever is later.
   useEffect(() => {
     if (!ready || leaving) return;
-    const held = Date.now() - mountedAt.current;
+    const held = performance.now() - (artShownAt.current ?? performance.now());
     const t = window.setTimeout(() => setLeaving(true), Math.max(0, MIN_VISIBLE_MS - held));
     return () => window.clearTimeout(t);
   }, [ready, leaving]);
@@ -109,15 +124,11 @@ export function SplashScreen() {
     <div className="theme-light" style={{ display: 'contents' }}>
       <PhoneShell>
         <div
-          className={`splash-shell${leaving ? ' is-leaving' : ''}`}
+          className={`splash-shell${leaving ? ' is-leaving' : ''}${adopted ? ' adopted' : ''}${!artReady && !adopted ? ' art-pending' : ''}`}
           onClick={skip}
-          style={css(
-            'position:absolute;inset:0;overflow:hidden;cursor:pointer;' +
-            // Sampled from the artwork's own top, middle and bottom edges, so
-            // the instant before it decodes is a plausible blur of the picture
-            // rather than a white flash.
-            'background:linear-gradient(180deg,#E7EFF9 0%,#889698 55%,#2F436B 100%)',
-          )}
+          // The brand colour, not a gradient with a bar on it: until the
+          // picture can be drawn there is nothing else to show (TP-058).
+          style={css('position:absolute;inset:0;overflow:hidden;cursor:pointer;background:#0C091E')}
         >
           <img
             ref={imgRef}
@@ -144,9 +155,9 @@ export function SplashScreen() {
               index.css. */}
           <div className="splash-stage" aria-hidden="true">
             <div className="splash-bar">
-              <div className="splash-bar-fill" />
+              <div className="splash-bar-fill" style={{ animationDelay: barDelay }} />
             </div>
-            <div className="splash-bar-glow" />
+            <div className="splash-bar-glow" style={{ animationDelay: barDelay }} />
           </div>
 
           {/* The picture carries the word "LOADING" as pixels, which a screen

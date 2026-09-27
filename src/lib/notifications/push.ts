@@ -108,6 +108,19 @@ export async function registerWorker(): Promise<ServiceWorkerRegistration | null
   return navigator.serviceWorker.register('/sw.js', { scope: '/' });
 }
 
+/**
+ * Hands the worker the build files this page has already loaded, so a first
+ * visit (which the worker did not yet control) is cached for the next launch.
+ */
+export async function shareLoadedAssets(): Promise<void> {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+  const registration = await navigator.serviceWorker.ready;
+  const urls = performance.getEntriesByType('resource')
+    .map(entry => entry.name)
+    .filter(name => { try { const url = new URL(name); return url.origin === location.origin && url.pathname.startsWith('/assets/'); } catch { return false; } });
+  if (urls.length) registration.active?.postMessage({ type: 'cache-assets', urls });
+}
+
 /** A registration with an ACTIVE worker: subscribe() rejects with InvalidStateError without one. */
 async function activeRegistration(trace: Trace): Promise<ServiceWorkerRegistration> {
   let registration: ServiceWorkerRegistration | null;
