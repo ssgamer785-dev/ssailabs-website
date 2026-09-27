@@ -4,7 +4,7 @@ import App from './App';
 import { lockAppZoom } from './lib/app-zoom';
 import './index.css';
 import { installNotificationAudioUnlock } from './lib/useNotificationSound';
-import { preloadMoneyRefreshSound, resetMoneyRefreshAudioSession } from './lib/useMoneySound';
+import { handleRefreshAudioLifecycle, preloadMoneyRefreshSound } from './lib/useMoneySound';
 import { refreshAudioExperimentMode, traceRefreshAudio } from './lib/audio/refresh-diagnostics';
 import { RefreshAudioDiagnosticPanel } from './components/RefreshAudioDiagnosticPanel';
 
@@ -19,11 +19,10 @@ installNotificationAudioUnlock();
 preloadMoneyRefreshSound();
 document.addEventListener('visibilitychange', () => {
   traceRefreshAudio('visibility', document.visibilityState);
-  if (document.visibilityState === 'visible') preloadMoneyRefreshSound();
-  else resetMoneyRefreshAudioSession();
+  handleRefreshAudioLifecycle(document.visibilityState === 'visible' ? 'visible' : 'hidden');
 });
-window.addEventListener('pagehide', e => { traceRefreshAudio('pagehide', e.persisted ? 'to bfcache' : 'unload'); resetMoneyRefreshAudioSession(); });
-window.addEventListener('pageshow', e => { traceRefreshAudio('pageshow', e.persisted ? 'from bfcache' : 'fresh load'); preloadMoneyRefreshSound(); });
+window.addEventListener('pagehide', e => { traceRefreshAudio('pagehide', e.persisted ? 'to bfcache' : 'unload'); handleRefreshAudioLifecycle('pagehide', e.persisted); });
+window.addEventListener('pageshow', e => { traceRefreshAudio('pageshow', e.persisted ? 'from bfcache' : 'fresh load'); handleRefreshAudioLifecycle('pageshow', e.persisted); });
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { audioPreferenceEnabled, setAudioPreference } from './audio/preferences';
-import { refreshAudioDiagnosticsEnabled, traceRefreshAudio } from './audio/refresh-diagnostics';
+import { refreshAudioDiagnosticsEnabled, refreshAudioExperimentMode, traceRefreshAudio } from './audio/refresh-diagnostics';
+import { hasUserActivation, sharedAudioOutput } from './audio/shared-output';
 
 /** Original short, gently rising three-note in-app chime. */
 const PARTIALS = [
@@ -18,8 +19,17 @@ let ctx: AudioContext | null = null;
 let lastScheduledEnd = 0;
 let unlockInstalled = false;
 const chimed = new Set<string>();
+/** ?audioMode=legacy keeps the production chime's own context for the side-by-side device test. */
+const legacy = refreshAudioExperimentMode() === 'legacy';
 
 function context(): AudioContext | null {
+  if (!legacy) {
+    // The page's one output, shared with the refresh sound. Only the output
+    // is shared; the chime keeps its own preference and scheduling.
+    const shared = sharedAudioOutput.ensure();
+    if (shared !== ctx) { ctx = shared; lastScheduledEnd = 0; }
+    return ctx;
+  }
   if (ctx?.state === 'closed') { ctx = null; lastScheduledEnd = 0; }
   if (ctx) return ctx;
   const Constructor: AudioContextConstructor | undefined = typeof window === 'undefined'
@@ -119,6 +129,12 @@ export function playNotificationChime(id?: string): void {
 
 /** Called directly from a real user gesture (also from the push Allow button). */
 export function unlockNotificationAudio(): void {
+  if (!legacy) {
+    if (audioPreferenceEnabled('notificationSound') || audioPreferenceEnabled('refreshSound')) {
+      sharedAudioOutput.unlock(hasUserActivation());
+    }
+    return;
+  }
   const audio = context();
   if (audio && audio.state !== 'running' && audio.state !== 'closed') {
     traceRefreshAudio('nctx-resume-request', audio.state);
@@ -131,6 +147,14 @@ export function installNotificationAudioUnlock(): void {
   if (unlockInstalled || typeof document === 'undefined') return;
   unlockInstalled = true;
   const onGesture = () => unlockNotificationAudio();
+  if (!legacy) {
+    // Activation-triggering events on iOS: touchend/pointerup/click/keydown.
+    // A touch pointerdown is not one, so it alone never started this output.
+    for (const type of ['pointerup', 'touchend', 'click', 'keydown'] as const) {
+      document.addEventListener(type, onGesture, { passive: true, capture: true });
+    }
+    return;
+  }
   const onVisible = () => { if (document.visibilityState === 'visible') unlockNotificationAudio(); };
   document.addEventListener('pointerdown', onGesture, { passive: true });
   document.addEventListener('keydown', onGesture);

@@ -27,19 +27,20 @@ export function refreshAudioDiagnosticsEnabled(): boolean {
 const MODE_KEY = 'tp:refresh-audio-mode';
 
 /**
- * Which refresh-audio lifecycle this tab runs, for a side-by-side device test:
- * "fresh" (default, the current release) opens and closes a context per
- * refresh; "warm" (?audioMode=warm) keeps one unlocked context while visible.
- * ?audioMode=fresh returns to the default. Read once at load.
+ * Which refresh-audio architecture this tab runs, for a side-by-side device
+ * test. "shared" (default) plays on the page's one long-lived output.
+ * "legacy" (?audioMode=legacy) is the current production release, unchanged:
+ * a context per refresh, closed afterwards, and its own notification context.
+ * ?audioMode=shared returns to the default. Read once at load.
  */
-export function refreshAudioExperimentMode(): 'fresh' | 'warm' {
-  if (typeof window === 'undefined') return 'fresh';
+export function refreshAudioExperimentMode(): 'shared' | 'legacy' {
+  if (typeof window === 'undefined') return 'shared';
   try {
     const choice = new URLSearchParams(window.location.search).get('audioMode');
-    if (choice === 'warm') sessionStorage.setItem(MODE_KEY, 'warm');
-    if (choice === 'fresh') sessionStorage.removeItem(MODE_KEY);
-    return sessionStorage.getItem(MODE_KEY) === 'warm' ? 'warm' : 'fresh';
-  } catch { return 'fresh'; }
+    if (choice === 'legacy') sessionStorage.setItem(MODE_KEY, 'legacy');
+    if (choice === 'shared') sessionStorage.removeItem(MODE_KEY);
+    return sessionStorage.getItem(MODE_KEY) === 'legacy' ? 'legacy' : 'shared';
+  } catch { return 'shared'; }
 }
 
 /** Epoch-based, so times from before a reload line up with the ones after it. */

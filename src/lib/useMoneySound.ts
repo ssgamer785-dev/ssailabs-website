@@ -3,53 +3,30 @@ import moneySound from '../assets/money-sound-for-trader.m4a';
 import { createOneShotAudioPlayer } from './audio/one-shot-audio';
 import { audioPreferenceEnabled } from './audio/preferences';
 import { refreshAudioDiagnosticsEnabled, refreshAudioExperimentMode, traceRefreshAudio } from './audio/refresh-diagnostics';
+import { createRefreshSoundPlayer } from './audio/refresh-sound';
+import { createTracedAudioContext, hasUserActivation, sharedAudioOutput } from './audio/shared-output';
 
-let diagnosticContextSerial = 0;
-/** Contexts created and not yet reported closed: a leak shows up as a climbing number. */
-let diagnosticLiveContexts = 0;
+async function loadMoneySound(context: { decodeAudioData: (bytes: ArrayBuffer) => Promise<AudioBuffer> }): Promise<AudioBuffer> {
+  const response = await fetch(moneySound);
+  if (!response.ok) throw new Error('Could not load refresh sound.');
+  return context.decodeAudioData(await response.arrayBuffer());
+}
 
-const moneyPlayer = createOneShotAudioPlayer({
-  trace: refreshAudioDiagnosticsEnabled() ? traceRefreshAudio : undefined,
-  retainContext: refreshAudioExperimentMode() === 'warm',
-  createContext: () => {
-    if (typeof window === 'undefined') return null;
-    const Constructor = window.AudioContext ?? (window as unknown as {
-      webkitAudioContext?: typeof AudioContext;
-    }).webkitAudioContext;
-    if (!Constructor) return null;
-    try {
-      const context = new Constructor();
-      // Diagnostic-only: numbered so the log shows which context changed, and
-      // every transition is recorded — including WebKit's non-standard
-      // 'interrupted' state, which call-site snapshots can miss entirely.
-      if (refreshAudioDiagnosticsEnabled()) {
-        const id = ++diagnosticContextSerial;
-        const live = ++diagnosticLiveContexts;
-        traceRefreshAudio('ctx-created', `#${id} ${context.state} ${context.sampleRate}Hz live=${live}`);
-        let counted = false;
-        context.addEventListener('statechange', () => {
-          if (context.state === 'closed' && !counted) {
-            counted = true;
-            diagnosticLiveContexts -= 1;
-            traceRefreshAudio('ctx-statechange', `#${id} closed live=${diagnosticLiveContexts}`);
-            return;
-          }
-          traceRefreshAudio('ctx-statechange', `#${id} ${context.state}`);
-        });
-      }
-      return context;
-    } catch {
-      traceRefreshAudio('ctx-create-failed');
-      return null;
-    }
-  },
-  loadBuffer: async context => {
-    const response = await fetch(moneySound);
-    if (!response.ok) throw new Error('Could not load refresh sound.');
-    const bytes = await response.arrayBuffer();
-    return context.decodeAudioData(bytes);
-  },
+const trace = refreshAudioDiagnosticsEnabled() ? traceRefreshAudio : undefined;
+/** ?audioMode=legacy: the current production player, kept only for the side-by-side device test. */
+const legacy = refreshAudioExperimentMode() === 'legacy';
+
+const sharedPlayer = legacy ? null : createRefreshSoundPlayer<AudioContext>({
+  output: sharedAudioOutput,
+  loadBuffer: loadMoneySound,
+  trace,
 });
+
+const legacyPlayer = legacy ? createOneShotAudioPlayer({
+  trace,
+  createContext: () => createTracedAudioContext('ctx'),
+  loadBuffer: loadMoneySound,
+}) : null;
 
 let preloaded = false;
 let preloadInFlight = false;
@@ -59,7 +36,7 @@ let reloadAttempted = false;
 export function preloadMoneyRefreshSound(): void {
   if (preloaded || preloadInFlight) return;
   preloadInFlight = true;
-  void moneyPlayer.preload().then(ready => { preloaded = ready; })
+  void (sharedPlayer ?? legacyPlayer!).preload().then(ready => { preloaded = ready; })
     .finally(() => { preloadInFlight = false; });
 }
 
@@ -70,34 +47,60 @@ export function handleMoneySoundSessionReady(): void {
   const navigation = typeof performance !== 'undefined'
     ? performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
     : undefined;
-  if (navigation?.type === 'reload' && audioPreferenceEnabled('refreshSound')) moneyPlayer.tryAutoplay();
+  if (navigation?.type !== 'reload' || !audioPreferenceEnabled('refreshSound')) return;
+  if (legacyPlayer) { legacyPlayer.tryAutoplay(); return; }
+  // Only where the browser already lets this page play (desktop); iOS keeps
+  // the output suspended until a gesture, and nothing is queued for later.
+  void sharedPlayer!.preload().then(() => {
+    if (sharedAudioOutput.ensure()?.state === 'running') sharedPlayer!.playFromGesture(false);
+  });
+}
+
+function play(): void {
+  if (!audioPreferenceEnabled('refreshSound')) { traceRefreshAudio('refresh-sound-off'); return; }
+  if (legacyPlayer) legacyPlayer.playFromGesture();
+  else sharedPlayer!.playFromGesture(hasUserActivation());
 }
 
 export function useMoneySound() {
-
-  // PhoneShell calls this directly from its pull-to-refresh pointer gesture.
-  return useCallback(() => {
-    if (audioPreferenceEnabled('refreshSound')) moneyPlayer.playFromGesture();
-    else traceRefreshAudio('refresh-sound-off');
-  }, []);
+  // PhoneShell calls this directly from its pull-to-refresh touch/pointer/wheel gesture.
+  return useCallback(play, []);
 }
 
 /** Shared entry point for explicit in-app refresh/retry buttons. */
 export function playMoneyRefreshSound(): void {
-  if (audioPreferenceEnabled('refreshSound')) moneyPlayer.playFromGesture();
-  else traceRefreshAudio('refresh-sound-off');
+  play();
 }
 
-/** Prepare Web Audio during the pointer/touch start that precedes a pull. */
+/** The touch/pointer start that precedes a pull. */
 export function prepareMoneyRefreshSound(): void {
-  if (audioPreferenceEnabled('refreshSound')) moneyPlayer.prepareFromGesture();
+  if (!audioPreferenceEnabled('refreshSound')) return;
+  if (legacyPlayer) { legacyPlayer.prepareFromGesture(); return; }
+  // A mouse press is an activation and can start the output early; an iOS
+  // touchstart is not, so this only makes sure the sound is decoded.
+  if (hasUserActivation() && sharedAudioOutput.ensure()?.state !== 'running') sharedAudioOutput.unlock(true);
+  preloadMoneyRefreshSound();
 }
 
 export function cancelMoneyRefreshPreparation(): void {
-  moneyPlayer.cancelPreparation();
+  // The shared output is kept for the page's lifetime; only legacy releases.
+  legacyPlayer?.cancelPreparation();
 }
 
-/** A hidden/page-cached tab must not reuse a silent WebKit output context. */
-export function resetMoneyRefreshAudioSession(): void {
-  moneyPlayer.resetOutput();
+/** Page lifecycle: the sound must never continue, or start, while the page is hidden. */
+export function handleRefreshAudioLifecycle(event: 'hidden' | 'visible' | 'pagehide' | 'pageshow', persisted = false): void {
+  if (legacyPlayer) {
+    if (event === 'hidden' || event === 'pagehide') legacyPlayer.resetOutput();
+    else preloadMoneyRefreshSound();
+    return;
+  }
+  if (event === 'hidden' || event === 'pagehide') {
+    sharedPlayer!.stop(event);
+    // A page that is really unloading releases its output; a page going into
+    // the back/forward cache keeps it, and WebKit interrupts it meanwhile.
+    if (event === 'pagehide' && !persisted) sharedAudioOutput.close();
+    return;
+  }
+  sharedAudioOutput.foreground();
+  preloadMoneyRefreshSound();
 }

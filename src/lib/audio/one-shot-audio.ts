@@ -35,12 +35,6 @@ export function createOneShotAudioPlayer(options: {
   createContext: () => OneShotContext | null;
   loadBuffer: (context: OneShotContext) => Promise<BufferLike>;
   trace?: (event: string, detail?: string) => void;
-  /**
-   * Experiment arm (?audioMode=warm): keep one unlocked context for the whole
-   * foreground session instead of closing it after every sound. A failed
-   * start, a watchdog stop and backgrounding still discard it.
-   */
-  retainContext?: boolean;
 }) {
   const trace = options.trace ?? (() => {});
   let context: OneShotContext | null = null;
@@ -89,14 +83,6 @@ export function createOneShotAudioPlayer(options: {
     resumePromise = null;
     trace('context-close', target.state);
     void target.close().catch(() => {});
-  };
-
-  /** The context has nothing to play: close it, unless this session keeps it warm. */
-  const idle = (target: OneShotContext, reason?: string) => {
-    if (!options.retainContext) { release(target); return; }
-    if (context !== target || pending || source) return;
-    clearPreparedClose();
-    if (reason) trace('context-kept', `${target.state} ${reason}`);
   };
 
   const resumeContext = (target: OneShotContext, fromFreshGesture = false): Promise<void> => {
@@ -179,7 +165,7 @@ export function createOneShotAudioPlayer(options: {
       clearClockSample();
       next.disconnect();
       trace('source-ended', `${target.state} clock=${target.currentTime.toFixed(3)}`);
-      idle(target, 'after-playback');
+      release(target);
     };
     try {
       const clockAtStart = target.currentTime;
@@ -249,11 +235,11 @@ export function createOneShotAudioPlayer(options: {
       if (target.state !== 'running') void resumeContext(target).catch(() => {});
       if (!cachedBuffer) void getBuffer(target).catch(() => {});
       clearPreparedClose();
-      if (!options.retainContext) preparedCloseTimer = setTimeout(() => release(target), 5_000);
+      preparedCloseTimer = setTimeout(() => release(target), 5_000);
     },
 
     cancelPreparation() {
-      if (context) idle(context);
+      if (context) release(context);
     },
 
     /** Invoke in the refresh gesture. Repeated taps restart promptly without queuing. */
