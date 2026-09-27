@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { displayPostBody } from './display-body';
+import { displayPostBody, officialHeadline } from './display-body';
 
 describe('displayPostBody', () => {
   it('removes the mirrored Official headline from the body', () => {
@@ -23,5 +23,14 @@ describe('displayPostBody', () => {
 
   it('returns no body when the whole body only repeats the title', () => {
     expect(displayPostBody('Market update', 'Market update')).toBeNull();
+  });
+});
+
+describe('officialHeadline', () => {
+  it('is the first line of the post, trimmed', () => {
+    expect(officialHeadline('  GBPUSD setup (corrected)\nSell below 1.2650')).toBe('GBPUSD setup (corrected)');
+  });
+  it('is null for an empty post', () => {
+    expect(officialHeadline('   \n  ')).toBeNull();
   });
 });

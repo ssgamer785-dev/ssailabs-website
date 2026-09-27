@@ -13,3 +13,8 @@ export function displayPostBody(title: string | null, body: string | null): stri
   while (lines.length && !lines[0].trim()) lines.shift();
   return lines.join('\n') || null;
 }
+
+/** The headline of an Official post: its first line, or null for an empty post. */
+export function officialHeadline(text: string): string | null {
+  return text.trim().split('\n')[0]?.trim() || null;
+}

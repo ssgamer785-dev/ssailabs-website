@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { css } from '../lib/css';
 import { supabase } from '../lib/supabase';
 import { useAppState } from '../lib/app-state';
+import { officialHeadline } from '../lib/community/display-body';
 import { useAuth } from '../lib/auth-context';
 import { requestPostUploadUrl, resumePostUploadUrl, uploadPostMedia, type PostMediaKind, type PostUploadTicket } from '../lib/community/media-api';
 import { createPollPost } from '../lib/community/polls';
@@ -105,12 +106,14 @@ export function CreatePostScreen() {
 
   const myIdentity = reveal ? userName : 'Unknown User';
 
-  // Editing: prefill from the existing row.
+  // Editing: prefill from the existing row, and remember its channel so the
+  // headline of an Official post can follow the edit.
+  const [editChannel, setEditChannel] = useState<string | null>(null);
   useEffect(() => {
     if (!editId) return;
     let active = true;
-    supabase.from('posts').select('body, title').eq('id', editId).single().then(({ data }) => {
-      if (active && data) setPostText(data.body ?? data.title ?? '');
+    supabase.from('posts').select('body, title, channel').eq('id', editId).single().then(({ data }) => {
+      if (active && data) { setPostText(data.body ?? data.title ?? ''); setEditChannel(data.channel); }
     });
     return () => { active = false; };
   }, [editId]);
@@ -241,15 +244,18 @@ export function CreatePostScreen() {
       }
 
       if (editId) {
+        // An Official headline is the first line, as when the post was made;
+        // editing only the body left Home and the detail view on the old one.
+        const headline = officialHeadline(postText);
         const { error: upError } = await supabase.from('posts')
-          .update({ body: postText.trim() || null })
+          .update(editChannel === 'official' ? { body: postText.trim() || null, title: headline } : { body: postText.trim() || null })
           .eq('id', editId);
         if (upError) throw new Error(upError.message);
       } else {
         const { error: insError } = await supabase.from('posts').insert({
           author_id: user.id,
           channel,
-          title: channel === 'official' ? (postText.trim().split('\n')[0] || null) : null,
+          title: channel === 'official' ? officialHeadline(postText) : null,
           body: postText.trim() || null,
           attachment,
           storage_key: storageKey,
