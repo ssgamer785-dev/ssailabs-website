@@ -48,6 +48,32 @@ function vapidProblem(): string | null {
   }
 }
 
+/**
+ * A push service that answers 429 or 5xx did not accept the message, so one
+ * retry cannot duplicate it. A transport error (no answer) might have been
+ * delivered, so it is never retried.
+ */
+async function sendWithOneRetry(
+  subscription: webpush.PushSubscription, payload: string, options: webpush.RequestOptions,
+): Promise<webpush.SendResult> {
+  try {
+    return await webpush.sendNotification(subscription, payload, options);
+  } catch (error) {
+    const status = (error as { statusCode?: number }).statusCode;
+    if (status !== 429 && !(status && status >= 500)) throw error;
+    const retryAfter = Number((error as { headers?: Record<string, string> }).headers?.['retry-after']);
+    await new Promise(resolve => setTimeout(resolve, Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 2000) : RETRY_DELAY_MS));
+    return webpush.sendNotification(subscription, payload, options);
+  }
+}
+
+let RETRY_DELAY_MS = 500;
+export function setPushRetryDelayForTests(ms: number): void { RETRY_DELAY_MS = ms; }
+
+/** How far back the delivery check looks, and how recent a notification may be before it counts. */
+const HEALTH_WINDOW_MS = 24 * 3600 * 1000;
+const HEALTH_SETTLE_MS = 60 * 1000;
+
 export function pushRouter(): Router {
   const router = Router();
 
@@ -172,7 +198,7 @@ export function pushRouter(): Router {
       if (claimError?.code === '23505') continue;
       if (claimError) throw claimError;
       try {
-        await webpush.sendNotification({
+        await sendWithOneRetry({
           endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth_key },
         }, payload, { TTL: 3600, urgency: ['chat', 'signal', 'target', 'session'].includes(row.kind) ? 'normal' : 'low' });
       } catch (error) {
@@ -188,6 +214,49 @@ export function pushRouter(): Router {
       }
     }
     res.json({ ok: true, attempted: (subscriptions ?? []).length, uncertainFailures: failed });
+  }, 'Notifications are temporarily unavailable. Please try again.'));
+
+  /**
+   * Admin-only delivery check, from aggregate counts (no member data): of the
+   * latest notifications for members who have a registered device, how many
+   * did /dispatch pick up? None means the database webhook is not calling it.
+   */
+  router.get('/health', asyncRoute(async (req, res) => {
+    const caller = await authenticate(req);
+    if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
+    if (!caller.isAdmin) return res.status(403).json({ error: 'Admins only.' });
+    const vapid = configured() ? vapidProblem() : 'VAPID keys or subject missing';
+    const webhookSecret = !!env('PUSH_WEBHOOK_SECRET');
+    const db = getAdmin();
+    if (!db) return res.status(503).json({ error: 'Server is missing Supabase service credentials.' });
+
+    const { data: devices, error: deviceError } = await db.from('push_subscriptions').select('user_id').limit(5000);
+    if (deviceError) throw deviceError;
+    const members = [...new Set((devices ?? []).map(d => d.user_id as string))];
+    let recent = 0;
+    let delivered = 0;
+    if (members.length) {
+      const now = Date.now();
+      const { data: notes, error: noteError } = await db.from('notifications').select('id')
+        .in('user_id', members.slice(0, 500))
+        .gt('created_at', new Date(now - HEALTH_WINDOW_MS).toISOString())
+        .lt('created_at', new Date(now - HEALTH_SETTLE_MS).toISOString())
+        .order('created_at', { ascending: false }).limit(20);
+      if (noteError) throw noteError;
+      const ids = (notes ?? []).map(n => n.id as string);
+      recent = ids.length;
+      if (ids.length) {
+        const { data: claims, error: claimError } = await db.from('push_deliveries').select('notification_id').in('notification_id', ids);
+        if (claimError) throw claimError;
+        delivered = new Set((claims ?? []).map(c => c.notification_id)).size;
+      }
+    }
+    const verdict = vapid || !webhookSecret ? 'server-not-configured'
+      : !members.length ? 'no-devices'
+      : !recent ? 'no-recent-notifications'
+      : delivered === 0 ? 'webhook-not-delivering'
+      : 'delivering';
+    res.json({ verdict, vapidConfigured: !vapid, webhookSecretConfigured: webhookSecret, devices: (devices ?? []).length, recentNotifications: recent, recentDispatched: delivered });
   }, 'Notifications are temporarily unavailable. Please try again.'));
 
   return router;

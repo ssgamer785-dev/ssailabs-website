@@ -6,7 +6,7 @@ const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebK
 const ANDROID_CHROME = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36';
 
 /** Runs the real public/sw.js against a fake ServiceWorkerGlobalScope and delivers one push. */
-async function deliverPush(userAgent: string, appVisible: boolean, extra: Record<string, unknown> = {}) {
+async function deliverPush(userAgent: string, appVisible: boolean, extra: Record<string, unknown> = {}, unreadable = false) {
   const handlers: Record<string, (event: unknown) => void> = {};
   const shown: { tag: string; closed: boolean }[] = [];
   const self = {
@@ -24,7 +24,7 @@ async function deliverPush(userAgent: string, appVisible: boolean, extra: Record
   new Function('self', 'caches', SOURCE)(self, {});
   let work: Promise<unknown> = Promise.resolve();
   handlers.push({
-    data: { json: () => ({ id: 'n1', title: 'THE TRADERS PLANET', body: 'New message', url: '/chat/admin', ...extra }) },
+    data: { json: () => { if (unreadable) throw new SyntaxError('bad payload'); return { id: 'n1', title: 'THE TRADERS PLANET', body: 'New message', url: '/chat/admin', ...extra }; } },
     waitUntil: (promise: Promise<unknown>) => { work = promise; },
   });
   await work;
@@ -48,5 +48,10 @@ describe('service worker push delivery', () => {
   it('keeps a test notification on screen even while the app is open (it has no in-app notice)', async () => {
     expect(await deliverPush(IPHONE, true, { test: true })).toEqual([{ tag: 'tp-n1', closed: false }]);
     expect(await deliverPush(ANDROID_CHROME, true, { test: true })).toEqual([{ tag: 'tp-n1', closed: false }]);
+  });
+
+  it('still shows a banner on iPhone for a push it cannot read (WebKit counts it either way)', async () => {
+    expect(await deliverPush(IPHONE, false, {}, true)).toEqual([{ tag: 'tp-unreadable', closed: false }]);
+    expect(await deliverPush(ANDROID_CHROME, false, {}, true)).toEqual([]);
   });
 });

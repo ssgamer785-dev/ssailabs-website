@@ -36,7 +36,16 @@ const APPLE_WEBKIT = /AppleWebKit/.test(self.navigator.userAgent)
 self.addEventListener('push', event => {
   let data;
   try { data = event.data?.json(); } catch { data = null; }
-  if (!data || typeof data.id !== 'string') return;
+  if (!data || typeof data.id !== 'string') {
+    // Unreadable payload: WebKit still counts it, so it still gets a banner.
+    if (APPLE_WEBKIT) {
+      event.waitUntil(self.registration.showNotification('The Traders Planet', {
+        body: 'You have a new notification.', icon: '/icon-192.png', badge: '/icon-192.png',
+        tag: 'tp-unreadable', data: { url: '/notifications' },
+      }));
+    }
+    return;
+  }
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const visible = windows.some(client => client.visibilityState === 'visible');

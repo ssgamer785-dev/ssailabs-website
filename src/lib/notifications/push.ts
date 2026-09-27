@@ -235,6 +235,36 @@ export async function sendTestPush(): Promise<{ attempted: number; delivered: nu
   return { attempted: body.attempted ?? 0, delivered: body.delivered ?? 0, statuses: body.statuses ?? [] };
 }
 
+export type PushHealth = {
+  verdict: 'delivering' | 'webhook-not-delivering' | 'no-recent-notifications' | 'no-devices' | 'server-not-configured';
+  devices: number; recentNotifications: number; recentDispatched: number;
+};
+
+/** Admin only: whether recent notifications actually reached the push dispatcher. */
+export async function checkPushHealth(): Promise<PushHealth> {
+  const token = await accessToken();
+  const res = await fetch('/api/push/health', { headers: { Authorization: `Bearer ${token}` } });
+  const body = await res.json().catch(() => ({})) as Partial<PushHealth> & { error?: string };
+  if (!res.ok || !body.verdict) throw new Error(body.error || 'The delivery check could not run. Try again.');
+  return { verdict: body.verdict, devices: body.devices ?? 0, recentNotifications: body.recentNotifications ?? 0, recentDispatched: body.recentDispatched ?? 0 };
+}
+
+/** Plain-language result of the admin delivery check. */
+export function pushHealthMessage(health: PushHealth): string {
+  switch (health.verdict) {
+    case 'delivering':
+      return `Working: ${health.recentDispatched} of the last ${health.recentNotifications} notifications for members with notifications turned on were sent to their devices.`;
+    case 'webhook-not-delivering':
+      return `Not working: none of the last ${health.recentNotifications} notifications were sent to devices. The Supabase database webhook that sends new notifications to /api/push/dispatch is missing or failing.`;
+    case 'no-recent-notifications':
+      return 'Nothing recent to check. Send a chat message to a member who has notifications turned on, wait a minute, then check again.';
+    case 'no-devices':
+      return 'No one has turned on notifications on a device yet.';
+    default:
+      return 'Push is not fully configured on the server (keys or webhook secret missing).';
+  }
+}
+
 /** What a person should read for a failure: accurate, actionable, no internals. */
 export function pushErrorMessage(error: unknown): string {
   const stage = error instanceof PushSetupError ? error.stage : null;

@@ -7,6 +7,7 @@ import app from './app';
 import { resetClientsForTests } from './r2';
 import { isConversationObjectKey, isResumableChatUpload } from './chat-media';
 import { isAuthorPostKey } from './post-media';
+import { setPushRetryDelayForTests } from './push';
 import { startFakeSupabase, type FakeSupabase, type Row } from './testing/fake-supabase';
 
 /**
@@ -34,6 +35,8 @@ const AVATAR_KEY = `avatars/${OTHER}/1790000000000-${u(6)}.bin`;
 
 const deletedKeys: string[][] = [];
 const pushes: string[] = [];
+/** Statuses the fake push service answers before accepting; 0 = no answer (transport error). */
+let pushFailures: number[] = [];
 let originalSend: typeof S3Client.prototype.send;
 let originalNotify: typeof webpush.sendNotification;
 let fake: FakeSupabase;
@@ -83,6 +86,7 @@ function world(): Record<string, Row[]> {
 }
 
 beforeAll(() => {
+  setPushRetryDelayForTests(0);
   originalSend = S3Client.prototype.send;
   (S3Client.prototype as { send: unknown }).send = async function (command: { input?: { Delete?: { Objects?: { Key: string }[] } } }) {
     const keys = command?.input?.Delete?.Objects?.map(o => o.Key);
@@ -91,6 +95,8 @@ beforeAll(() => {
   };
   originalNotify = webpush.sendNotification;
   (webpush as { sendNotification: unknown }).sendNotification = async (subscription: { endpoint: string }) => {
+    const failure = pushFailures.shift();
+    if (failure !== undefined) throw Object.assign(new Error('push service refused'), { statusCode: failure || undefined, headers: {} });
     pushes.push(subscription.endpoint);
     return { statusCode: 201, body: '', headers: {} };
   };
@@ -104,6 +110,7 @@ afterAll(() => {
 beforeEach(async () => {
   deletedKeys.length = 0;
   pushes.length = 0;
+  pushFailures = [];
   purgeVictims = [];
   staleUploads = [];
   expiredPosts = [];
@@ -111,6 +118,7 @@ beforeEach(async () => {
   fake = await startFakeSupabase({
     tokens: TOKENS,
     failWrites,
+    uniqueKeys: { push_deliveries: ['notification_id', 'subscription_id'] },
     tables: world(),
     rpc: {
       select_user_media_to_purge: () => purgeVictims,
@@ -522,5 +530,54 @@ describe('stored and served types (TP-024)', () => {
     const res = await call(`/api/profile/avatar-url?userId=${OTHER}`, 'student-token', undefined, 'GET');
     expect(res.status).toBe(200);
     expect(served(res.body.url).disposition).toBe('attachment');
+  });
+});
+
+describe('push delivery reliability', () => {
+  const dispatch = (id: string) => call('/api/push/dispatch', null, { type: 'INSERT', table: 'notifications', record: { id } }, 'POST',
+    { 'x-push-webhook-secret': 'webhook-secret-fixture' });
+  const device = (id: string, user: string) => ({ id, user_id: user, endpoint: `https://push.example.test/${id}`, p256dh: 'B'.repeat(87), auth_key: 'A'.repeat(22) });
+  const note = (id: string, user: string, createdAt = new Date(Date.now() - 5 * 60_000).toISOString()) =>
+    ({ id, user_id: user, kind: 'chat', title: 'New message', body: 'Hi', related_post_id: null, related_conversation_id: CONV, created_at: createdAt });
+
+  test('a push the service refused for now (429/5xx) is sent again once', async () => {
+    fake.tables.push_subscriptions.push(device(u(401), STUDENT));
+    fake.tables.notifications.push(note(u(411), STUDENT));
+    pushFailures = [503];
+    expect((await dispatch(u(411))).body).toMatchObject({ ok: true, attempted: 1, uncertainFailures: 0 });
+    expect(pushes).toEqual([`https://push.example.test/${u(401)}`]);
+  });
+
+  test('a push that may have been delivered (no answer) is never sent twice', async () => {
+    fake.tables.push_subscriptions.push(device(u(402), STUDENT));
+    fake.tables.notifications.push(note(u(412), STUDENT));
+    pushFailures = [0];
+    expect((await dispatch(u(412))).body).toMatchObject({ ok: true, attempted: 1, uncertainFailures: 1 });
+    expect(pushes).toEqual([]);
+    expect((await dispatch(u(412))).body).toMatchObject({ ok: true, attempted: 1 });
+    expect(pushes).toEqual([]);
+  });
+
+  test('the delivery check is for the admin only', async () => {
+    expect((await call('/api/push/health', null, undefined, 'GET')).status).toBe(401);
+    expect((await call('/api/push/health', 'student-token', undefined, 'GET')).status).toBe(403);
+  });
+
+  test('the delivery check tells a missing webhook apart from a working one', async () => {
+    fake.tables.push_subscriptions.push(device(u(403), STUDENT));
+    fake.tables.notifications.push(note(u(413), STUDENT), note(u(414), STUDENT));
+    const missing = await call('/api/push/health', 'admin-token', undefined, 'GET');
+    expect(missing.body).toMatchObject({ verdict: 'webhook-not-delivering', devices: 1, recentNotifications: 2, recentDispatched: 0 });
+    await dispatch(u(413));
+    const working = await call('/api/push/health', 'admin-token', undefined, 'GET');
+    expect(working.body).toMatchObject({ verdict: 'delivering', recentNotifications: 2, recentDispatched: 1 });
+    expect(JSON.stringify(working.body)).not.toContain(STUDENT);
+  });
+
+  test('the delivery check reports no devices and no recent activity plainly', async () => {
+    expect((await call('/api/push/health', 'admin-token', undefined, 'GET')).body).toMatchObject({ verdict: 'no-devices' });
+    fake.tables.push_subscriptions.push(device(u(404), STUDENT));
+    fake.tables.notifications.push(note(u(415), STUDENT, new Date(Date.now() - 10_000).toISOString()));
+    expect((await call('/api/push/health', 'admin-token', undefined, 'GET')).body).toMatchObject({ verdict: 'no-recent-notifications' });
   });
 });

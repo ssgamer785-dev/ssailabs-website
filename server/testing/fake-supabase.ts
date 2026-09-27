@@ -52,6 +52,8 @@ export async function startFakeSupabase(options: {
   rpc?: Record<string, (args: Record<string, unknown>, tables: Record<string, Row[]>) => unknown>;
   /** Tables whose writes fail: 'missing' answers as PostgREST does for an unknown table. */
   failWrites?: Record<string, 'missing' | 'error'>;
+  /** Composite primary/unique keys to enforce on insert (answered as Postgres does: 23505). */
+  uniqueKeys?: Record<string, string[]>;
 }): Promise<FakeSupabase> {
   const tables: Record<string, Row[]> = options.tables ?? {};
   const rpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
@@ -96,7 +98,11 @@ export async function startFakeSupabase(options: {
     const incoming: Row[] = Array.isArray(req.body) ? req.body : [req.body];
     const conflict = new URL(req.originalUrl, 'http://fake').searchParams.get('on_conflict');
     const merge = (req.get('prefer') ?? '').includes('merge-duplicates');
+    const key = options.uniqueKeys?.[req.params.table];
     for (const row of incoming) {
+      if (key && table.some(r => key.every(column => r[column] === row[column]))) {
+        return res.status(409).json({ code: '23505', message: 'duplicate key value violates unique constraint' });
+      }
       const existing = conflict ? table.find(r => r[conflict] === row[conflict]) : undefined;
       if (existing && merge) Object.assign(existing, row);
       else if (existing) return res.status(409).json({ code: '23505', message: 'duplicate key' });

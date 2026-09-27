@@ -6,7 +6,7 @@ mock.module('../supabase', () => ({
 }));
 let session = true;
 
-const { PushSetupError, decodeApplicationServerKey, pushAvailability, pushErrorMessage, subscribePush } = await import('./push');
+const { PushSetupError, decodeApplicationServerKey, pushAvailability, pushErrorMessage, pushHealthMessage, subscribePush } = await import('./push');
 
 const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1';
 /** A real P-256 public key in the base64url form /api/push/public-key returns. */
@@ -172,5 +172,18 @@ describe('where push can work at all', () => {
     expect(decodeApplicationServerKey(PUBLIC_KEY)).toHaveLength(65);
     expect(() => decodeApplicationServerKey('not a key')).toThrow(PushSetupError);
     expect(() => decodeApplicationServerKey(Buffer.alloc(64, 4).toString('base64url') + 'AAAAAAAAAAAAAAAAAAAA')).toThrow(/P-256|malformed/);
+  });
+});
+
+describe('admin delivery check wording', () => {
+  const base = { devices: 3, recentNotifications: 5, recentDispatched: 0 };
+  it('names the webhook when nothing recent was dispatched', () => {
+    expect(pushHealthMessage({ ...base, verdict: 'webhook-not-delivering' })).toContain('webhook');
+  });
+  it('reports how many were sent when delivery works', () => {
+    expect(pushHealthMessage({ ...base, recentDispatched: 5, verdict: 'delivering' })).toContain('5 of the last 5');
+  });
+  it('explains how to produce something to check', () => {
+    expect(pushHealthMessage({ ...base, recentNotifications: 0, verdict: 'no-recent-notifications' })).toContain('wait a minute');
   });
 });

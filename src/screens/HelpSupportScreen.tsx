@@ -4,6 +4,7 @@ import { css } from '../lib/css';
 import { supportWhatsAppDisplay, supportWhatsAppUrl } from '../lib/support';
 import { useAuth } from '../lib/auth-context';
 import { B, DocumentScreen, P, Section } from '../components/ui/DocumentScreen';
+import { checkPushHealth, pushHealthMessage } from '../lib/notifications/push';
 
 /**
  * Support that uses what the app already has rather than standing up anything
@@ -203,6 +204,8 @@ export function HelpSupportScreen() {
         </div>
       </Section>
 
+      {isAdmin && <PushDeliveryCheck />}
+
       <Section title="Before you write in">
         <P>
           Telling us what you were doing, what you expected and what happened instead gets you a
@@ -217,5 +220,29 @@ export function HelpSupportScreen() {
         </button>
       </Section>
     </DocumentScreen>
+  );
+}
+
+/** Admin only: confirms from the server that new notifications reach members' devices. */
+function PushDeliveryCheck() {
+  const [state, setState] = useState<{ busy: boolean; message: string | null; error: boolean }>({ busy: false, message: null, error: false });
+  const run = async () => {
+    setState({ busy: true, message: null, error: false });
+    try {
+      const health = await checkPushHealth();
+      setState({ busy: false, message: pushHealthMessage(health), error: health.verdict !== 'delivering' && health.verdict !== 'no-recent-notifications' && health.verdict !== 'no-devices' });
+    } catch (error) {
+      setState({ busy: false, message: error instanceof Error ? error.message : 'The delivery check could not run. Try again.', error: true });
+    }
+  };
+  return (
+    <Section title="Notification delivery">
+      <P>Checks whether new notifications are being sent to members' phones.</P>
+      <button type="button" onClick={() => { void run(); }} disabled={state.busy} className="pressable row-focus"
+        style={css('margin-top:8px;min-height:40px;padding:0 16px;border-radius:999px;cursor:pointer;font-size:13px;font-weight:600;background:var(--surface-secondary);border:1px solid var(--border-4);color:var(--text-primary)')}>
+        {state.busy ? 'Checking…' : 'Check notification delivery'}
+      </button>
+      {state.message && <p role={state.error ? 'alert' : 'status'} style={css('margin-top:10px;font-size:13px;line-height:1.5;color:' + (state.error ? 'var(--danger-ink)' : 'var(--text-secondary)'))}>{state.message}</p>}
+    </Section>
   );
 }
