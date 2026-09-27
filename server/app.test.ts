@@ -10,12 +10,12 @@ const base = new Promise<string>(resolve => {
 afterAll(() => { server.close(); });
 
 describe('API surface', () => {
-  test('does not serve contact-form leads to unauthenticated callers', async () => {
+  test('the retired contact-form listing is not served', async () => {
     const res = await fetch(`${await base}/api/leads`);
     expect(res.status).toBe(404);
   });
 
-  test('does not accept anonymous contact-form submissions that send email', async () => {
+  test('the retired contact-form submission route is not served', async () => {
     const res = await fetch(`${await base}/api/start-project`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

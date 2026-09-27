@@ -37,8 +37,6 @@ app.use("/api/push", pushRouter());
 app.use("/api/notifications", notificationsRouter());
 
 // The S.S AI LABS contact-form routes (/api/start-project, /api/leads) were
-// removed: this app never called them, /api/leads served every submitted
-// name, email and phone number to anyone without authentication, and
-// /api/start-project let any caller send HTML email through the SMTP account.
+// removed: nothing in this app calls them.
 
 export default app;
