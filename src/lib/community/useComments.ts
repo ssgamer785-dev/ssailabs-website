@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabase';
 import { subscribeCommunityActivity } from './activity';
+import { mergeFirstPage } from './comments-merge';
 import { useAuth } from '../auth-context';
 import { friendlyError } from '../errors';
 
@@ -75,10 +76,14 @@ export function useComments(postId: string | null): UseComments {
   const refresh = useCallback(async () => {
     try {
       const rows = await fetchPage(null);
-      setHasMore(rows.length === PAGE_SIZE);
-      oldestRef.current = rows.length ? rows[rows.length - 1].createdAt : null;
-      // Keep any comment still in flight so it doesn't vanish mid-send.
-      setComments(prev => [...rows, ...prev.filter(c => c.pending || c.failed)]);
+      const pageOldest = rows.length ? rows[rows.length - 1].createdAt : null;
+      // Older pages the reader already loaded stay loaded (and so does the
+      // paging position); only a first load or an emptied thread resets it.
+      if (!oldestRef.current || !pageOldest || pageOldest < oldestRef.current) {
+        oldestRef.current = pageOldest;
+        setHasMore(rows.length === PAGE_SIZE);
+      }
+      setComments(prev => mergeFirstPage(prev, rows));
       setError(null);
     } catch (e) {
       setError(friendlyError(e, 'Could not load comments.'));
@@ -100,7 +105,12 @@ export function useComments(postId: string | null): UseComments {
       .channel(`comments:${postId}`)
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'comments', filter: `post_id=eq.${postId}` },
-        () => { if (active) void refresh(); })
+        payload => {
+          if (!active) return;
+          const removed = payload.eventType === 'DELETE' ? (payload.old as { id?: string } | null)?.id : undefined;
+          if (removed) setComments(prev => prev.filter(c => c.id !== removed));
+          void refresh();
+        })
       .subscribe();
     // Anonymous comments by others only arrive through the activity stream.
     const stopActivity = subscribeCommunityActivity(`comments-activity:${postId}`, event => {
