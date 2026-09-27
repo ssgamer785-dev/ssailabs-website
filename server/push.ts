@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { timingSafeEqual } from 'crypto';
+import { randomUUID, timingSafeEqual } from 'crypto';
 import webpush from 'web-push';
 import { asyncRoute, authenticate, env, getAdmin } from './r2.js';
 
@@ -32,6 +32,20 @@ function destination(row: { kind: string; related_post_id: string | null; relate
     return `/post?post=${encodeURIComponent(row.related_post_id)}${comment}`;
   }
   return '/notifications';
+}
+
+/** One test per account per window: enough to verify a device, useless for spamming it. */
+const TEST_INTERVAL_MS = 20_000;
+const lastTest = new Map<string, number>();
+
+/** web-push's errors describe configuration (bad subject, wrong key length) without containing keys. */
+function vapidProblem(): string | null {
+  try {
+    webpush.setVapidDetails(env('VAPID_SUBJECT')!, env('VAPID_PUBLIC_KEY')!, env('VAPID_PRIVATE_KEY')!);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message.slice(0, 160) : 'invalid VAPID configuration';
+  }
 }
 
 export function pushRouter(): Router {
@@ -67,6 +81,56 @@ export function pushRouter(): Router {
       .delete().eq('endpoint', endpoint).eq('user_id', caller.userId);
     if (error) throw error;
     res.json({ ok: true });
+  }));
+
+  /**
+   * Sends a test notification to the CALLER's own devices only (the query is
+   * keyed to the verified user id), reporting each push service status: 201
+   * delivered, 403 VAPID rejected (e.g. mismatched key pair), 404/410 expired.
+   * It bypasses the database webhook, so a test that arrives while real
+   * notifications do not points at the webhook, not the device.
+   */
+  router.post('/test', asyncRoute(async (req, res) => {
+    if (!configured()) return res.status(503).json({ error: 'Push notifications are not configured.' });
+    const caller = await authenticate(req);
+    if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
+    if (!caller.isActivated) return res.status(403).json({ error: 'Activate your account first.' });
+    const now = Date.now();
+    if (now - (lastTest.get(caller.userId) ?? 0) < TEST_INTERVAL_MS) {
+      return res.status(429).json({ error: 'Wait a few seconds before sending another test.' });
+    }
+    lastTest.set(caller.userId, now);
+    const problem = vapidProblem();
+    if (problem) return res.status(503).json({ error: `Push is misconfigured on the server: ${problem}` });
+
+    const db = getAdmin()!;
+    const { data: subscriptions, error } = await db.from('push_subscriptions')
+      .select('id,endpoint,p256dh,auth_key').eq('user_id', caller.userId);
+    if (error) throw error;
+    const payload = JSON.stringify({
+      id: `test-${randomUUID()}`, test: true, title: 'THE TRADERS PLANET',
+      body: 'Test notification: delivery to this device works.', url: '/notifications',
+    });
+    const statuses: number[] = [];
+    const reasons: string[] = [];
+    let delivered = 0;
+    for (const sub of subscriptions ?? []) {
+      try {
+        const result = await webpush.sendNotification({
+          endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth_key },
+        }, payload, { TTL: 300, urgency: 'high' });
+        statuses.push(result.statusCode);
+        delivered++;
+      } catch (sendError) {
+        const status = (sendError as { statusCode?: number }).statusCode ?? 0;
+        statuses.push(status);
+        // Apple/FCM reasons such as "BadJwtToken" name the problem without secrets.
+        const reason = String((sendError as { body?: unknown }).body ?? '').match(/"reason"\s*:\s*"([A-Za-z]+)"/)?.[1];
+        if (reason) reasons.push(reason);
+        if (status === 404 || status === 410) await db.from('push_subscriptions').delete().eq('id', sub.id);
+      }
+    }
+    res.json({ attempted: (subscriptions ?? []).length, delivered, statuses, reasons });
   }));
 
   // Called only by a Supabase Database Webhook on notifications INSERT.

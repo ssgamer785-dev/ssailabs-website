@@ -292,3 +292,45 @@ describe('WebKit audio-session model: the shared long-lived output', () => {
     expect(webkit.contexts).toHaveLength(2);
   });
 });
+
+describe('start window vs WebKit reporting state late', () => {
+  /** A context whose `state` string lags behind rendering, as WebKit's async state update can. */
+  const laggingContext = () => {
+    const sources: { stopped: boolean }[] = [];
+    const context = {
+      state: 'suspended' as AudioContextState,
+      currentTime: 0,
+      destination: {} as AudioNode,
+      resume: () => new Promise<void>(() => {}),
+      close: () => Promise.resolve(),
+      decodeAudioData: () => Promise.resolve(SOUND as AudioBuffer),
+      createBufferSource: () => {
+        const source = { buffer: null, onended: null, stopped: false, connect() {}, disconnect() {}, start() {}, stop() { source.stopped = true; } };
+        sources.push(source);
+        return source;
+      },
+    };
+    return { context, sources };
+  };
+
+  it('keeps a sound whose clock is already moving even though state still reads "suspended"', async () => {
+    const { context, sources } = laggingContext();
+    const output = createAudioOutput({ createContext: () => context });
+    const player = createRefreshSoundPlayer({ output, loadBuffer: async () => SOUND, maxStartDelayMs: 120 });
+    await player.preload();
+    player.playFromGesture(true);
+    context.currentTime = 0.08;                  // rendering began; the state update has not arrived
+    await wait(160);
+    expect(sources[0].stopped).toBe(false);
+  });
+
+  it('still drops a sound that has not started by the end of the window', async () => {
+    const { context, sources } = laggingContext();
+    const output = createAudioOutput({ createContext: () => context });
+    const player = createRefreshSoundPlayer({ output, loadBuffer: async () => SOUND, maxStartDelayMs: 120 });
+    await player.preload();
+    player.playFromGesture(true);
+    await wait(160);
+    expect(sources[0].stopped).toBe(true);
+  });
+});

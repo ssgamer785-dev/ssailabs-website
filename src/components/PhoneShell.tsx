@@ -22,6 +22,8 @@ type RefreshHandler = () => unknown | Promise<unknown>;
  * would always read as empty from exactly the components that need it.
  */
 const refreshHandlers = new Set<RefreshHandler>();
+/** Diagnostic: links one pull's touch-start, touch-end and refresh-fire in the trace. */
+let gestureSerial = 0;
 
 /**
  * Registers `fn` as this screen's pull-to-refresh action while it is mounted.
@@ -119,7 +121,7 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       if (!fns.length) { traceRefreshAudio('refresh-no-handler'); settle(); return; }
 
       // Start the sound in the release/touch gesture before animation or fetch.
-      traceRefreshAudio('refresh-fire', `${fns.length} handler(s) activation=${userActivationSnapshot()}`);
+      traceRefreshAudio('refresh-fire', `${fns.length} handler(s) g${gestureSerial} activation=${userActivationSnapshot()}`);
       playMoneyRef.current();
       state.busy = true;
       state.target = 54;
@@ -167,7 +169,7 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       if (e.touches.length !== 1) { state.tracking = false; settle(); return; }
       state.tracking = atTop(e.target);
       if (state.tracking) {
-        traceRefreshAudio('touch-start-at-top');
+        traceRefreshAudio('touch-start-at-top', `g${++gestureSerial} activation=${userActivationSnapshot()}`);
         prepareMoneyRefreshSound();
       }
       state.startX = e.touches[0].clientX;
@@ -195,7 +197,7 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
 
     const onTouchEnd = (e: TouchEvent) => {
       if (e.touches.length) return;
-      traceRefreshAudio('touch-end', `pull=${state.target.toFixed(0)} threshold=${THRESHOLD}`);
+      traceRefreshAudio('touch-end', `g${gestureSerial} pull=${state.target.toFixed(0)} threshold=${THRESHOLD}`);
       state.tracking = false;
       release();
     };

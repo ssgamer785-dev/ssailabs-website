@@ -209,6 +209,12 @@ export function HelpSupportScreen() {
           useful answer first time. A screenshot helps — you can attach one straight to the admin
           chat, or send it on WhatsApp if you cannot get into the app.
         </P>
+        {/* TEMPORARY (device testing): the installed app has no address bar for
+            ?audioDebug=1. Remove together with RefreshAudioDiagnosticPanel. */}
+        <button type="button" onClick={() => { window.location.href = `${window.location.pathname}?audioDebug=1`; }}
+          style={css('margin-top:10px;padding:6px 0;border:0;background:transparent;color:var(--text-faint);font-size:11.5px;text-decoration:underline;cursor:pointer')}>
+          Device diagnostics
+        </button>
       </Section>
     </DocumentScreen>
   );

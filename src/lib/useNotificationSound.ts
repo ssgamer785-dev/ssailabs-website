@@ -76,17 +76,19 @@ export function setNotificationSoundEnabled(enabled: boolean): void {
 /** Plays at most once per event id and drops bursts rather than playing late. */
 export function playNotificationChime(id?: string): void {
   if (id && !markNotificationSoundSeen(id)) return;
-  if (!notificationSoundEnabled()) return;
+  if (!notificationSoundEnabled()) { traceRefreshAudio('chime-skipped', 'pref off'); return; }
   const audio = context();
-  if (!audio) return;
+  if (!audio) { traceRefreshAudio('chime-skipped', 'no context'); return; }
+  traceRefreshAudio('chime-request', audio.state);
 
   const requestedAt = performance.now();
   const schedule = () => {
     try {
-      if (ctx !== audio || audio.state !== 'running') return;
-      if (performance.now() - requestedAt > MAX_UNLOCK_DELAY_MS) return;
+      if (ctx !== audio || audio.state !== 'running') { traceRefreshAudio('chime-skipped', audio.state); return; }
+      if (performance.now() - requestedAt > MAX_UNLOCK_DELAY_MS) { traceRefreshAudio('chime-skipped', 'late'); return; }
       const now = audio.currentTime;
-      if (now < lastScheduledEnd) return;
+      if (now < lastScheduledEnd) { traceRefreshAudio('chime-skipped', 'overlap'); return; }
+      traceRefreshAudio('chime-scheduled', `clock=${now.toFixed(3)}`);
       const startAt = now + 0.005;
       lastScheduledEnd = startAt + SOUND_DURATION_SECONDS + 0.06;
 

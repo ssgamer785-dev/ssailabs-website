@@ -40,8 +40,10 @@ self.addEventListener('push', event => {
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const visible = windows.some(client => client.visibilityState === 'visible');
-    // The open app already chimes and shows its own in-app notice.
-    if (visible && !APPLE_WEBKIT) return;
+    // The open app already chimes and shows its own in-app notice. A test push
+    // has no in-app counterpart, so it is always shown.
+    const test = data.test === true;
+    if (visible && !APPLE_WEBKIT && !test) return;
     const tag = `tp-${data.id}`;
     const path = typeof data.url === 'string' && data.url.startsWith('/') && !data.url.startsWith('//')
       ? data.url : '/notifications';
@@ -54,7 +56,7 @@ self.addEventListener('push', event => {
       data: { url: path },
     });
     // Shown only to keep WebKit's subscription; the app on screen has it covered.
-    if (visible) (await self.registration.getNotifications({ tag })).forEach(shown => shown.close());
+    if (visible && !test) (await self.registration.getNotifications({ tag })).forEach(shown => shown.close());
   })());
 });
 

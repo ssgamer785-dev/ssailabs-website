@@ -5,7 +5,7 @@ import { lockAppZoom } from './lib/app-zoom';
 import './index.css';
 import { installNotificationAudioUnlock } from './lib/useNotificationSound';
 import { handleRefreshAudioLifecycle, preloadMoneyRefreshSound } from './lib/useMoneySound';
-import { refreshAudioExperimentMode, traceRefreshAudio } from './lib/audio/refresh-diagnostics';
+import { refreshAudioDiagnosticsEnabled, refreshAudioExperimentMode, traceRefreshAudio } from './lib/audio/refresh-diagnostics';
 import { RefreshAudioDiagnosticPanel } from './components/RefreshAudioDiagnosticPanel';
 
 // Installed here rather than in a component effect: it is app-wide and
@@ -14,7 +14,19 @@ import { RefreshAudioDiagnosticPanel } from './components/RefreshAudioDiagnostic
 lockAppZoom();
 // The first load's pageshow fires before this module runs, so mark boot here.
 // A reload also takes the separate tryAutoplay path, so record which it was.
-traceRefreshAudio('boot', `${(performance.getEntriesByType?.('navigation')[0] as PerformanceNavigationTiming | undefined)?.type ?? 'unknown'} mode=${refreshAudioExperimentMode()}`);
+traceRefreshAudio('boot', `${(performance.getEntriesByType?.('navigation')[0] as PerformanceNavigationTiming | undefined)?.type ?? 'unknown'} mode=${refreshAudioExperimentMode()} build=${typeof __BUILD_COMMIT__ === 'string' ? __BUILD_COMMIT__ : 'dev'} standalone=${window.matchMedia?.('(display-mode: standalone)').matches ? 'yes' : 'no'}`);
+if (refreshAudioDiagnosticsEnabled()) {
+  // Other audio on the page changes the iOS audio category (voice notes and
+  // video play as media playback; the microphone as play-and-record).
+  for (const type of ['play', 'pause', 'ended'] as const) {
+    document.addEventListener(type, event => {
+      const media = event.target as HTMLMediaElement | null;
+      if (media instanceof HTMLMediaElement) traceRefreshAudio(`media-${type}`, `${media.tagName.toLowerCase()} muted=${media.muted}`);
+    }, true);
+  }
+  window.addEventListener('focus', () => traceRefreshAudio('focus'));
+  window.addEventListener('blur', () => traceRefreshAudio('blur'));
+}
 installNotificationAudioUnlock();
 preloadMoneyRefreshSound();
 document.addEventListener('visibilitychange', () => {

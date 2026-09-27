@@ -12,6 +12,7 @@ import {
   type RefreshAudioDiagnostic,
 } from '../lib/audio/refresh-diagnostics';
 import { audioPreferenceEnabled } from '../lib/audio/preferences';
+import { pushAvailability, sendTestPush } from '../lib/notifications/push';
 import { useRefreshHandler } from './PhoneShell';
 
 /**
@@ -28,6 +29,7 @@ function logHeader(events: readonly RefreshAudioDiagnostic[]): string[] {
   const standalone = nav.standalone === true || window.matchMedia?.('(display-mode: standalone)').matches;
   return [
     `ua: ${nav.userAgent}`,
+    `build: ${typeof __BUILD_COMMIT__ === 'string' ? __BUILD_COMMIT__ : 'dev'} · origin: ${location.host} · push: ${pushAvailability()}/${typeof Notification === 'undefined' ? 'n/a' : Notification.permission}`,
     `standalone: ${standalone ? 'yes' : 'no'} · audioSession: ${nav.audioSession?.type ?? 'n/a'} · audio mode: ${refreshAudioExperimentMode()} · refresh/notification sound: ${audioPreferenceEnabled('refreshSound') ? 'on' : 'off'}/${audioPreferenceEnabled('notificationSound') ? 'on' : 'off'} · activation api: ${userActivationSnapshot() === 'n/a' ? 'no' : 'yes'}`,
     `captured: ${new Date().toISOString()}`,
     `summary: ${summarizeRefreshAudioDiagnostics(events)}`,
@@ -52,11 +54,46 @@ export function RefreshAudioDiagnosticPanel() {
   // The Clipboard API is absent on plain-http origins (e.g. a LAN dev server)
   // and may reject; a silent failure would hand back a stale clipboard. Fall
   // back to selecting the log so iOS's own Copy menu can take it.
+  const text = () => [...logHeader(events), ...lines].join('\n');
+
+  // iOS share sheet: Messages, Mail, Notes or AirDrop, with no selecting.
+  const share = async () => {
+    try {
+      if (!navigator.share) throw new Error('unavailable');
+      await navigator.share({ title: 'Traders Planet audio log', text: text() });
+      setCopyStatus('Shared ✓');
+    } catch (error) {
+      if ((error as Error)?.name !== 'AbortError') download();
+    }
+  };
+
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([text()], { type: 'text/plain' }));
+    const link = Object.assign(document.createElement('a'), { href: url, download: `traders-planet-audio-log-${Date.now()}.txt` });
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    setCopyStatus('Saved as a .txt file (Files → Downloads).');
+  };
+
+  const testPush = async () => {
+    setCopyStatus('Sending test notification…');
+    try {
+      const result = await sendTestPush();
+      traceRefreshAudio('push-test', `attempted=${result.attempted} delivered=${result.delivered} statuses=${result.statuses.join(',') || '-'}`);
+      setCopyStatus(result.attempted
+        ? `Test sent to ${result.delivered}/${result.attempted} registered device(s) — push service status ${result.statuses.join(', ')}.`
+        : 'No device is registered for this account yet — enable notifications first.');
+    } catch (error) {
+      traceRefreshAudio('push-test-failed', (error as Error)?.message);
+      setCopyStatus(`Test failed: ${(error as Error)?.message}`);
+    }
+  };
+
   const copy = async () => {
-    const text = [...logHeader(events), ...lines].join('\n');
+    const content = text();
     try {
       if (!navigator.clipboard?.writeText) throw new Error('unavailable');
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(content);
       setCopyStatus('Copied ✓ — paste it into the chat.');
     } catch {
       const log = logRef.current;
@@ -81,10 +118,13 @@ export function RefreshAudioDiagnosticPanel() {
     </div>
     {expanded && <>
       <p style={{ margin: '8px 0' }}>Pull to refresh, then mark what you heard. The log stays on this device, survives a reload, and contains no account data.</p>
+      <button type="button" onClick={() => { void share(); }}>Share log</button>{' '}
       <button type="button" onClick={() => { void copy(); }}>Copy log</button>{' '}
+      <button type="button" onClick={download}>Download .txt</button>{' '}
+      <button type="button" onClick={() => { void testPush(); }}>Send test push</button>{' '}
       <button type="button" onClick={() => { setCopyStatus(''); clearRefreshAudioDiagnostics(); }}>Clear</button>
       {copyStatus && <p role="status" style={{ margin: '6px 0 0' }}>{copyStatus}</p>}
-      <pre ref={logRef} style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', userSelect: 'text', WebkitUserSelect: 'text' }}>{[...logHeader(events), ...lines].join('\n')}</pre>
+      <pre ref={logRef} style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', userSelect: 'text', WebkitUserSelect: 'text' }}>{text()}</pre>
     </>}
   </section>;
 }

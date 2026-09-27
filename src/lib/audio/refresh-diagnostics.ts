@@ -56,7 +56,17 @@ function restore(): void {
     if (!Array.isArray(saved)) return;
     const valid = saved.filter((item): item is RefreshAudioDiagnostic =>
       typeof item?.at === 'number' && typeof item?.event === 'string');
-    if (valid.length) events = [...valid, { at: now(), event: 'log-restored', detail: `${valid.length} events from before this page load` }].slice(-MAX_EVENTS);
+    if (!valid.length) return;
+    const restoredAt = now();
+    const added: RefreshAudioDiagnostic[] = [{ at: restoredAt, event: 'log-restored', detail: `${valid.length} events from before this page load` }];
+    // A reload whose last recorded touch was a pull that never reached
+    // touch-end is the browser's own pull-to-refresh, not the app's.
+    const lastTouch = [...valid].reverse().find(item => item.event === 'touch-start-at-top' || item.event === 'touch-end');
+    const navigation = (performance.getEntriesByType?.('navigation')[0] as PerformanceNavigationTiming | undefined)?.type;
+    if (navigation === 'reload' && lastTouch?.event === 'touch-start-at-top' && restoredAt - lastTouch.at < 15_000) {
+      added.push({ at: restoredAt, event: 'native-reload-suspected', detail: `${Math.round(restoredAt - lastTouch.at)}ms after an unfinished pull` });
+    }
+    events = [...valid, ...added].slice(-MAX_EVENTS);
   } catch { /* A corrupt or blocked store starts a fresh trace. */ }
 }
 

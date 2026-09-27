@@ -6,7 +6,7 @@ const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebK
 const ANDROID_CHROME = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36';
 
 /** Runs the real public/sw.js against a fake ServiceWorkerGlobalScope and delivers one push. */
-async function deliverPush(userAgent: string, appVisible: boolean) {
+async function deliverPush(userAgent: string, appVisible: boolean, extra: Record<string, unknown> = {}) {
   const handlers: Record<string, (event: unknown) => void> = {};
   const shown: { tag: string; closed: boolean }[] = [];
   const self = {
@@ -24,7 +24,7 @@ async function deliverPush(userAgent: string, appVisible: boolean) {
   new Function('self', 'caches', SOURCE)(self, {});
   let work: Promise<unknown> = Promise.resolve();
   handlers.push({
-    data: { json: () => ({ id: 'n1', title: 'THE TRADERS PLANET', body: 'New message', url: '/chat/admin' }) },
+    data: { json: () => ({ id: 'n1', title: 'THE TRADERS PLANET', body: 'New message', url: '/chat/admin', ...extra }) },
     waitUntil: (promise: Promise<unknown>) => { work = promise; },
   });
   await work;
@@ -43,5 +43,10 @@ describe('service worker push delivery', () => {
   it('keeps Chrome/Android behaviour: no OS banner while the app is visible, a banner otherwise', async () => {
     expect(await deliverPush(ANDROID_CHROME, true)).toEqual([]);
     expect(await deliverPush(ANDROID_CHROME, false)).toEqual([{ tag: 'tp-n1', closed: false }]);
+  });
+
+  it('keeps a test notification on screen even while the app is open (it has no in-app notice)', async () => {
+    expect(await deliverPush(IPHONE, true, { test: true })).toEqual([{ tag: 'tp-n1', closed: false }]);
+    expect(await deliverPush(ANDROID_CHROME, true, { test: true })).toEqual([{ tag: 'tp-n1', closed: false }]);
   });
 });

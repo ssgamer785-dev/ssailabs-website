@@ -7,8 +7,37 @@ import { PhoneShell, useRefreshHandler } from '../components/PhoneShell';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 import { notificationDestination } from '../lib/notifications/destination';
+import { usePushSetup } from '../lib/notifications/usePushSetup';
+import { isAppleMobileWebKit } from '../lib/notifications/push';
 
 const NCATS = ['All', 'Community', 'Chat'] as const;
+
+/** Device push status and the one action that fits it; never claims "on" before the server stored this device. */
+function PushStatusCard() {
+  const push = usePushSetup();
+  const text: Record<typeof push.status, string> = {
+    on: 'Push notifications are on for this device.',
+    ask: 'Get chat and community updates on this device, even when the app is closed.',
+    'needs-retry': "Notifications are allowed, but this device isn't registered yet.",
+    denied: isAppleMobileWebKit()
+      ? 'Notifications are turned off. Open iPhone Settings → Notifications → The Traders Planet and turn on Allow Notifications.'
+      : "Notifications are blocked for this site. Allow them in your browser's site settings.",
+    'install-required': 'On iPhone, push notifications work in the installed app: tap Share, then "Add to Home Screen", and open The Traders Planet from your Home Screen.',
+    unsupported: "This browser doesn't support push notifications.",
+    insecure: 'Push notifications need a secure (https) connection.',
+  };
+  const action = push.status === 'ask' ? 'Enable' : push.status === 'needs-retry' ? 'Retry' : null;
+  return (
+    <div style={css('flex:none;margin:0 20px 12px;padding:11px 13px;border-radius:14px;background:var(--surface-secondary);display:flex;flex-direction:column;gap:6px')}>
+      <div style={css('display:flex;align-items:center;gap:10px')}>
+        <div style={css('flex:1;min-width:0;font-size:12px;line-height:1.45;color:var(--text-muted)')}>{text[push.status]}</div>
+        {action && <button type="button" disabled={push.busy} onClick={() => void push.enable()} style={css('flex:none;min-height:34px;padding:0 13px;border:0;border-radius:10px;background:var(--accent);color:var(--on-accent);font-size:12px;font-weight:650;cursor:pointer;opacity:' + (push.busy ? '.7' : '1'))}>{push.busy ? 'Enabling…' : action}</button>}
+      </div>
+      {/* A blocked permission is already explained by the status line above. */}
+      {((push.error && push.status !== 'denied') || push.notice) && <div role="status" style={css('font-size:11.5px;line-height:1.45;color:' + (push.error ? 'var(--danger-ink)' : 'var(--success-ink)'))}>{push.status !== 'denied' && push.error ? push.error : push.notice}</div>}
+    </div>
+  );
+}
 
 const ICONS: Record<NotificationKind, [string, string, string]> = {
   signal: ['var(--accent-soft)', 'var(--accent-ink)', 'M4.2 16.8 9 11.4l3.4 3.2 2.7-2.6 4.7 4.6M14.6 5.2h5v5'],
@@ -155,6 +184,7 @@ export function NotificationsScreen() {
         })}
       </div>
       <div className="nav-space" style={css('flex:1;min-height:0;padding:16px 0 0;display:flex;flex-direction:column;overflow-y:auto')}>
+        <PushStatusCard />
         {error && (
           <div style={css('padding:10px 20px;font-size:12px;color:var(--danger-ink);line-height:1.4')}>{error}</div>
         )}

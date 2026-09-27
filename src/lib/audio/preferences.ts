@@ -1,3 +1,4 @@
+import { traceRefreshAudio } from './refresh-diagnostics';
 export type AudioPreference = 'refreshSound' | 'notificationSound';
 export interface AudioPreferences {
   refreshSound: boolean;
@@ -71,6 +72,7 @@ export function audioPreferenceEnabled(preference: AudioPreference): boolean {
 
 export function setAudioPreference(preference: AudioPreference, enabled: boolean): AudioPreferences {
   const next = { ...getAudioPreferences(), [preference]: enabled };
+  traceRefreshAudio('pref-change', `${preference}=${enabled ? 'on' : 'off'}`);
   try {
     localStorage.setItem(key(), JSON.stringify(next));
     if (typeof window !== 'undefined') window.dispatchEvent(new Event(CHANGE_EVENT));

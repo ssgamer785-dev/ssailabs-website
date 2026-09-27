@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { traceRefreshAudio } from '../audio/refresh-diagnostics';
 
 /** Safari/iOS only produces audio/mp4; Chrome and Android prefer webm/opus. */
 function pickMimeType(): string {
@@ -67,6 +68,7 @@ export function useVoiceRecorder(): UseVoiceRecorder {
     attemptRef.current += 1;
     clearInterval(timerRef.current);
     // Releases the mic indicator — important on mobile.
+    if (streamRef.current) traceRefreshAudio('mic-stop');
     streamRef.current?.getTracks().forEach(t => t.stop());
     streamRef.current = null;
     recorderRef.current = null;
@@ -87,6 +89,8 @@ export function useVoiceRecorder(): UseVoiceRecorder {
         return;
       }
       streamRef.current = stream;
+      // Diagnostic: capture moves iOS to the play-and-record audio category.
+      traceRefreshAudio('mic-start');
       const mimeType = pickMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
 

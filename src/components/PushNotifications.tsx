@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth-context';
-import { registerWorker, subscribePush, supportsPush } from '../lib/notifications/push';
+import { isInstalledApp, registerWorker, supportsPush } from '../lib/notifications/push';
+import { ensureSubscribed, usePushSetup } from '../lib/notifications/usePushSetup';
 import { supabase } from '../lib/supabase';
-import { playNotificationChime, unlockNotificationAudio } from '../lib/useNotificationSound';
+import { playNotificationChime } from '../lib/useNotificationSound';
 import { foregroundNotificationSoundId, incomingStudentPostSoundId } from '../lib/notifications/sound-events';
 import { notificationDestination } from '../lib/notifications/destination';
 import { NOTIFICATIONS_CHANGED_EVENT, type AppNotification } from '../lib/notifications/useNotifications';
@@ -12,16 +13,6 @@ import { createIncomingGate } from '../lib/notifications/incoming-gate';
 const REMIND_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 const RESYNC_AFTER_MS = 6 * 60 * 60 * 1000;
 const lastSynced = new Map<string, number>();
-const syncing = new Map<string, Promise<void>>();
-
-function ensureSubscribed(userId: string): Promise<void> {
-  const pending = syncing.get(userId);
-  if (pending) return pending;
-  const request = subscribePush().then(() => { lastSynced.set(userId, Date.now()); })
-    .finally(() => { syncing.delete(userId); });
-  syncing.set(userId, request);
-  return request;
-}
 
 function reminderKey(userId: string): string { return `tp:push-remind:${userId}`; }
 
@@ -37,17 +28,11 @@ function postpone(userId: string): void {
   catch { /* Storage may be unavailable in private browsing. */ }
 }
 
-function installed(): boolean {
-  return window.matchMedia('(display-mode: standalone)').matches
-    || (navigator as Navigator & { standalone?: boolean }).standalone === true;
-}
-
 export function PushNotifications() {
   const navigate = useNavigate();
   const { user, isActivated } = useAuth();
+  const push = usePushSetup();
   const [offer, setOffer] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ id: string; body: string; url: string } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -56,25 +41,34 @@ export function PushNotifications() {
   }, []);
 
   useEffect(() => {
-    if (!user || !isActivated || !supportsPush()) { setOffer(false); setError(null); return; }
+    if (!user || !isActivated) { setOffer(false); return; }
     const userId = user.id;
     let active = true;
     const sync = () => {
       if (!active) return;
-      if (Notification.permission === 'granted') {
+      if (supportsPush() && Notification.permission === 'granted') {
         setOffer(false);
+        // Background repair only; a failure shows on the Notifications screen,
+        // never as a banner the member did not ask for.
         if (Date.now() - (lastSynced.get(userId) ?? 0) >= RESYNC_AFTER_MS) {
+          // Stamped on the attempt: a device that cannot subscribe waits for
+          // the next window instead of retrying on every return to the app.
+          lastSynced.set(userId, Date.now());
           void ensureSubscribed(userId).catch(() => {});
         }
-      } else {
-        setOffer(installed() && Notification.permission === 'default' && reminderDue(userId));
+        return;
       }
+      const askable = supportsPush() && Notification.permission === 'default' && isInstalledApp();
+      // iPhone/iPad browser tabs cannot subscribe at all: explain installing
+      // instead of offering a button that can only fail.
+      const installGuide = !supportsPush() && push.availability === 'install-required';
+      setOffer((askable || installGuide) && reminderDue(userId));
     };
     sync();
     const onVisible = () => { if (document.visibilityState === 'visible') sync(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => { active = false; lastSynced.delete(userId); document.removeEventListener('visibilitychange', onVisible); };
-  }, [user?.id, isActivated]);
+  }, [user?.id, isActivated, push.availability]);
 
   useEffect(() => {
     if (!user || !isActivated) return;
@@ -162,45 +156,24 @@ export function PushNotifications() {
     };
   }, [user?.id, isActivated]);
 
-  async function enable() {
-    if (busy) return;
-    // This executes in the Allow button's trusted click before awaiting the OS prompt.
-    unlockNotificationAudio();
-    setBusy(true);
-    setError(null);
-    try {
-      const permission = await Notification.requestPermission();
-      setOffer(false);
-      if (permission === 'granted') {
-        if (user) await ensureSubscribed(user.id);
-      } else if (user && permission === 'default') postpone(user.id);
-    } catch {
-      setError('Notifications could not be enabled. Please try again later.');
-    } finally {
-      setBusy(false);
-    }
-  }
+  const installGuide = push.status === 'install-required';
+  const message = push.error ?? push.notice
+    ?? (installGuide
+      ? 'On iPhone, notifications work in the installed app: tap Share, then "Add to Home Screen", and open The Traders Planet from your Home Screen.'
+      : 'Get chat and community updates on this device.');
+  const dismiss = () => { if (user && offer) postpone(user.id); setOffer(false); push.clearMessages(); };
+  const showAction = !installGuide && !push.notice && (push.status === 'ask' || push.status === 'needs-retry');
 
-  async function retry() {
-    if (busy || !user) return;
-    setBusy(true);
-    setError(null);
-    try { await ensureSubscribed(user.id); }
-    catch { setError('Notifications could not be enabled. Please try again later.'); }
-    finally { setBusy(false); }
-  }
-
-  const granted = supportsPush() && Notification.permission === 'granted';
   return <>{toast && <button type="button" role="status" aria-label={`Open notification: ${toast.body}`} onClick={() => { navigate(toast.url); setToast(null); }}
     style={{ position: 'fixed', zIndex: 840, top: 'calc(10px + env(safe-area-inset-top))', left: '50%', transform: 'translateX(-50%)', width: 'min(390px, calc(100vw - 24px))', minHeight: 64, border: '1px solid var(--border)', borderRadius: 16, padding: '11px 14px', background: 'var(--surface)', color: 'var(--text-primary)', textAlign: 'left', boxShadow: '0 12px 36px rgba(0,0,0,.2)', cursor: 'pointer' }}>
     <span style={{ display: 'block', fontSize: 11, fontWeight: 800, letterSpacing: '.06em', color: 'var(--accent-ink)' }}>THE TRADERS PLANET</span>
     <span style={{ display: 'block', marginTop: 3, fontSize: 12.5, lineHeight: 1.4 }}>{toast.body}</span>
-  </button>}{(offer || error) && <div role="status" style={{ position: 'fixed', zIndex: 850, bottom: 'calc(20px + env(safe-area-inset-bottom))', left: '50%', transform: 'translateX(-50%)', width: 'min(350px, calc(100vw - 32px))', borderRadius: 16, padding: '16px 17px', background: 'var(--surface)', color: 'var(--text-primary)', boxShadow: '0 10px 35px rgba(0,0,0,.25)', border: '1px solid var(--border)' }}>
-    <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-.2px' }}>Enable Notifications</div>
-    <div style={{ marginTop: 4, fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-muted)' }}>{error ?? 'Get chat and community updates on this device.'}</div>
+  </button>}{(offer || push.error || push.notice) && <div role="status" style={{ position: 'fixed', zIndex: 850, bottom: 'calc(20px + env(safe-area-inset-bottom))', left: '50%', transform: 'translateX(-50%)', width: 'min(350px, calc(100vw - 32px))', borderRadius: 16, padding: '16px 17px', background: 'var(--surface)', color: 'var(--text-primary)', boxShadow: '0 10px 35px rgba(0,0,0,.25)', border: '1px solid var(--border)' }}>
+    <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-.2px' }}>{push.notice ? 'Notifications Enabled' : installGuide ? 'Get Notifications' : 'Enable Notifications'}</div>
+    <div style={{ marginTop: 4, fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-muted)' }}>{message}</div>
     <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 14, marginTop: 13 }}>
-      <button type="button" onClick={() => { if (user && offer) postpone(user.id); setOffer(false); setError(null); }} style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Not Now</button>
-      {(offer || granted) && <button type="button" disabled={busy} onClick={() => void (granted ? retry() : enable())} style={{ color: 'var(--accent-ink)', fontWeight: 700 }}>{busy ? 'Enabling…' : granted ? 'Retry' : 'Allow'}</button>}
+      <button type="button" onClick={dismiss} style={{ color: 'var(--text-muted)', fontWeight: 600 }}>{push.notice ? 'Done' : installGuide ? 'Got It' : 'Not Now'}</button>
+      {showAction && <button type="button" disabled={push.busy} onClick={() => void push.enable()} style={{ color: 'var(--accent-ink)', fontWeight: 700 }}>{push.busy ? 'Enabling…' : push.status === 'needs-retry' ? 'Retry' : 'Allow'}</button>}
     </div>
   </div>}</>;
 }

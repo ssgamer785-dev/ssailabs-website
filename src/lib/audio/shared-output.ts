@@ -17,7 +17,7 @@ export function createTracedAudioContext(label = 'ctx'): AudioContext | null {
     if (refreshAudioDiagnosticsEnabled()) {
       const id = ++diagnosticContextSerial;
       const live = ++diagnosticLiveContexts;
-      traceRefreshAudio(`${label}-created`, `#${id} ${context.state} ${context.sampleRate}Hz live=${live}`);
+      traceRefreshAudio(`${label}-created`, `#${id} ${context.state} ${context.sampleRate}Hz base=${Math.round((context.baseLatency ?? 0) * 1000)}ms live=${live}`);
       let counted = false;
       context.addEventListener('statechange', () => {
         if (context.state === 'closed' && !counted) {

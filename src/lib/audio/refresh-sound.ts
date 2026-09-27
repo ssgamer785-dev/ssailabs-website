@@ -13,9 +13,21 @@ type Source = {
 
 export type RefreshContext = OutputLike & {
   destination: AudioNode;
+  getOutputTimestamp?: () => AudioTimestamp;
+  outputLatency?: number;
   decodeAudioData: (bytes: ArrayBuffer) => Promise<AudioBuffer>;
   createBufferSource: () => Source;
 };
+
+/** Diagnostic: the output device position and latency beside the render clock. */
+function outputDetail(target: RefreshContext): string {
+  try {
+    const stamp = target.getOutputTimestamp?.();
+    const out = typeof stamp?.contextTime === 'number' ? ` out=${stamp.contextTime.toFixed(3)}` : '';
+    const latency = typeof target.outputLatency === 'number' ? ` latency=${Math.round(target.outputLatency * 1000)}ms` : '';
+    return out + latency;
+  } catch { return ''; }
+}
 
 /**
  * The refresh sound, played on the page's single long-lived output.
@@ -104,10 +116,11 @@ export function createRefreshSoundPlayer<C extends RefreshContext>(options: {
         next.disconnect();
         trace('source-ended', `${target.state} clock=${target.currentTime.toFixed(3)}`);
       };
+      const scheduledAt = target.currentTime;
       try {
         // Scheduled inside the gesture even while suspended: iOS starts it the
         // moment admission completes, with no second trip through a promise.
-        next.start(target.currentTime);
+        next.start(scheduledAt);
       } catch {
         drop('source-start-failed', target.state);
         return;
@@ -123,14 +136,17 @@ export function createRefreshSoundPlayer<C extends RefreshContext>(options: {
           options.output.markStalled(target, 'refresh-start');
           return;
         }
-        if (final && target.state !== 'running') {
+        // WebKit updates `state` asynchronously, after rendering has begun: a
+        // clock that has moved means this sound is already playing.
+        const rendering = target.currentTime > scheduledAt + 0.01;
+        if (final && target.state !== 'running' && !rendering) {
           // iOS has not admitted playback yet. Drop the sound so it cannot
           // start late, but keep the output: the activation in flight is what
           // makes the next refresh immediate.
           drop('start-deadline', `${target.state} kept-output`);
           return;
         }
-        if (!final) trace('clock-after-150ms', `${target.state} ${clock} clock=${target.currentTime.toFixed(3)}`);
+        if (!final) trace('clock-after-150ms', `${target.state} ${clock} clock=${target.currentTime.toFixed(3)}${outputDetail(target)}`);
       };
       timers.push(setTimeout(() => check(false), 150));
       timers.push(setTimeout(() => check(true), maxStartDelayMs));
