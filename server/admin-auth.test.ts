@@ -3,7 +3,7 @@ import express from 'express';
 import type { AddressInfo } from 'net';
 import type { Server } from 'http';
 import { fileURLToPath } from 'url';
-import { adminAuthRouter } from './admin-auth';
+import { adminAuthRouter, resetAdminLoginThrottleForTests } from './admin-auth';
 
 /**
  * The admin sign-in route.
@@ -30,11 +30,12 @@ async function serve(): Promise<string> {
 }
 
 const ENV_KEYS = ['ADMIN_USERNAME', 'VITE_SUPABASE_URL', 'SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY',
-                  'SUPABASE_SERVICE_ROLE_KEY'] as const;
+                  'SUPABASE_SERVICE_ROLE_KEY', 'ADMIN_LOGIN_FAILURE_FLOOR_MS'] as const;
 const saved: Record<string, string | undefined> = {};
 for (const k of ENV_KEYS) saved[k] = process.env[k];
 
 afterEach(() => {
+  resetAdminLoginThrottleForTests();
   for (const k of ENV_KEYS) {
     if (saved[k] === undefined) delete process.env[k];
     else process.env[k] = saved[k];
@@ -51,13 +52,14 @@ function configure(over: Partial<Record<(typeof ENV_KEYS)[number], string>> = {}
   process.env.VITE_SUPABASE_URL = 'https://project.supabase.co';
   process.env.VITE_SUPABASE_ANON_KEY = 'anon-key';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-key';
+  process.env.ADMIN_LOGIN_FAILURE_FLOOR_MS = '0';
   for (const [k, v] of Object.entries(over)) process.env[k] = v;
 }
 
-const post = (base: string, body: unknown) =>
+const post = (base: string, body: unknown, ip = '203.0.113.7') =>
   fetch(`${base}/api/admin/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-real-ip': ip },
     body: JSON.stringify(body),
   });
 
@@ -165,5 +167,29 @@ describe('the bundle', () => {
       expect(text).not.toMatch(/ADMIN_EMAIL/);
       expect(text).toContain("eq('role', 'admin')");
     });
+  });
+});
+
+describe('admin sign-in throttling and timing', () => {
+  test('after five failures a client is told to wait, with Retry-After; another client is not', async () => {
+    configure();
+    const base = await serve();
+    for (let i = 0; i < 5; i++) {
+      expect((await post(base, { username: 'guess', password: 'x' })).status).toBe(401);
+    }
+    const blocked = await post(base, { username: 'guess', password: 'x' });
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0);
+    expect((await blocked.json()).error).toContain('Too many');
+    expect((await post(base, { username: 'guess', password: 'x' }, '198.51.100.9')).status).toBe(401);
+  });
+
+  test('a refusal is never answered faster than the floor', async () => {
+    configure({ ADMIN_LOGIN_FAILURE_FLOOR_MS: '150' });
+    const base = await serve();
+    const started = Date.now();
+    const res = await post(base, { username: 'guess', password: 'x' });
+    expect(res.status).toBe(401);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(145);
   });
 });

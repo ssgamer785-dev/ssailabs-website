@@ -38,7 +38,7 @@
  * It is set in the Supabase dashboard.
  */
 
-import { Router, type Response } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { timingSafeEqual } from 'crypto';
 import { asyncRoute, env, getAdmin } from './r2.js';
@@ -57,6 +57,50 @@ function safeEqual(a: string, b: string): boolean {
   const bb = Buffer.from(b, 'utf8');
   if (ab.length !== bb.length) return false;
   return timingSafeEqual(ab, bb);
+}
+
+/**
+ * Failed attempts per client, kept in this instance's memory: five in fifteen
+ * minutes and that client is told to wait. Supabase's own limit sees Vercel's
+ * addresses rather than the caller's, so it cannot tell one guesser from
+ * everyone else. Serverless instances do not share memory, so this is a brake
+ * on guessing, not a guarantee; a durable limit needs a database table.
+ */
+const WINDOW_MS = 15 * 60 * 1000;
+const MAX_FAILURES = 5;
+const failures = new Map<string, number[]>();
+
+/** Vercel sets x-real-ip / x-forwarded-for to the caller's address and overwrites any client-supplied value. */
+export function clientKey(req: Request): string {
+  const forwarded = req.get('x-forwarded-for')?.split(',')[0]?.trim();
+  return req.get('x-real-ip')?.trim() || forwarded || req.socket.remoteAddress || 'unknown';
+}
+
+function recentFailures(key: string, now: number): number[] {
+  const recent = (failures.get(key) ?? []).filter(t => now - t < WINDOW_MS);
+  if (recent.length) failures.set(key, recent); else failures.delete(key);
+  return recent;
+}
+
+function recordFailure(key: string, now: number): void {
+  if (failures.size > 10_000) failures.clear(); // bounded, whatever arrives
+  failures.set(key, [...recentFailures(key, now), now]);
+}
+
+export function resetAdminLoginThrottleForTests(): void {
+  failures.clear();
+}
+
+/**
+ * Every refusal takes at least this long, measured from the start of the
+ * request, so a wrong username (decided locally) is not answered measurably
+ * faster than a wrong password (decided by Supabase).
+ */
+async function answerNoSoonerThan(startedAt: number): Promise<void> {
+  const floor = Number(env('ADMIN_LOGIN_FAILURE_FLOOR_MS') ?? 800);
+  const target = startedAt + floor + Math.floor(Math.random() * 150);
+  const wait = target - Date.now();
+  if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
 }
 
 function supabaseUrl(): string | undefined {
@@ -114,6 +158,16 @@ export function adminAuthRouter(): Router {
   router.post('/login', asyncRoute(async (req, res) => {
     if (!requireConfigured(res)) return;
 
+    const startedAt = Date.now();
+    const client = clientKey(req);
+    const recent = recentFailures(client, startedAt);
+    if (recent.length >= MAX_FAILURES) {
+      const retryAfter = Math.max(1, Math.ceil((recent[0] + WINDOW_MS - startedAt) / 1000));
+      console.error('[admin-auth] throttled: too many failed attempts from one client');
+      res.set('Retry-After', String(retryAfter));
+      return res.status(429).json({ error: 'Too many sign-in attempts. Please wait and try again.' });
+    }
+
     const { username, password } = req.body ?? {};
     if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) {
       return res.status(400).json({ error: 'Username and password are required.' });
@@ -124,6 +178,8 @@ export function adminAuthRouter(): Router {
       // so a rejected login can be told apart from a Supabase-side rejection
       // below without exposing the username or the configured alias.
       console.error('[admin-auth] rejected: typed username did not match ADMIN_USERNAME');
+      recordFailure(client, startedAt);
+      await answerNoSoonerThan(startedAt);
       return res.status(401).json({ error: REJECTED });
     }
 
@@ -178,11 +234,14 @@ export function adminAuthRouter(): Router {
       console.error('[admin-auth] rejected by Supabase sign-in:', error?.message ?? 'no session returned');
       if (error?.status === 429) return res.status(429).json({ error: 'Too many sign-in attempts. Please wait and try again.' });
       if (error?.code === 'invalid_credentials' || error?.message === 'Invalid login credentials') {
+        recordFailure(client, startedAt);
+        await answerNoSoonerThan(startedAt);
         return res.status(401).json({ error: REJECTED });
       }
       return res.status(503).json({ error: 'Admin sign-in is temporarily unavailable. Please try again.' });
     }
 
+    failures.delete(client);
     // The client installs this with supabase.auth.setSession(), which is why
     // only the two tokens are returned rather than the whole payload.
     res.json({
