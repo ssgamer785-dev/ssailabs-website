@@ -74,12 +74,15 @@ export function AdminChatScreen() {
   useEffect(() => {
     if (!isAdmin || !conversationId) { setPeer(null); return; }
     let active = true;
-    void supabase.rpc('admin_conversations').then(({ data }) => {
+    // Just this thread's member: it used to load every member's conversation
+    // summary (admin_conversations) to find one name.
+    void (async () => {
+      const { data: conv } = await supabase.from('conversations').select('student_id').eq('id', conversationId).maybeSingle();
+      if (!active || !conv?.student_id) { if (active) setPeer(null); return; }
+      const { data: profile } = await supabase.from('profiles').select('full_name, avatar_key').eq('id', conv.student_id).maybeSingle();
       if (!active) return;
-      const row = (data as { conversation_id: string | null; student_id: string; full_name: string; avatar_key: string | null }[] | null)
-        ?.find(item => item.conversation_id === conversationId);
-      setPeer(row ? { id: row.student_id, name: row.full_name, avatarKey: row.avatar_key } : null);
-    });
+      setPeer(profile ? { id: conv.student_id, name: profile.full_name, avatarKey: profile.avatar_key } : null);
+    })();
     return () => { active = false; };
   }, [isAdmin, conversationId]);
   const recorder = useVoiceRecorder();
@@ -133,7 +136,14 @@ export function AdminChatScreen() {
     restoreHeight.current = null;
   }, [messages.length]);
 
-  useEffect(() => { void markRead(); }, [markRead, messages.length]);
+  // Read receipts only while the thread is actually on screen: messages that
+  // arrive while the app is in the background stay unread until it returns.
+  useEffect(() => {
+    if (document.visibilityState === 'visible') void markRead();
+    const onVisible = () => { if (document.visibilityState === 'visible') void markRead(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [markRead, messages.length]);
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
