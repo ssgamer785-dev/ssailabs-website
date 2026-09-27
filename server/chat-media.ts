@@ -108,6 +108,87 @@ export function conversationFromKey(storageKey: string): string | null {
   return conversationId;
 }
 
+/** One ordinary file name, which is all a minted key ever ends in: no path, no traversal. */
+const OBJECT_LEAF = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
+
+/**
+ * Whether `key` names an object inside `conversationId`'s own namespace.
+ *
+ * Message rows are written by clients, so a key read back from a row proves
+ * nothing on its own. Before this server signs or deletes anything a row
+ * names, the key must resolve to the row's own conversation.
+ */
+export function isConversationObjectKey(key: unknown, conversationId: unknown): key is string {
+  if (typeof key !== 'string' || typeof conversationId !== 'string') return false;
+  const owner = conversationFromKey(key);
+  if (!owner || owner.toLowerCase() !== conversationId.toLowerCase()) return false;
+  const segments = key.split('/');
+  return segments.length === 3 && OBJECT_LEAF.test(segments[2]) && !segments[2].includes('..');
+}
+
+/** The extension /upload-url gives a key. Voice keeps a real audio extension so players pick the decoder. */
+export function chatUploadExtension(kind: string, mimeType: string): string {
+  if (kind !== 'voice') return EXTENSION[kind];
+  return /^audio\/mp4/i.test(mimeType) ? 'm4a' : /^audio\/aac/i.test(mimeType) ? 'aac'
+    : /^audio\/ogg/i.test(mimeType) ? 'ogg' : /^audio\/wav/i.test(mimeType) ? 'wav' : 'webm';
+}
+
+/**
+ * Whether a pending row's keys are the shape /upload-url mints for that
+ * conversation: `chat/<conversation>/<millis>-<uuid>.<ext>`, and for a video
+ * poster exactly `<same stem>-poster.jpg`.
+ */
+export function isResumableChatUpload(row: { conversation_id: unknown; storage_key: unknown; poster_key: unknown }): boolean {
+  if (!isConversationObjectKey(row.storage_key, row.conversation_id)) return false;
+  const leaf = row.storage_key.split('/')[2];
+  const minted = /^(\d{13}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.[a-z0-9]{2,5}$/i.exec(leaf);
+  if (!minted) return false;
+  if (row.poster_key == null) return true;
+  return row.poster_key === `chat/${row.storage_key.split('/')[1]}/${minted[1]}-poster.jpg`;
+}
+
+type Db = NonNullable<ReturnType<typeof getAdmin>>;
+
+/**
+ * Whether any message other than `messageId` names one of `keys`. An object is
+ * only ever signed or deleted on behalf of the one row that owns it.
+ */
+async function referencedByAnotherMessage(db: Db, messageId: string, keys: string[]): Promise<boolean> {
+  for (const key of keys) {
+    for (const column of ['storage_key', 'poster_key'] as const) {
+      const { data, error } = await db.from('messages').select('id').eq(column, key).neq('id', messageId).limit(1);
+      if (error) throw error;
+      if (data?.length) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The keys of `rows` this server may delete: inside each row's own
+ * conversation and named by no other message. Anything else is left in the
+ * bucket untouched; the row itself is still cleaned up by the caller.
+ */
+async function ownedObjectKeys(db: Db, rows: PurgeVictim[]): Promise<{ Key: string }[]> {
+  if (!rows.length) return [];
+  const { data, error } = await db.from('messages').select('id, conversation_id').in('id', rows.map(row => row.id));
+  if (error) throw error;
+  const conversationOf = new Map((data ?? []).map(row => [row.id as string, row.conversation_id as string]));
+  const owned: { Key: string }[] = [];
+  for (const row of rows) {
+    const conversationId = conversationOf.get(row.id);
+    for (const key of [row.storage_key, row.poster_key]) {
+      if (!key) continue;
+      if (isConversationObjectKey(key, conversationId) && !(await referencedByAnotherMessage(db, row.id, [key]))) {
+        owned.push({ Key: key });
+      } else {
+        console.error('[media] left an object in place: it is not owned by the row being cleaned up', row.id);
+      }
+    }
+  }
+  return owned;
+}
+
 export interface UploadRequest {
   kind: string;
   mimeType: string;
@@ -190,7 +271,7 @@ async function makeRoom(userId: string, incomingBytes: number): Promise<number> 
   if (error || !data?.length) return 0;
 
   const victims = data as PurgeVictim[];
-  const keys = objectKeysFor(victims);
+  const keys = await ownedObjectKeys(db, victims);
 
   // R2 first. deleteObjects throws on a partial failure too, so the rows are
   // only marked purged once every object is genuinely gone.
@@ -217,7 +298,7 @@ export async function sweepStaleUploads(): Promise<number> {
   if (error || !data?.length) return 0;
 
   const stale = data as PurgeVictim[];
-  const keys = objectKeysFor(stale);
+  const keys = await ownedObjectKeys(db, stale);
 
   await deleteObjects(client, b, keys);
   const { data: removed } = await db.rpc('delete_stale_pending_uploads', {
@@ -296,8 +377,7 @@ export function chatMediaRouter(): Router {
     const purged = await makeRoom(caller.userId, totalBytes);
 
     const stem = `chat/${conversationId}/${Date.now()}-${randomUUID()}`;
-    const voiceExtension = /^audio\/mp4/i.test(mimeType) ? 'm4a' : /^audio\/aac/i.test(mimeType) ? 'aac' : /^audio\/ogg/i.test(mimeType) ? 'ogg' : /^audio\/wav/i.test(mimeType) ? 'wav' : 'webm';
-    const storageKey = `${stem}.${kind === 'voice' ? voiceExtension : EXTENSION[kind]}`;
+    const storageKey = `${stem}.${chatUploadExtension(kind, mimeType)}`;
     const uploadUrl = await signPut(storageKey, mimeType, sizeBytes);
 
     const posterKey = wantsPoster ? `${stem}-poster.jpg` : undefined;
@@ -332,7 +412,7 @@ export function chatMediaRouter(): Router {
     const db = getAdmin()!;
     const { data: message } = await db
       .from('messages')
-      .select('id, sender_id, storage_key, poster_key, mime_type, size_bytes, poster_size_bytes, upload_status')
+      .select('id, conversation_id, sender_id, kind, storage_key, poster_key, mime_type, size_bytes, poster_size_bytes, upload_status')
       .eq('id', messageId)
       .single();
 
@@ -340,9 +420,28 @@ export function chatMediaRouter(): Router {
     if (message.sender_id !== caller.userId) {
       return res.status(403).json({ error: 'You can only resume your own uploads.' });
     }
+    if (!(await canAccessConversation(caller, message.conversation_id))) {
+      return res.status(403).json({ error: 'You do not have access to this conversation.' });
+    }
     if (message.upload_status !== 'pending' || !message.storage_key) {
       return res.status(409).json({ error: 'That upload has already finished.' });
     }
+
+    // The row was written by the client, so it is held to what /upload-url
+    // would have issued for it: a key minted for this conversation, a size and
+    // type within the limits, and an object no other message names.
+    const invalid = () => res.status(400).json({ error: 'Invalid upload.' });
+    if (!isResumableChatUpload(message)) return invalid();
+    const check = validateUploadRequest({
+      kind: message.kind,
+      mimeType: message.mime_type,
+      sizeBytes: Number(message.size_bytes),
+      posterBytes: message.poster_key ? Number(message.poster_size_bytes) : undefined,
+    });
+    if (check.status === 'rejected') return res.status(check.code).json({ error: check.error });
+    if (message.poster_key && !check.wantsPoster) return invalid();
+    const keys = [message.storage_key, message.poster_key].filter((k): k is string => !!k);
+    if (await referencedByAnotherMessage(db, message.id, keys)) return invalid();
 
     const uploadUrl = await signPut(
       message.storage_key,
@@ -445,10 +544,18 @@ export function chatMediaRouter(): Router {
     if (message.sender_id !== caller.userId) {
       return res.status(403).json({ error: 'You can only delete your own messages.' });
     }
+    if (!(await canAccessConversation(caller, message.conversation_id))) {
+      return res.status(403).json({ error: 'You do not have access to this conversation.' });
+    }
 
-    const keys = [message.storage_key, message.poster_key]
-      .filter((k): k is string => !!k)
-      .map(Key => ({ Key }));
+    // Keys come from a client-written row: only objects inside this message's
+    // conversation, and named by no other message, are ever deleted here.
+    const names = [message.storage_key, message.poster_key].filter((k): k is string => !!k);
+    if (names.some(key => !isConversationObjectKey(key, message.conversation_id))
+      || await referencedByAnotherMessage(db, message.id, names)) {
+      return res.status(409).json({ error: 'This attachment cannot be removed.' });
+    }
+    const keys = names.map(Key => ({ Key }));
 
     await deleteObjects(getS3()!, bucket()!, keys);
 

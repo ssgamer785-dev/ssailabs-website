@@ -132,6 +132,19 @@ export function postObjectKey(raw: unknown): string | null {
   return resolved;
 }
 
+/**
+ * Whether `key` is an object the post's author uploaded (`posts/<author>/…`).
+ *
+ * Post rows are written by clients, so a key read back from one is only
+ * deleted once it resolves inside the author's own namespace. Every key
+ * /upload-url has ever minted has this shape.
+ */
+export function isAuthorPostKey(key: unknown, authorId: unknown): key is string {
+  if (typeof authorId !== 'string' || !authorId) return false;
+  const resolved = postObjectKey(key);
+  return !!resolved && resolved === key && resolved.startsWith(`posts/${authorId}/`);
+}
+
 function signPut(key: string, mimeType: string, sizeBytes: number): Promise<string> {
   // ContentType and ContentLength are signed, so the upload can't exceed
   // the size we just validated.
@@ -274,9 +287,12 @@ export function postMediaRouter(): Router {
       return res.status(403).json({ error: 'You can only delete your own posts.' });
     }
 
-    const keys = [post.storage_key, post.poster_key]
-      .filter((k): k is string => !!k)
-      .map(Key => ({ Key }));
+    // Keys come from a client-written row: only the author's own objects are deleted here.
+    const names = [post.storage_key, post.poster_key].filter((k): k is string => !!k);
+    if (names.some(key => !isAuthorPostKey(key, post.author_id))) {
+      return res.status(409).json({ error: 'This attachment cannot be removed.' });
+    }
+    const keys = names.map(Key => ({ Key }));
 
     if (keys.length) {
       // R2 first: a failure throws, so the row is never marked purged while
@@ -302,10 +318,22 @@ export function postMediaRouter(): Router {
     const db = getAdmin()!;
     const { data: expired } = await db.rpc('select_expired_post_media');
     const victims = (expired ?? []) as { id: string; storage_key: string | null; poster_key: string | null }[];
-    const keys = victims
-      .flatMap(v => [v.storage_key, v.poster_key])
-      .filter((k): k is string => !!k)
-      .map(Key => ({ Key }));
+    // Only objects inside each expired post's own author namespace are
+    // deleted; anything else a row names is left in the bucket.
+    const authorOf = new Map<string, string>();
+    if (victims.length) {
+      const { data: owners, error: ownersError } = await db.from('posts').select('id, author_id').in('id', victims.map(v => v.id));
+      if (ownersError) throw ownersError;
+      for (const row of owners ?? []) authorOf.set(row.id as string, row.author_id as string);
+    }
+    const keys: { Key: string }[] = [];
+    for (const victim of victims) {
+      for (const key of [victim.storage_key, victim.poster_key]) {
+        if (!key) continue;
+        if (isAuthorPostKey(key, authorOf.get(victim.id))) keys.push({ Key: key });
+        else console.error('[media] retention left an object in place: it is not owned by its post', victim.id);
+      }
+    }
 
     if (keys.length) {
       await deleteObjects(getS3()!, bucket()!, keys);
