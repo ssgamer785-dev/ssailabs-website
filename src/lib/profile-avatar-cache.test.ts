@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
+let refreshes = 0;
 mock.module('./supabase', () => ({
-  supabase: { auth: { getSession: async () => ({ data: { session: { access_token: 'token-1' } } }) } },
+  supabase: { auth: {
+    getSession: async () => ({ data: { session: { access_token: 'token-1' } } }),
+    refreshSession: async () => { refreshes += 1; return { data: { session: { access_token: 'token-2' } }, error: null }; },
+  } },
 }));
 
 const { NoAvatarError, forgetAvatarUrl, getAvatarUrl } = await import('./profile-api');
@@ -9,9 +13,16 @@ const { NoAvatarError, forgetAvatarUrl, getAvatarUrl } = await import('./profile
 const saved = globalThis.fetch;
 let requests: string[];
 let answer: () => Response;
+let tokens: string[] = [];
 beforeEach(() => {
   requests = [];
-  globalThis.fetch = (async (url: string) => { requests.push(url); return answer(); }) as typeof fetch;
+  refreshes = 0;
+  tokens = [];
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    requests.push(url);
+    tokens.push(String((init?.headers as Record<string, string> | undefined)?.Authorization ?? 'none'));
+    return answer();
+  }) as typeof fetch;
 });
 afterEach(() => { globalThis.fetch = saved; });
 
@@ -50,5 +61,28 @@ describe('avatar URL cache', () => {
     answer = picture;
     expect(await getAvatarUrl(null, 'me')).toBe('https://r2.example/signed');
     expect(requests).toHaveLength(2);
+  });
+
+  it('never sends an avatar request without a session token', async () => {
+    answer = picture;
+    await getAvatarUrl(null, 'token-check');
+    expect(tokens).toEqual(['Bearer token-1']);
+  });
+
+  it('after a rejected token: refreshes the session once and retries once', async () => {
+    const replies = [new Response('{}', { status: 401 }), picture()];
+    answer = () => replies.shift()!;
+    expect(await getAvatarUrl(null, 'stale-session')).toBe('https://r2.example/signed');
+    expect(refreshes).toBe(1);
+    expect(tokens).toEqual(['Bearer token-1', 'Bearer token-2']);
+  });
+
+  it('a session that stays rejected fails without a loop and is not cached as "no picture"', async () => {
+    answer = () => new Response('{}', { status: 401 });
+    await expect(getAvatarUrl(null, 'signed-out')).rejects.not.toBeInstanceOf(NoAvatarError);
+    expect(requests).toHaveLength(2);                // original + one retry, then stop
+    expect(refreshes).toBe(1);
+    await expect(getAvatarUrl(null, 'signed-out')).rejects.toThrow();
+    expect(requests).toHaveLength(4);                // asked again next time, not remembered as absent
   });
 });

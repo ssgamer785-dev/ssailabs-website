@@ -179,9 +179,20 @@ export async function getAvatarUrl(storageKey?: string | null, userId?: string |
     const query = storageKey
       ? `key=${encodeURIComponent(storageKey)}`
       : `userId=${encodeURIComponent(userId!)}`;
-    const res = await fetch(`/api/profile/avatar-url?${query}`, {
+    let res = await fetch(`/api/profile/avatar-url?${query}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
+    // Same rule as fetchSignedUrl (media): one session refresh after a
+    // rejected token, then give up. Never a loop, and never cached as
+    // "no picture", so the next mount asks again with a good session.
+    if (res.status === 401) {
+      const { data: refreshed, error } = await supabase.auth.refreshSession();
+      const retryToken = refreshed.session?.access_token;
+      if (error || !retryToken) throw new Error('Your session has ended. Please sign in again.');
+      res = await fetch(`/api/profile/avatar-url?${query}`, {
+        headers: { Authorization: `Bearer ${retryToken}` },
+      });
+    }
     if (res.status === 404) {
       if ((cacheGeneration.get(cacheKey) ?? 0) === generation) noPicture.set(cacheKey, Date.now() + NO_PICTURE_TTL_MS);
       throw new NoAvatarError();
