@@ -287,14 +287,13 @@ export function postMediaRouter(): Router {
       return res.status(403).json({ error: 'You can only delete your own posts.' });
     }
 
-    // Keys come from a client-written row: only the author's own objects are deleted here.
+    // Keys come from a client-written row: only the author's own objects are
+    // deleted here. Anything else is left in the bucket; the row is still cleared.
     const names = [post.storage_key, post.poster_key].filter((k): k is string => !!k);
-    if (names.some(key => !isAuthorPostKey(key, post.author_id))) {
-      return res.status(409).json({ error: 'This attachment cannot be removed.' });
-    }
-    const keys = names.map(Key => ({ Key }));
+    const keys = names.filter(key => isAuthorPostKey(key, post.author_id)).map(Key => ({ Key }));
+    if (keys.length < names.length) console.error('[media] left an object in place: it is not owned by its post', post.id);
 
-    if (keys.length) {
+    if (names.length) {
       // R2 first: a failure throws, so the row is never marked purged while
       // its object is still in the bucket.
       await deleteObjects(getS3()!, bucket()!, keys);

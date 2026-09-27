@@ -550,12 +550,8 @@ export function chatMediaRouter(): Router {
 
     // Keys come from a client-written row: only objects inside this message's
     // conversation, and named by no other message, are ever deleted here.
-    const names = [message.storage_key, message.poster_key].filter((k): k is string => !!k);
-    if (names.some(key => !isConversationObjectKey(key, message.conversation_id))
-      || await referencedByAnotherMessage(db, message.id, names)) {
-      return res.status(409).json({ error: 'This attachment cannot be removed.' });
-    }
-    const keys = names.map(Key => ({ Key }));
+    // Anything else is left in the bucket; the row itself is still cleaned up.
+    const keys = await ownedObjectKeys(db, [{ id: message.id, storage_key: message.storage_key, poster_key: message.poster_key }]);
 
     await deleteObjects(getS3()!, bucket()!, keys);
 

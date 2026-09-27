@@ -273,17 +273,18 @@ describe('removing a chat attachment', () => {
     expect(fake.tables.messages.some(r => r.id === u(140))).toBe(false);
   });
 
-  test('refuses rows naming objects outside their conversation, and deletes nothing', async () => {
+  test('never deletes objects outside the row\'s conversation, but still clears the row', async () => {
     for (const [i, key] of [OFFICIAL_KEY, AVATAR_KEY, OTHER_THREAD_KEY].entries()) {
       addMessage(message(u(150 + i), { storage_key: chatKey(CONV, 20 + i), poster_key: key }));
-      expect((await call('/api/chat/delete-media', 'student-token', { messageId: u(150 + i) })).status).toBe(409);
+      expect((await call('/api/chat/delete-media', 'student-token', { messageId: u(150 + i) })).status).toBe(200);
     }
-    expect(deletedKeys).toEqual([]);
+    expect(deletedKeys).toEqual([[chatKey(CONV, 20)], [chatKey(CONV, 21)], [chatKey(CONV, 22)]]);
+    expect([u(150), u(151), u(152)].every(id => fake.tables.messages.find(r => r.id === id)?.media_purged)).toBe(true);
   });
 
-  test('refuses a row naming another message\'s object', async () => {
+  test('never deletes an object another message names', async () => {
     addMessage(message(u(160), { kind: 'pdf', storage_key: ADMIN_KEY_IN_THREAD }));
-    expect((await call('/api/chat/delete-media', 'student-token', { messageId: u(160) })).status).toBe(409);
+    expect((await call('/api/chat/delete-media', 'student-token', { messageId: u(160) })).status).toBe(200);
     expect(deletedKeys).toEqual([]);
     expect(fake.tables.messages.find(r => r.id === u(102))?.storage_key).toBe(ADMIN_KEY_IN_THREAD);
   });
@@ -342,13 +343,13 @@ describe('removing post media', () => {
     expect(deletedKeys).toEqual([[STUDENT_POST_KEY], [OFFICIAL_KEY]]);
   });
 
-  test('refuses a post whose row names another author\'s object, and deletes nothing', async () => {
+  test('never deletes another author\'s object, but still clears the post', async () => {
     fake.tables.posts.push({ id: u(203), author_id: STUDENT, storage_key: OFFICIAL_KEY, poster_key: null, media_purged: false });
     fake.tables.posts.push({ id: u(204), author_id: STUDENT, storage_key: STUDENT_POST_KEY, poster_key: AVATAR_KEY, media_purged: false });
-    expect((await call('/api/posts/delete-media', 'student-token', { postId: u(203) })).status).toBe(409);
-    expect((await call('/api/posts/delete-media', 'student-token', { postId: u(204) })).status).toBe(409);
-    expect((await call('/api/posts/delete-media', 'admin-token', { postId: u(203) })).status).toBe(409);
-    expect(deletedKeys).toEqual([]);
+    expect((await call('/api/posts/delete-media', 'admin-token', { postId: u(203) })).status).toBe(200);
+    expect((await call('/api/posts/delete-media', 'student-token', { postId: u(204) })).status).toBe(200);
+    expect(deletedKeys).toEqual([[STUDENT_POST_KEY]]);
+    expect(fake.tables.posts.find(r => r.id === u(203))?.media_purged).toBe(true);
     expect(fake.tables.posts.find(r => r.id === u(201))?.storage_key).toBe(OFFICIAL_KEY);
   });
 
