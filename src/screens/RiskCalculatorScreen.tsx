@@ -194,7 +194,7 @@ export function RiskCalculatorScreen() {
 
           <Field label="Instrument">
             <div style={FIELD}>
-              <select value={instrumentSymbol} onChange={e => setInstrumentSymbol(e.target.value)} style={SELECT}>
+              <select aria-label="Instrument" value={instrumentSymbol} onChange={e => setInstrumentSymbol(e.target.value)} style={SELECT}>
                 {INSTRUMENTS.map(i => <option key={i.symbol} value={i.symbol}>{i.label}</option>)}
               </select>
               <Chevron />
@@ -203,7 +203,7 @@ export function RiskCalculatorScreen() {
 
           <Field label="Deposit currency">
             <div style={FIELD}>
-              <select value={depositCurrency} onChange={e => setDepositCurrency(e.target.value as CurrencyCode)} style={SELECT}>
+              <select aria-label="Deposit currency" value={depositCurrency} onChange={e => setDepositCurrency(e.target.value as CurrencyCode)} style={SELECT}>
                 {DEPOSIT_CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
               </select>
               <Chevron />
@@ -258,7 +258,7 @@ export function RiskCalculatorScreen() {
                 />
               </div>
               <div style={css('flex:1;height:52px;border:1px solid var(--border-strong);border-radius:8px;background:var(--surface);display:flex;align-items:center;padding:0 14px;min-width:0')}>
-                <select value={riskUnit} onChange={e => setRiskUnit(e.target.value as RiskUnit)} style={SELECT}>
+                <select aria-label="Risk unit" value={riskUnit} onChange={e => setRiskUnit(e.target.value as RiskUnit)} style={SELECT}>
                   <option value="percent">%</option>
                   {/* Always "$": a non-USD account is stopped by the FX guard
                       before any result is produced, so this can never mislabel
