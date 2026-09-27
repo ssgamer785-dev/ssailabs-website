@@ -581,3 +581,66 @@ describe('push delivery reliability', () => {
     expect((await call('/api/push/health', 'admin-token', undefined, 'GET')).body).toMatchObject({ verdict: 'no-recent-notifications' });
   });
 });
+
+describe('anonymous authors: post media keys never name the author', () => {
+  const grants = () => (fake.tables.media_upload_grants ??= []) as Row[];
+  const neutral = (n: number, ext = 'bin') => `posts/${u(900 + n)}/17900000000${String(n).padStart(2, '0')}-${u(950 + n)}.${ext}`;
+  const grant = (key: string, owner: string, over: Row = {}) => grants().push({ storage_key: key, owner_id: owner, scope: 'post', conversation_id: null,
+    kind: 'image', mime_type: 'image/png', size_bytes: 1_000, poster_key: null, poster_size_bytes: null, used_at: '2026-09-27T00:00:00Z', created_at: '2026-09-27T00:00:00Z', ...over });
+
+  test('a new upload key (and its poster) carries a random id, not the author\'s', async () => {
+    const res = await call('/api/posts/upload-url', 'student-token', { kind: 'video', mimeType: 'video/mp4', sizeBytes: 90_000, posterBytes: 4_000 });
+    expect(res.status).toBe(200);
+    for (const key of [res.body.storageKey, res.body.posterKey, signedKey(res.body.uploadUrl), signedKey(res.body.posterUploadUrl)]) {
+      expect(String(key)).toMatch(/^posts\/[0-9a-f-]{36}\//);
+      expect(String(key)).not.toContain(STUDENT);
+    }
+  });
+
+  test('before the grants table exists, keys stay in the author namespace (ownership stays provable)', async () => {
+    failWrites.media_upload_grants = 'missing';
+    const res = await call('/api/posts/upload-url', 'student-token', { kind: 'image', mimeType: 'image/png', sizeBytes: 1_000 });
+    expect(res.status).toBe(200);
+    expect(String(res.body.storageKey).startsWith(`posts/${STUDENT}/`)).toBe(true);
+  });
+
+  test('the author (or the admin) removes media behind an author-free key proven by the author\'s grant', async () => {
+    fake.tables.posts.push({ id: u(960), author_id: STUDENT, storage_key: neutral(1), poster_key: null, media_purged: false });
+    grant(neutral(1), STUDENT);
+    expect((await call('/api/posts/delete-media', 'student-token', { postId: u(960) })).status).toBe(200);
+    expect(deletedKeys).toEqual([[neutral(1)]]);
+  });
+
+  test('an author-free key granted to someone else, or to no one, is never deleted', async () => {
+    fake.tables.posts.push(
+      { id: u(961), author_id: STUDENT, storage_key: neutral(2), poster_key: null, media_purged: false },
+      { id: u(962), author_id: STUDENT, storage_key: neutral(3), poster_key: null, media_purged: false },
+    );
+    grant(neutral(2), ADMIN);
+    const foreign = await call('/api/posts/delete-media', 'student-token', { postId: u(961) });
+    const unproven = await call('/api/posts/delete-media', 'admin-token', { postId: u(962) });
+    expect([foreign.status, unproven.status]).toEqual([409, 409]);
+    expect(deletedKeys).toEqual([]);
+  });
+
+  test('retention deletes an expired post\'s author-free objects only when its author\'s grant proves them', async () => {
+    fake.tables.posts.push(
+      { id: u(963), author_id: STUDENT, storage_key: neutral(4), poster_key: neutral(4).replace(/\.bin$/, '-poster.jpg'), media_purged: false },
+      { id: u(964), author_id: STUDENT, storage_key: neutral(5), poster_key: null, media_purged: false },
+    );
+    grant(neutral(4), STUDENT, { kind: 'video', poster_key: neutral(4).replace(/\.bin$/, '-poster.jpg') });
+    grant(neutral(5), OTHER);
+    expiredPosts = [{ id: u(963), storage_key: neutral(4), poster_key: neutral(4).replace(/\.bin$/, '-poster.jpg') }, { id: u(964), storage_key: neutral(5), poster_key: null }];
+    expect((await call('/api/posts/run-retention', 'admin-token', {})).status).toBe(200);
+    expect(deletedKeys.flat().sort()).toEqual([neutral(4), neutral(4).replace(/\.bin$/, '-poster.jpg')].sort());
+  });
+
+  test('resuming an author-free upload needs the caller\'s own grant', async () => {
+    grant(neutral(6), STUDENT, { used_at: null });
+    grant(neutral(7), OTHER, { used_at: null });
+    const own = await call('/api/posts/resume-upload', 'student-token', { storageKey: neutral(6), kind: 'image', mimeType: 'image/png', sizeBytes: 1_000 });
+    const foreign = await call('/api/posts/resume-upload', 'student-token', { storageKey: neutral(7), kind: 'image', mimeType: 'image/png', sizeBytes: 1_000 });
+    expect([own.status, foreign.status]).toEqual([200, 400]);
+    expect(signedKey(own.body.uploadUrl)).toBe(neutral(6));
+  });
+});

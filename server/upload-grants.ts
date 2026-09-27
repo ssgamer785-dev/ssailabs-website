@@ -32,7 +32,11 @@ function isMissingTable(error: { code?: string; message?: string }): boolean {
     || (/media_upload_grants/.test(error.message ?? '') && /does not exist|schema cache/i.test(error.message ?? ''));
 }
 
-export async function recordUploadGrant(db: SupabaseClient, grant: UploadGrant): Promise<void> {
+/**
+ * Records the grant. Resolves true once it is stored, false when the table
+ * does not exist yet (API deployed ahead of the migration); throws otherwise.
+ */
+export async function recordUploadGrant(db: SupabaseClient, grant: UploadGrant): Promise<boolean> {
   const { error } = await db.from(TABLE).insert({
     storage_key: grant.storageKey,
     owner_id: grant.ownerId,
@@ -46,25 +50,27 @@ export async function recordUploadGrant(db: SupabaseClient, grant: UploadGrant):
   });
   if (!error) {
     if (Math.random() < 0.01) void pruneUsedGrants(db);
-    return;
+    return true;
   }
   if (isMissingTable(error)) {
     if (!missingTableWarned) {
       missingTableWarned = true;
       console.warn('[media] upload grants are not recorded yet: the media_upload_grants table does not exist');
     }
-    return;
+    return false;
   }
   throw error;
 }
 
 /**
- * Used grants have done their job once the row exists. Unused ones are kept:
- * they are the list of uploads that never became a message or post.
+ * Used chat grants have done their job once the message exists (a chat key's
+ * conversation proves where it belongs). Post grants are kept: an author-free
+ * post key is proven to be its author's only by its grant. Unused grants are
+ * kept too: they are the list of uploads that never became a message or post.
  */
 async function pruneUsedGrants(db: SupabaseClient): Promise<void> {
   const cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
-  const { error } = await db.from(TABLE).delete().not('used_at', 'is', null).lt('created_at', cutoff);
+  const { error } = await db.from(TABLE).delete().eq('scope', 'chat').not('used_at', 'is', null).lt('created_at', cutoff);
   if (error && !isMissingTable(error)) console.error('[media] pruning used upload grants failed', error.message);
 }
 

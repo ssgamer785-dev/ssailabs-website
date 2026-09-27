@@ -10,6 +10,7 @@ import { useAudioPlayer } from '../../lib/chat/useAudioPlayer';
 import { formatDuration } from '../../lib/chat/types';
 import { VideoViewer } from '../media/VideoViewer';
 import { clampVideoPosition, snapshotVideoPlayback, type VideoPlaybackSnapshot } from '../../lib/media/video-playback-state';
+import { isWithheldForAnonymity } from '../../lib/community/media-visibility';
 
 function bytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -250,15 +251,16 @@ function PostVideo({ post }: { post: FeedPost }) {
  * chart. A post's real content going away is not a reason to replace it with
  * placeholder trading imagery; it is a reason to say it is gone.
  */
-function NoMedia({ height, purged }: { height: number; purged: boolean }) {
+function NoMedia({ height, purged, withheld = false }: { height: number; purged: boolean; withheld?: boolean }) {
   return (
     <div style={{ position: 'relative', height, borderRadius: 12, overflow: 'hidden', background: 'var(--surface-sunken-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={css('font-size:11.5px;color:var(--text-faint);text-align:center;padding:0 16px')}>
-        {purged ? 'Removed (6-month retention)' : 'Attachment unavailable'}
+        {withheld ? 'Attachment hidden to keep the author anonymous' : purged ? 'Removed (6-month retention)' : 'Attachment unavailable'}
       </div>
     </div>
   );
 }
+
 
 /**
  * The attachment area of a post card: the real image, the real video, or the
@@ -272,6 +274,11 @@ export function PostMedia({ post, height }: { post: FeedPost; height: number }) 
     isImage && !post.mediaPurged ? post.storageKey : null,
     getPostMediaUrl,
   );
+
+  if (isWithheldForAnonymity(post)) {
+    const compact = post.attachment === 'voice' || post.attachment === 'pdf' || post.attachment === 'file';
+    return <NoMedia height={compact ? 56 : height} purged={false} withheld />;
+  }
 
   if (post.attachment === 'voice') return <VoicePost post={post} />;
 
@@ -340,6 +347,7 @@ function VoicePost({ post }: { post: FeedPost }) {
 export function PdfRow({ post }: { post: FeedPost }) {
   const [open, setOpen] = useState(false);
   const isPdf = post.attachment === 'pdf';
+  if (isWithheldForAnonymity(post)) return <NoMedia height={56} purged={false} withheld />;
 
   return (
     <div onClick={post.storageKey && !post.mediaPurged ? event => { event.stopPropagation(); setOpen(true); } : undefined} style={css('background:var(--surface);border:1px solid var(--border-2);border-radius:12px;padding:11px 12px;display:flex;align-items:center;gap:11px;cursor:pointer')}>

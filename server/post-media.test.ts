@@ -239,26 +239,29 @@ describe('isAllowedAttachment: the kinds are not interchangeable', () => {
   });
 });
 
-describe('resuming an interrupted post upload', () => {
+describe('resuming an interrupted post upload (key shape; ownership is checked against the upload grant)', () => {
   const USER = '11111111-1111-4111-8111-111111111111';
   const stem = `posts/${USER}/1790000000000-0f8fad5b-d9cb-469f-a165-70867728950e`;
+  const neutral = 'posts/5d0c8b44-7a3e-4f7e-9d61-2f1b8f0c9a10/1790000000000-0f8fad5b-d9cb-469f-a165-70867728950e';
 
   test('accepts the key /upload-url minted for an admin voice post (retry was always refused)', () => {
-    expect(isResumablePostKey(`${stem}.${postUploadExtension('voice', 'audio/mp4')}`, USER, 'voice', 'audio/mp4')).toBe(true);
-    expect(isResumablePostKey(`${stem}.webm`, USER, 'voice', 'audio/webm;codecs=opus')).toBe(true);
+    expect(isResumablePostKey(`${stem}.${postUploadExtension('voice', 'audio/mp4')}`, 'voice', 'audio/mp4')).toBe(true);
+    expect(isResumablePostKey(`${stem}.webm`, 'voice', 'audio/webm;codecs=opus')).toBe(true);
   });
 
-  test('still accepts image, video and PDF keys exactly as before', () => {
-    expect(isResumablePostKey(`${stem}.bin`, USER, 'image', 'image/png')).toBe(true);
-    expect(isResumablePostKey(`${stem}.bin`, USER, 'video', 'video/mp4')).toBe(true);
-    expect(isResumablePostKey(`${stem}.pdf`, USER, 'pdf', 'application/pdf')).toBe(true);
+  test('accepts image, video and PDF keys of both generations (author namespace and author-free)', () => {
+    for (const base of [stem, neutral]) {
+      expect(isResumablePostKey(`${base}.bin`, 'image', 'image/png')).toBe(true);
+      expect(isResumablePostKey(`${base}.bin`, 'video', 'video/mp4')).toBe(true);
+      expect(isResumablePostKey(`${base}.pdf`, 'pdf', 'application/pdf')).toBe(true);
+    }
   });
 
-  test('refuses a key of another type, another user, or an unminted shape', () => {
-    expect(isResumablePostKey(`${stem}.bin`, USER, 'voice', 'audio/mp4')).toBe(false);
-    expect(isResumablePostKey(`${stem}.m4a`, USER, 'image', 'image/png')).toBe(false);
-    expect(isResumablePostKey(`${stem}.pdf`, USER, 'image', 'image/png')).toBe(false);
-    expect(isResumablePostKey(`${stem}.m4a`, '22222222-2222-4222-8222-222222222222', 'voice', 'audio/mp4')).toBe(false);
-    expect(isResumablePostKey(`posts/${USER}/avatar.m4a`, USER, 'voice', 'audio/mp4')).toBe(false);
+  test('refuses a key of another type, a poster in place of the main object, or an unminted shape', () => {
+    expect(isResumablePostKey(`${stem}.bin`, 'voice', 'audio/mp4')).toBe(false);
+    expect(isResumablePostKey(`${stem}.m4a`, 'image', 'image/png')).toBe(false);
+    expect(isResumablePostKey(`${stem}.pdf`, 'image', 'image/png')).toBe(false);
+    expect(isResumablePostKey(`${stem}-poster.jpg`, 'image', 'image/jpeg')).toBe(false);
+    expect(isResumablePostKey(`posts/${USER}/avatar.m4a`, 'voice', 'audio/mp4')).toBe(false);
   });
 });

@@ -416,6 +416,11 @@ as $$
 begin
   if current_user in ('authenticated', 'anon') then
     new.created_at := now();
+    -- The app has no voice comments. The columns took any string from a
+    -- client, which could carry a link that identifies an anonymous author
+    -- (or tracks whoever opens it), so a client never writes them.
+    new.voice_url := null;
+    new.voice_duration_seconds := null;
   end if;
   return new;
 end;
@@ -600,7 +605,20 @@ as $$
     case when p.is_anonymous and not v.admin and p.author_id is distinct from v.uid then null else p.author_id end,
     p.channel, p.title, p.body,
     p.instrument, p.entry_price, p.stop_loss, p.take_profit,
-    p.attachment, p.storage_key, p.poster_key, p.mime_type, p.size_bytes,
+    p.attachment,
+    -- An anonymous post's media keys are withheld from other members when
+    -- they contain the author's id (every key minted before author-free keys:
+    -- 'posts/<author>/...'), since the key, and the signed URL built from
+    -- it, would name the author.
+    case when p.is_anonymous and not v.admin and p.author_id is distinct from v.uid
+              and (position(p.author_id::text in coalesce(p.storage_key, '')) > 0
+                   or position(p.author_id::text in coalesce(p.poster_key, '')) > 0)
+         then null else p.storage_key end,
+    case when p.is_anonymous and not v.admin and p.author_id is distinct from v.uid
+              and (position(p.author_id::text in coalesce(p.storage_key, '')) > 0
+                   or position(p.author_id::text in coalesce(p.poster_key, '')) > 0)
+         then null else p.poster_key end,
+    p.mime_type, p.size_bytes,
     p.file_name, p.media_purged,
     p.chart_seed, p.is_anonymous, p.display_name, p.created_at, p.updated_at,
     case when v.admin then coalesce(pr.full_name, p.display_name) else p.display_name end,
@@ -641,7 +659,20 @@ as $$
     case when p.is_anonymous and not v.admin and p.author_id is distinct from v.uid then null else p.author_id end,
     p.channel, p.title, p.body,
     p.instrument, p.entry_price, p.stop_loss, p.take_profit,
-    p.attachment, p.storage_key, p.poster_key, p.mime_type, p.size_bytes,
+    p.attachment,
+    -- An anonymous post's media keys are withheld from other members when
+    -- they contain the author's id (every key minted before author-free keys:
+    -- 'posts/<author>/...'), since the key, and the signed URL built from
+    -- it, would name the author.
+    case when p.is_anonymous and not v.admin and p.author_id is distinct from v.uid
+              and (position(p.author_id::text in coalesce(p.storage_key, '')) > 0
+                   or position(p.author_id::text in coalesce(p.poster_key, '')) > 0)
+         then null else p.storage_key end,
+    case when p.is_anonymous and not v.admin and p.author_id is distinct from v.uid
+              and (position(p.author_id::text in coalesce(p.storage_key, '')) > 0
+                   or position(p.author_id::text in coalesce(p.poster_key, '')) > 0)
+         then null else p.poster_key end,
+    p.mime_type, p.size_bytes,
     p.file_name, p.media_purged,
     p.chart_seed, p.is_anonymous, p.display_name, p.created_at, p.updated_at,
     case when v.admin then coalesce(pr.full_name, p.display_name) else p.display_name end,
@@ -679,7 +710,9 @@ as $$
   select
     c.id, c.post_id,
     case when c.is_anonymous and not v.admin and c.author_id is distinct from v.uid then null else c.author_id end,
-    c.body, c.voice_url, c.voice_duration_seconds,
+    c.body,
+    case when c.is_anonymous and not v.admin and c.author_id is distinct from v.uid then null else c.voice_url end,
+    c.voice_duration_seconds,
     c.is_anonymous, c.display_name, c.created_at,
     case when v.admin then coalesce(pr.full_name, c.display_name) else c.display_name end,
     c.author_id = v.uid

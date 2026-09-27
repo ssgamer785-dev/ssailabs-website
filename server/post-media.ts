@@ -7,6 +7,7 @@
  */
 
 import { Router, type Response } from 'express';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
@@ -145,21 +146,59 @@ export function postUploadExtension(kind: string, mimeType: string): string {
     : /^audio\/ogg/i.test(mimeType) ? 'ogg' : /^audio\/wav/i.test(mimeType) ? 'wav' : 'webm';
 }
 
-/** Whether `key` is exactly what /upload-url would have minted for this caller and attachment. */
-export function isResumablePostKey(key: string, userId: string, kind: string, mimeType: string): boolean {
-  const prefix = `posts/${userId}/`;
-  if (!key.startsWith(prefix)) return false;
-  const leaf = key.slice(prefix.length);
-  if (!/^\d{13}-[0-9a-f-]{36}\.[a-z0-9]{3,4}$/i.test(leaf)) return false;
-  return leaf.endsWith(`.${postUploadExtension(kind, mimeType)}`);
+const UUID_RE = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+/** `posts/<uuid>/<13 digits>-<uuid>.<ext>` or its `-poster.jpg`: the shapes /upload-url mints. */
+const MINTED_POST_KEY = new RegExp(`^posts/${UUID_RE}/\\d{13}-${UUID_RE}(\\.[a-z0-9]{2,5}|-poster\\.jpg)$`, 'i');
+
+/**
+ * A new post object's key. It carries a random id, not the author's: the key
+ * is visible to every member who can see the post and sits in its signed URL,
+ * so an author id in it would name the author of an anonymous post. The upload
+ * grant recorded for the author is what proves ownership later. Only when
+ * grants cannot be recorded yet (API ahead of the migration) does the key fall
+ * back to the author namespace, so every object stays provably owned.
+ */
+export function newPostStem(ownerSegment: string): string {
+  return `posts/${ownerSegment}/${Date.now()}-${randomUUID()}`;
+}
+
+/** Whether `key` has the shape /upload-url mints for this attachment (either key generation). */
+export function isResumablePostKey(key: string, kind: string, mimeType: string): boolean {
+  return MINTED_POST_KEY.test(key) && !key.endsWith('-poster.jpg') && key.endsWith(`.${postUploadExtension(kind, mimeType)}`);
 }
 
 /**
- * Whether `key` is an object the post's author uploaded (`posts/<author>/…`).
- *
- * Post rows are written by clients, so a key read back from one is only
- * deleted once it resolves inside the author's own namespace. Every key
- * /upload-url has ever minted has this shape.
+ * Of `keys`, the ones `authorId` uploaded. Keys minted before author-free keys
+ * carry the author's id (`posts/<author>/…`); an author-free key counts only
+ * when the author's upload grant for it (main object or poster) exists.
+ */
+export async function ownedPostKeys(db: SupabaseClient, authorId: unknown, keys: (string | null | undefined)[]): Promise<Set<string>> {
+  const owned = new Set<string>();
+  if (typeof authorId !== 'string' || !authorId) return owned;
+  const lookup: string[] = [];
+  for (const key of keys) {
+    if (!key) continue;
+    const resolved = postObjectKey(key);
+    if (!resolved || resolved !== key) continue;
+    if (key.startsWith(`posts/${authorId}/`)) owned.add(key);
+    else if (MINTED_POST_KEY.test(key)) lookup.push(key);
+  }
+  if (lookup.length) {
+    const [main, posters] = await Promise.all([
+      db.from('media_upload_grants').select('storage_key').eq('owner_id', authorId).eq('scope', 'post').in('storage_key', lookup),
+      db.from('media_upload_grants').select('poster_key').eq('owner_id', authorId).eq('scope', 'post').in('poster_key', lookup),
+    ]);
+    if (main.error) throw main.error;
+    if (posters.error) throw posters.error;
+    for (const grant of main.data ?? []) owned.add(grant.storage_key as string);
+    for (const grant of posters.data ?? []) if (grant.poster_key) owned.add(grant.poster_key as string);
+  }
+  return owned;
+}
+
+/**
+ * Whether `key` is in the author's own legacy namespace (`posts/<author>/…`).
+ * Author-free keys need ownedPostKeys(), which consults the upload grants.
  */
 export function isAuthorPostKey(key: unknown, authorId: unknown): key is string {
   if (typeof authorId !== 'string' || !authorId) return false;
@@ -213,17 +252,24 @@ export function postMediaRouter(): Router {
       return res.status(413).json({ error: 'That thumbnail is too large.' });
     }
 
-    const stem = `posts/${caller.userId}/${Date.now()}-${randomUUID()}`;
-    const storageKey = `${stem}.${postUploadExtension(kind, mimeType)}`;
-    const uploadUrl = await signPut(storageKey, mimeType, sizeBytes);
-
-    const posterKey = wantsPoster ? `${stem}-poster.jpg` : undefined;
-    const posterUploadUrl = posterKey ? await signPut(posterKey, POSTER_MIME, posterBytes) : undefined;
-
-    await recordUploadGrant(getAdmin()!, {
+    const extension = postUploadExtension(kind, mimeType);
+    let stem = newPostStem(randomUUID());
+    let storageKey = `${stem}.${extension}`;
+    let posterKey = wantsPoster ? `${stem}-poster.jpg` : undefined;
+    const recorded = await recordUploadGrant(getAdmin()!, {
       storageKey, ownerId: caller.userId, scope: 'post',
       kind, mimeType, sizeBytes, posterKey, posterSizeBytes: posterKey ? posterBytes : null,
     });
+    if (!recorded) {
+      // No grant table yet: an author-free key could never be proven to be
+      // this author's, so use the author namespace until the migration runs.
+      stem = newPostStem(caller.userId);
+      storageKey = `${stem}.${extension}`;
+      posterKey = wantsPoster ? `${stem}-poster.jpg` : undefined;
+    }
+
+    const uploadUrl = await signPut(storageKey, mimeType, sizeBytes);
+    const posterUploadUrl = posterKey ? await signPut(posterKey, POSTER_MIME, posterBytes) : undefined;
 
     res.json({ uploadUrl, storageKey, posterUploadUrl, posterKey });
   }));
@@ -237,11 +283,11 @@ export function postMediaRouter(): Router {
     const { storageKey, posterKey, kind, mimeType, sizeBytes, posterBytes } = req.body ?? {};
     const key = postObjectKey(storageKey);
     if (kind === 'voice' && !caller.isAdmin) return res.status(403).json({ error: 'Admins only.' });
-    if (!key?.startsWith(`posts/${caller.userId}/`) || !isAllowedAttachment(kind, mimeType)
+    if (!key || !isAllowedAttachment(kind, mimeType)
       || !Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > MAX_BYTES[kind]) {
       return res.status(400).json({ error: 'Invalid upload.' });
     }
-    if (!isResumablePostKey(key, caller.userId, kind, mimeType)) {
+    if (!isResumablePostKey(key, kind, mimeType) || !(await ownedPostKeys(getAdmin()!, caller.userId, [key])).has(key)) {
       return res.status(400).json({ error: 'Invalid upload key.' });
     }
     const { data: published, error: publishedError } = await getAdmin()!.from('posts').select('id').eq('storage_key', key).maybeSingle();
@@ -315,7 +361,8 @@ export function postMediaRouter(): Router {
 
     // Keys come from a client-written row: only the author's own objects are deleted here.
     const names = [post.storage_key, post.poster_key].filter((k): k is string => !!k);
-    if (names.some(key => !isAuthorPostKey(key, post.author_id))) {
+    const owned = await ownedPostKeys(db, post.author_id, names);
+    if (names.some(key => !owned.has(key))) {
       return res.status(409).json({ error: 'This attachment cannot be removed.' });
     }
     const keys = names.map(Key => ({ Key }));
@@ -354,9 +401,10 @@ export function postMediaRouter(): Router {
     }
     const keys: { Key: string }[] = [];
     for (const victim of victims) {
+      const owned = await ownedPostKeys(db, authorOf.get(victim.id), [victim.storage_key, victim.poster_key]);
       for (const key of [victim.storage_key, victim.poster_key]) {
         if (!key) continue;
-        if (isAuthorPostKey(key, authorOf.get(victim.id))) keys.push({ Key: key });
+        if (owned.has(key)) keys.push({ Key: key });
         else console.error('[media] retention left an object in place: it is not owned by its post', victim.id);
       }
     }
