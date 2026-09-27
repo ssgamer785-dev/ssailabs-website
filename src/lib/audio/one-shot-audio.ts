@@ -23,7 +23,9 @@ type OneShotContext = {
 export function createOneShotAudioPlayer(options: {
   createContext: () => OneShotContext | null;
   loadBuffer: (context: OneShotContext) => Promise<BufferLike>;
+  trace?: (event: string, detail?: string) => void;
 }) {
+  const trace = options.trace ?? (() => {});
   let context: OneShotContext | null = null;
   let bufferPromise: Promise<BufferLike> | null = null;
   let cachedBuffer: BufferLike | null = null;
@@ -36,6 +38,12 @@ export function createOneShotAudioPlayer(options: {
   let startDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
   let playbackWatchdogTimer: ReturnType<typeof setTimeout> | undefined;
   let resumePromise: Promise<void> | null = null;
+  let clockSampleTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const clearClockSample = () => {
+    if (clockSampleTimer) clearTimeout(clockSampleTimer);
+    clockSampleTimer = undefined;
+  };
 
   // An unlock that arrives seconds later is a missed UI effect, not a sound to
   // replay over the member's next action.
@@ -62,16 +70,27 @@ export function createOneShotAudioPlayer(options: {
     context = null;
     bufferPromise = null;
     resumePromise = null;
+    trace('context-close', target.state);
     void target.close().catch(() => {});
   };
 
   const resumeContext = (target: OneShotContext, fromFreshGesture = false): Promise<void> => {
-    if (target.state === 'running') return Promise.resolve();
+    if (target.state === 'running') {
+      trace('resume-skipped', 'running');
+      return Promise.resolve();
+    }
     // iOS can leave the touch-start resume pending. Touch-end is a separate
     // user activation; retry in that task instead of awaiting the stale one.
-    if (resumePromise && !fromFreshGesture) return resumePromise;
+    if (resumePromise && !fromFreshGesture) {
+      trace('resume-pending', target.state);
+      return resumePromise;
+    }
+    trace('resume-request', target.state);
+    const startedAt = performance.now();
     const attempt = target.resume();
     resumePromise = attempt;
+    void attempt.then(() => trace('resume-resolved', `${target.state} ${Math.round(performance.now() - startedAt)}ms`))
+      .catch(() => trace('resume-rejected', target.state));
     void attempt.finally(() => {
       if (resumePromise === attempt) resumePromise = null;
     }).catch(() => {});
@@ -80,16 +99,19 @@ export function createOneShotAudioPlayer(options: {
 
   const stopSource = () => {
     clearPlaybackWatchdog();
+    clearClockSample();
     const previous = source;
     if (!previous) return;
     source = null;
     previous.onended = null;
     try { previous.stop(); } catch { /* It may already have ended. */ }
     previous.disconnect();
+    trace('source-stopped');
   };
 
   const cancel = (target: OneShotContext, request: number) => {
     if (context !== target || generation !== request) return;
+    trace('request-cancel', `${target.state} clock=${target.currentTime.toFixed(3)}`);
     pending = false;
     clearStartDeadline();
     stopSource();
@@ -112,7 +134,10 @@ export function createOneShotAudioPlayer(options: {
 
   const start = (target: OneShotContext, sound: BufferLike, request: number, gestureScheduled = false) => {
     if (context !== target || generation !== request || target.state === 'closed'
-      || (target.state !== 'running' && !gestureScheduled)) return;
+      || (target.state !== 'running' && !gestureScheduled)) {
+      trace('start-skipped', target.state);
+      return;
+    }
     pending = target.state !== 'running';
     if (!pending) clearStartDeadline();
     stopSource();
@@ -126,25 +151,35 @@ export function createOneShotAudioPlayer(options: {
       pending = false;
       next.onended = null;
       clearPlaybackWatchdog();
+      clearClockSample();
       next.disconnect();
+      trace('source-ended', `${target.state} clock=${target.currentTime.toFixed(3)}`);
       release(target);
     };
     try {
-      next.start(target.currentTime);
+      const clockAtStart = target.currentTime;
+      next.start(clockAtStart);
+      trace('source-start', `${target.state} clock=${clockAtStart.toFixed(3)} duration=${sound.duration.toFixed(2)}s`);
+      if (options.trace) clockSampleTimer = setTimeout(() => {
+        if (context !== target || generation !== request || source !== next) return;
+        const delta = target.currentTime - clockAtStart;
+        trace('clock-after-150ms', `${target.state} +${delta.toFixed(3)}s${delta < 0.03 ? ' STALLED' : ''}`);
+      }, 150);
       // WebKit can leave a context reporting "running" while its clock and
       // onended callback stop. Never reuse that silent context indefinitely.
       playbackWatchdogTimer = setTimeout(
-        () => cancel(target, request),
+        () => { trace('source-watchdog', target.state); cancel(target, request); },
         Math.max(0, sound.duration) * 1_000 + 1_000,
       );
     }
-    catch { cancel(target, request); }
+    catch { trace('source-start-failed', target.state); cancel(target, request); }
   };
 
   return {
     /** Discard a browser-interrupted output session; keep the decoded sound. */
     resetOutput() {
       const target = context;
+      trace('output-reset', target?.state ?? 'none');
       generation += 1;
       lastGestureAt = -Infinity;
       pending = false;
@@ -161,7 +196,8 @@ export function createOneShotAudioPlayer(options: {
         return !!cachedBuffer;
       }
       const target = options.createContext();
-      if (!target) return false;
+      if (!target) { trace('preload-no-context'); return false; }
+      trace('preload-start', target.state);
       // A gesture arriving during preload must await the same decode, not
       // start a second fetch/decode that can make the sound audibly late.
       const decode = options.loadBuffer(target).then(sound => {
@@ -175,15 +211,16 @@ export function createOneShotAudioPlayer(options: {
       const work = decode.then(() => {})
         .finally(() => { void target.close().catch(() => {}); });
       preloadPromise = work;
-      try { await work; return true; }
-      catch { preloadPromise = null; return false; }
+      try { await work; trace('preload-ready'); return true; }
+      catch { trace('preload-failed'); preloadPromise = null; return false; }
     },
 
     /** Unlock on the real touch/pointer start, before the later pull release. */
     prepareFromGesture() {
       if (!context || context.state === 'closed') context = options.createContext();
       const target = context;
-      if (!target) return;
+      if (!target) { trace('prepare-no-context'); return; }
+      trace('prepare-gesture', `${target.state} clock=${target.currentTime.toFixed(3)}`);
       if (target.state !== 'running') void resumeContext(target).catch(() => {});
       if (!cachedBuffer) void getBuffer(target).catch(() => {});
       clearPreparedClose();
@@ -198,19 +235,20 @@ export function createOneShotAudioPlayer(options: {
     playFromGesture() {
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
       // Duplicate touch/pointer events and stress bursts are one eligible gesture.
-      if (now - lastGestureAt < 100) return;
+      if (now - lastGestureAt < 100) { trace('duplicate-gesture-ignored'); return; }
       lastGestureAt = now;
       if (!context || context.state === 'closed') {
         context = options.createContext();
       }
       const target = context;
-      if (!target) return;
+      if (!target) { trace('play-no-context'); return; }
+      trace('play-gesture', `${target.state} clock=${target.currentTime.toFixed(3)} decoded=${!!cachedBuffer}`);
       clearPreparedClose();
       const request = ++generation;
       pending = true;
       stopSource();
       clearStartDeadline();
-      startDeadlineTimer = setTimeout(() => cancel(target, request), MAX_START_DELAY_MS);
+      startDeadlineTimer = setTimeout(() => { trace('start-deadline', target.state); cancel(target, request); }, MAX_START_DELAY_MS);
       // Resume must be requested in the browser's user-activation task.
       let resumed: Promise<void>;
       try { resumed = resumeContext(target, true); }

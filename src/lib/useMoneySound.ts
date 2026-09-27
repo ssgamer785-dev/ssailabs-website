@@ -2,8 +2,10 @@ import { useCallback } from 'react';
 import moneySound from '../assets/money-sound-for-trader.m4a';
 import { createOneShotAudioPlayer } from './audio/one-shot-audio';
 import { audioPreferenceEnabled } from './audio/preferences';
+import { refreshAudioDiagnosticsEnabled, traceRefreshAudio } from './audio/refresh-diagnostics';
 
 const moneyPlayer = createOneShotAudioPlayer({
+  trace: refreshAudioDiagnosticsEnabled() ? traceRefreshAudio : undefined,
   createContext: () => {
     if (typeof window === 'undefined') return null;
     const Constructor = window.AudioContext ?? (window as unknown as {
@@ -51,12 +53,14 @@ export function useMoneySound() {
   // PhoneShell calls this directly from its pull-to-refresh pointer gesture.
   return useCallback(() => {
     if (audioPreferenceEnabled('refreshSound')) moneyPlayer.playFromGesture();
+    else traceRefreshAudio('refresh-sound-off');
   }, []);
 }
 
 /** Shared entry point for explicit in-app refresh/retry buttons. */
 export function playMoneyRefreshSound(): void {
   if (audioPreferenceEnabled('refreshSound')) moneyPlayer.playFromGesture();
+  else traceRefreshAudio('refresh-sound-off');
 }
 
 /** Prepare Web Audio during the pointer/touch start that precedes a pull. */
