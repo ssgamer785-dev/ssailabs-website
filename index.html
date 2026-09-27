@@ -46,26 +46,58 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Start-up watchdog. A classic script, not a module, so it runs even
+         when the app's own code never arrives: a dropped connection while the
+         first files load used to leave a blank page, or a dead message with
+         no way forward. It shows a clear state with a Try again button,
+         retries by itself when the connection returns, and says "taking
+         longer than usual" (not "failed") when the start is only slow. The
+         app replaces this panel the moment it renders, and sets
+         window.__tpBooted so the watchdog stands down. Real errors still go
+         to the console. -->
+    <script>
+      (function () {
+        var shown = false;
+        function panel(kind) {
+          var root = document.getElementById('root');
+          if (!root || window.__tpBooted || (shown && kind !== 'failed') || root.childElementCount > 0 && !shown) return;
+          shown = true;
+          var offline = navigator.onLine === false;
+          var title = kind === 'slow' ? 'Taking longer than usual' : (offline ? 'You are offline' : 'The app could not load');
+          var text = kind === 'slow' ? 'Your connection seems slow. You can keep waiting or try again.'
+            : (offline ? 'It will open as soon as your connection is back.' : 'Check your connection and try again.');
+          root.innerHTML =
+            '<div role="alert" style="min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;' +
+            'padding:24px;text-align:center;background:#0C091E;color:#fff;font-family:system-ui,-apple-system,sans-serif;line-height:1.5">' +
+            '<div style="font-size:17px;font-weight:700">' + title + '</div>' +
+            '<div style="font-size:14px;opacity:.8;max-width:300px">' + text + '</div>' +
+            '<button type="button" id="tp-boot-retry" style="margin-top:6px;min-height:44px;padding:10px 24px;border:0;border-radius:12px;' +
+            'background:#0B5FEF;color:#fff;font-size:15px;font-weight:700;cursor:pointer">Try again</button></div>';
+          var retry = document.getElementById('tp-boot-retry');
+          if (retry) retry.onclick = function () { location.reload(); };
+          if (kind === 'failed') window.addEventListener('online', function () { location.reload(); }, { once: true });
+        }
+        window.__tpBootFailed = function (err) {
+          if (err) console.error('The app failed to start:', err);
+          panel('failed');
+        };
+        // A start-up file (script or stylesheet) that fails to download.
+        window.addEventListener('error', function (e) {
+          var t = e && e.target;
+          if (!window.__tpBooted && t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK') && /\/assets\//.test(t.src || t.href || '')) {
+            window.__tpBootFailed(new Error('Could not load ' + (t.src || t.href)));
+          }
+        }, true);
+        setTimeout(function () { if (!window.__tpBooted) panel('slow'); }, 25000);
+      })();
+    </script>
     <!-- A dynamic import, not a plain <script src>, so a failure the app
-         itself cannot recover from — e.g. required configuration missing at
-         build time — is catchable here. main.tsx and everything it imports
-         normally mount into #root within this promise and this .catch()
-         never runs; it exists only so a hard failure shows something instead
-         of leaving #root permanently empty with no visible sign anything
-         went wrong. The real error still goes to the console for
-         diagnosis — this message is deliberately generic for the visitor. -->
+         itself cannot recover from is catchable here and handed to the
+         watchdog above. -->
     <script type="module">
       import('/src/main.tsx').catch((err) => {
-        console.error('The app failed to start:', err);
-        const root = document.getElementById('root');
-        if (root) {
-          root.innerHTML =
-            '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;' +
-            'padding:24px;text-align:center;background:#0C091E;color:#fff;' +
-            'font-family:system-ui,-apple-system,sans-serif;font-size:15px;line-height:1.5">' +
-            'Something went wrong loading The Traders Planet. Please try again shortly.' +
-            '</div>';
-        }
+        if (window.__tpBootFailed) window.__tpBootFailed(err);
+        else console.error('The app failed to start:', err);
       });
     </script>
   </body>

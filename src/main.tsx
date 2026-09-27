@@ -37,6 +37,8 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', e => { traceRefreshAudio('pagehide', e.persisted ? 'to bfcache' : 'unload'); handleRefreshAudioLifecycle('pagehide', e.persisted); });
 window.addEventListener('pageshow', e => { traceRefreshAudio('pageshow', e.persisted ? 'from bfcache' : 'fresh load'); handleRefreshAudioLifecycle('pageshow', e.persisted); });
 
+// Tells the start-up watchdog in index.html that the app is running.
+(window as Window & { __tpBooted?: boolean }).__tpBooted = true;
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
