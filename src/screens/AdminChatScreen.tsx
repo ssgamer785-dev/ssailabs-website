@@ -15,6 +15,7 @@ import { AppBackButton } from '../components/ui/AppBackButton';
 import logo from '../assets/traders-planet-mark.png';
 import { Avatar } from '../components/ui/Avatar';
 import { normalizePickedFile } from '../lib/media/file-types';
+import { PortableImageError, toPortableImage } from '../lib/media/portable-image';
 import { PresenceIndicator, usePresence } from '../lib/presence/usePresence';
 
 function Wave({ bars, color, height, gap, seed }: { bars: number; color: string; height: number; gap: number; seed: number }) {
@@ -169,7 +170,12 @@ export function AdminChatScreen() {
     e.target.value = '';
     if (!picked) return;
     if (!chatReady) return;
-    const file = normalizePickedFile(picked);
+    let file = normalizePickedFile(picked);
+    try { file = await toPortableImage(file); }
+    catch (error) {
+      if (error instanceof PortableImageError) { setNotice(error.message); return; }
+      throw error;
+    }
 
     const kind = kindForFile(file);
     if (!kind) {

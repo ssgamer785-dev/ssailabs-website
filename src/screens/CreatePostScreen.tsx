@@ -14,6 +14,7 @@ import { AppBackButton } from '../components/ui/AppBackButton';
 import { useVoiceRecorder } from '../lib/chat/useVoiceRecorder';
 import { formatDuration } from '../lib/chat/types';
 import { normalizePickedFile } from '../lib/media/file-types';
+import { PortableImageError, toPortableImage } from '../lib/media/portable-image';
 
 const attachBtn = css('width:56px;height:56px;border-radius:15px;background:var(--surface);border:1px solid var(--border-4);box-shadow:0 2px 8px rgba(var(--shadow-rgb),.04);display:flex;align-items:center;justify-content:center');
 const attachCol = css('width:62px;display:flex;flex-direction:column;align-items:center;gap:9px;cursor:pointer');
@@ -136,7 +137,12 @@ export function CreatePostScreen() {
     const raw = e.target.files?.[0];
     e.target.value = '';
     if (!raw) return;
-    const picked = normalizePickedFile(raw);
+    let picked = normalizePickedFile(raw);
+    try { picked = await toPortableImage(picked); }
+    catch (error) {
+      if (error instanceof PortableImageError) { setError(error.message); return; }
+      throw error;
+    }
     if (!kindForFile(picked)) {
       setError('That file type cannot be attached.');
       return;

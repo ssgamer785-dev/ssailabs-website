@@ -10,6 +10,7 @@ import {
 import { PhoneShell } from '../components/PhoneShell';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import { Avatar } from '../components/ui/Avatar';
+import { PortableImageError, toPortableImage } from '../lib/media/portable-image';
 
 /**
  * Personal Information — name and profile picture, for members and the admin
@@ -105,9 +106,15 @@ export function PersonalInformationScreen() {
   }, [user, savingPhone, dirtyPhone, phoneProblem, phone, refreshProfile]);
 
   const pickPicture = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const picked = e.target.files?.[0];
+    const chosen = e.target.files?.[0];
     e.target.value = '';
-    if (!picked || !user) return;
+    if (!chosen || !user) return;
+    let picked: File;
+    try { picked = await toPortableImage(chosen); }
+    catch (error) {
+      setError(error instanceof PortableImageError ? error.message : 'That image could not be read. Choose another one.');
+      return;
+    }
 
     if (!PREVIEWABLE.test(picked.type)) {
       setError('Choose a JPEG, PNG, WebP or HEIC image.');
