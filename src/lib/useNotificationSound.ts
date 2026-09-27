@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { audioPreferenceEnabled, setAudioPreference } from './audio/preferences';
+import { refreshAudioDiagnosticsEnabled, traceRefreshAudio } from './audio/refresh-diagnostics';
 
 /** Original short, gently rising three-note in-app chime. */
 const PARTIALS = [
@@ -25,7 +26,17 @@ function context(): AudioContext | null {
     ? undefined
     : window.AudioContext ?? (window as unknown as { webkitAudioContext?: AudioContextConstructor }).webkitAudioContext;
   if (!Constructor) return null;
-  try { ctx = new Constructor(); return ctx; }
+  try {
+    const created = new Constructor();
+    ctx = created;
+    // Diagnostic-only: this app-lifetime context shares the page's audio
+    // session with every refresh context, so its state belongs in that trace.
+    if (refreshAudioDiagnosticsEnabled()) {
+      traceRefreshAudio('nctx-created', created.state);
+      created.addEventListener('statechange', () => traceRefreshAudio('nctx-statechange', created.state));
+    }
+    return ctx;
+  }
   catch { return null; }
 }
 
@@ -109,7 +120,10 @@ export function playNotificationChime(id?: string): void {
 /** Called directly from a real user gesture (also from the push Allow button). */
 export function unlockNotificationAudio(): void {
   const audio = context();
-  if (audio && audio.state !== 'running' && audio.state !== 'closed') void audio.resume().catch(() => {});
+  if (audio && audio.state !== 'running' && audio.state !== 'closed') {
+    traceRefreshAudio('nctx-resume-request', audio.state);
+    void audio.resume().catch(() => {});
+  }
 }
 
 /** Installs one app-lifetime gesture/lifecycle unlock; never asks for OS permission. */

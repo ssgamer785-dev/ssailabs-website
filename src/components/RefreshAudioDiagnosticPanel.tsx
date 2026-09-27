@@ -1,10 +1,14 @@
 import { useRef, useSyncExternalStore, useState } from 'react';
 import {
+  clearRefreshAudioDiagnostics,
   getRefreshAudioDiagnostics,
   refreshAudioDiagnosticsEnabled,
   stopRefreshAudioDiagnostics,
   subscribeRefreshAudioDiagnostics,
+  summarizeRefreshAudioDiagnostics,
   traceRefreshAudio,
+  userActivationSnapshot,
+  type RefreshAudioDiagnostic,
 } from '../lib/audio/refresh-diagnostics';
 import { audioPreferenceEnabled } from '../lib/audio/preferences';
 import { useRefreshHandler } from './PhoneShell';
@@ -18,13 +22,14 @@ import { useRefreshHandler } from './PhoneShell';
 const diagnosticRefresh = () => { traceRefreshAudio('diagnostic-refresh-handler'); };
 
 /** Device context a pasted log needs: Safari vs Chrome on iOS are both WebKit. */
-function logHeader(): string[] {
+function logHeader(events: readonly RefreshAudioDiagnostic[]): string[] {
   const nav = navigator as Navigator & { standalone?: boolean; audioSession?: { type?: string } };
   const standalone = nav.standalone === true || window.matchMedia?.('(display-mode: standalone)').matches;
   return [
     `ua: ${nav.userAgent}`,
-    `standalone: ${standalone ? 'yes' : 'no'} · audioSession: ${nav.audioSession?.type ?? 'n/a'} · refreshSound pref: ${audioPreferenceEnabled('refreshSound') ? 'on' : 'off'}`,
+    `standalone: ${standalone ? 'yes' : 'no'} · audioSession: ${nav.audioSession?.type ?? 'n/a'} · refreshSound pref: ${audioPreferenceEnabled('refreshSound') ? 'on' : 'off'} · activation api: ${userActivationSnapshot() === 'n/a' ? 'no' : 'yes'}`,
     `captured: ${new Date().toISOString()}`,
+    `summary: ${summarizeRefreshAudioDiagnostics(events)}`,
     '---',
   ];
 }
@@ -35,7 +40,9 @@ export function RefreshAudioDiagnosticPanel() {
   const [expanded, setExpanded] = useState(false);
   const [copyStatus, setCopyStatus] = useState('');
   const logRef = useRef<HTMLPreElement>(null);
-  const enabled = refreshAudioDiagnosticsEnabled();
+  // Subscribed, not read once: Close leaves the event list untouched, so a
+  // plain read never re-rendered and the panel stayed on screen.
+  const enabled = useSyncExternalStore(subscribeRefreshAudioDiagnostics, refreshAudioDiagnosticsEnabled);
   useRefreshHandler(diagnosticRefresh, enabled);
   if (!enabled) return null;
   const origin = events[0]?.at ?? 0;
@@ -45,7 +52,7 @@ export function RefreshAudioDiagnosticPanel() {
   // and may reject; a silent failure would hand back a stale clipboard. Fall
   // back to selecting the log so iOS's own Copy menu can take it.
   const copy = async () => {
-    const text = [...logHeader(), ...lines].join('\n');
+    const text = [...logHeader(events), ...lines].join('\n');
     try {
       if (!navigator.clipboard?.writeText) throw new Error('unavailable');
       await navigator.clipboard.writeText(text);
@@ -72,10 +79,11 @@ export function RefreshAudioDiagnosticPanel() {
       <button type="button" onClick={stopRefreshAudioDiagnostics}>Close</button>
     </div>
     {expanded && <>
-      <p style={{ margin: '8px 0' }}>Pull to refresh, then mark what you heard. The log stays on this device; it contains no account data.</p>
-      <button type="button" onClick={() => { void copy(); }}>Copy log</button>
+      <p style={{ margin: '8px 0' }}>Pull to refresh, then mark what you heard. The log stays on this device, survives a reload, and contains no account data.</p>
+      <button type="button" onClick={() => { void copy(); }}>Copy log</button>{' '}
+      <button type="button" onClick={() => { setCopyStatus(''); clearRefreshAudioDiagnostics(); }}>Clear</button>
       {copyStatus && <p role="status" style={{ margin: '6px 0 0' }}>{copyStatus}</p>}
-      <pre ref={logRef} style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', userSelect: 'text', WebkitUserSelect: 'text' }}>{[...logHeader(), ...lines].join('\n')}</pre>
+      <pre ref={logRef} style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', userSelect: 'text', WebkitUserSelect: 'text' }}>{[...logHeader(events), ...lines].join('\n')}</pre>
     </>}
   </section>;
 }

@@ -2,7 +2,7 @@ import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { css } from '../lib/css';
 import { cancelMoneyRefreshPreparation, prepareMoneyRefreshSound, useMoneySound } from '../lib/useMoneySound';
 import { accumulateWheelPull, resistedPullDistance, REFRESH_PULL_THRESHOLD } from '../lib/refresh-gesture';
-import { traceRefreshAudio } from '../lib/audio/refresh-diagnostics';
+import { traceRefreshAudio, userActivationSnapshot } from '../lib/audio/refresh-diagnostics';
 
 /** Drag distance, after resistance, that arms the refresh. */
 const THRESHOLD = REFRESH_PULL_THRESHOLD;
@@ -119,7 +119,7 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       if (!fns.length) { traceRefreshAudio('refresh-no-handler'); settle(); return; }
 
       // Start the sound in the release/touch gesture before animation or fetch.
-      traceRefreshAudio('refresh-fire', `${fns.length} handler(s)`);
+      traceRefreshAudio('refresh-fire', `${fns.length} handler(s) activation=${userActivationSnapshot()}`);
       playMoneyRef.current();
       state.busy = true;
       state.target = 54;

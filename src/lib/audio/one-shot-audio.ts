@@ -17,7 +17,18 @@ type OneShotContext = {
   close: () => Promise<void>;
   decodeAudioData: (bytes: ArrayBuffer) => Promise<AudioBuffer>;
   createBufferSource: () => OneShotSource;
+  getOutputTimestamp?: () => AudioTimestamp;
 };
+
+/** Diagnostic: the output device's position beside the render clock. Rendering can advance while nothing reaches the speaker. */
+function outputPosition(target: OneShotContext): string {
+  try {
+    const stamp = target.getOutputTimestamp?.();
+    return typeof stamp?.contextTime === 'number'
+      ? ` out=${stamp.contextTime.toFixed(3)} clock=${target.currentTime.toFixed(3)}`
+      : '';
+  } catch { return ''; }
+}
 
 /** A short UI effect: at most one pending or playing source, never a backlog. */
 export function createOneShotAudioPlayer(options: {
@@ -163,7 +174,7 @@ export function createOneShotAudioPlayer(options: {
       if (options.trace) clockSampleTimer = setTimeout(() => {
         if (context !== target || generation !== request || source !== next) return;
         const delta = target.currentTime - clockAtStart;
-        trace('clock-after-150ms', `${target.state} +${delta.toFixed(3)}s${delta < 0.03 ? ' STALLED' : ''}`);
+        trace('clock-after-150ms', `${target.state} +${delta.toFixed(3)}s${delta < 0.03 ? ' STALLED' : ''}${outputPosition(target)}`);
       }, 150);
       // WebKit can leave a context reporting "running" while its clock and
       // onended callback stop. Never reuse that silent context indefinitely.

@@ -5,6 +5,8 @@ import { audioPreferenceEnabled } from './audio/preferences';
 import { refreshAudioDiagnosticsEnabled, traceRefreshAudio } from './audio/refresh-diagnostics';
 
 let diagnosticContextSerial = 0;
+/** Contexts created and not yet reported closed: a leak shows up as a climbing number. */
+let diagnosticLiveContexts = 0;
 
 const moneyPlayer = createOneShotAudioPlayer({
   trace: refreshAudioDiagnosticsEnabled() ? traceRefreshAudio : undefined,
@@ -21,8 +23,18 @@ const moneyPlayer = createOneShotAudioPlayer({
       // 'interrupted' state, which call-site snapshots can miss entirely.
       if (refreshAudioDiagnosticsEnabled()) {
         const id = ++diagnosticContextSerial;
-        traceRefreshAudio('ctx-created', `#${id} ${context.state} ${context.sampleRate}Hz`);
-        context.addEventListener('statechange', () => traceRefreshAudio('ctx-statechange', `#${id} ${context.state}`));
+        const live = ++diagnosticLiveContexts;
+        traceRefreshAudio('ctx-created', `#${id} ${context.state} ${context.sampleRate}Hz live=${live}`);
+        let counted = false;
+        context.addEventListener('statechange', () => {
+          if (context.state === 'closed' && !counted) {
+            counted = true;
+            diagnosticLiveContexts -= 1;
+            traceRefreshAudio('ctx-statechange', `#${id} closed live=${diagnosticLiveContexts}`);
+            return;
+          }
+          traceRefreshAudio('ctx-statechange', `#${id} ${context.state}`);
+        });
       }
       return context;
     } catch {
