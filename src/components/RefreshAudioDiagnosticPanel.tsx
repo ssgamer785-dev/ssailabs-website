@@ -7,6 +7,15 @@ import {
   traceRefreshAudio,
 } from '../lib/audio/refresh-diagnostics';
 import { audioPreferenceEnabled } from '../lib/audio/preferences';
+import { useRefreshHandler } from './PhoneShell';
+
+/**
+ * Diagnostic-only refresh action. Public screens (/welcome, /login) register
+ * no handler, so pull-to-refresh is inert there; this one arms the identical
+ * touch-start prepare → touch-end play path so the test needs no sign-in.
+ * On signed-in screens it simply runs alongside the real handlers.
+ */
+const diagnosticRefresh = () => { traceRefreshAudio('diagnostic-refresh-handler'); };
 
 /** Device context a pasted log needs: Safari vs Chrome on iOS are both WebKit. */
 function logHeader(): string[] {
@@ -26,7 +35,9 @@ export function RefreshAudioDiagnosticPanel() {
   const [expanded, setExpanded] = useState(false);
   const [copyStatus, setCopyStatus] = useState('');
   const logRef = useRef<HTMLPreElement>(null);
-  if (!refreshAudioDiagnosticsEnabled()) return null;
+  const enabled = refreshAudioDiagnosticsEnabled();
+  useRefreshHandler(diagnosticRefresh, enabled);
+  if (!enabled) return null;
   const origin = events[0]?.at ?? 0;
   const lines = events.map(item => `${((item.at - origin) / 1000).toFixed(2)}s ${item.event}${item.detail ? ` · ${item.detail}` : ''}`);
 
