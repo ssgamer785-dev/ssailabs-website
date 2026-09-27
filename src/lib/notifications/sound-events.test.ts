@@ -16,4 +16,11 @@ describe('foreground notification sound routing', () => {
     expect(incomingStudentPostSoundId({ ...post, channel: 'official' }, 'admin-id', true)).toBeNull();
     expect(incomingStudentPostSoundId(post, 'admin-id', false)).toBeNull();
   });
+
+  it('stays silent for your own anonymous post, whose author is hidden from the payload', () => {
+    const anonymous = { id: 'p2', author_id: null, channel: 'students' };
+    expect(incomingStudentPostSoundId({ ...anonymous, is_mine: true }, 'student-id', true)).toBeNull();
+    expect(incomingStudentPostSoundId({ ...anonymous, is_mine: false }, 'student-id', true)).toBe('student-post:p2');
+    expect(incomingStudentPostSoundId(anonymous, 'student-id', true)).toBe('student-post:p2');
+  });
 });

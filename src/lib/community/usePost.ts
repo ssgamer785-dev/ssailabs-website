@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../supabase';
+import { subscribeCommunityActivity } from './activity';
 import { useAuth } from '../auth-context';
 import { toPost, type FeedPost, type FeedRow } from './useFeed';
 
@@ -91,7 +92,11 @@ export function usePost(postId: string | null): UsePost {
         { event: '*', schema: 'public', table: 'posts', filter: `id=eq.${postId}` },
         () => { if (active) void refresh(); })
       .subscribe();
-    return () => { active = false; supabase.removeChannel(sub); };
+    // Edits to an anonymous post, and new comments of any kind, arrive here.
+    const stopActivity = subscribeCommunityActivity(`post-activity:${postId}`, () => {
+      if (active) void refresh();
+    }, { postId });
+    return () => { active = false; stopActivity(); supabase.removeChannel(sub); };
   }, [postId, user, refresh]);
 
   const toggleLike = useCallback(async () => {

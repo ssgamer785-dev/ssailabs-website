@@ -3,12 +3,14 @@ import { supabase } from '../supabase';
 import { useAuth } from '../auth-context';
 import type { AttachmentKind, PostChannel, UserRole } from '../database.types';
 import { deletePostMedia } from './media-api';
+import { subscribeCommunityActivity } from './activity';
 
 const PAGE_SIZE = 15;
 
 export interface FeedPost {
   id: string;
-  authorId: string;
+  /** Null on anonymous posts for everyone but their author and admins. */
+  authorId: string | null;
   channel: PostChannel;
   title: string | null;
   body: string | null;
@@ -36,7 +38,7 @@ export interface FeedPost {
 }
 
 export type FeedRow = {
-  id: string; author_id: string; channel: PostChannel; title: string | null; body: string | null;
+  id: string; author_id: string | null; channel: PostChannel; title: string | null; body: string | null;
   instrument: string | null; entry_price: number | null; stop_loss: number | null; take_profit: number | null;
   attachment: AttachmentKind; storage_key: string | null; poster_key: string | null;
   mime_type: string | null; size_bytes: number | null;
@@ -176,11 +178,28 @@ export function useFeed(channel: PostChannel): UseFeed {
   useEffect(() => {
     if (!user) return;
     let active = true;
+    // Once the activity stream is live it covers every post and comment,
+    // anonymous ones included; the table listeners below then stand down so
+    // nothing is counted twice. Against an older database it never goes live.
+    let activityLive = false;
+
+    const stopActivity = subscribeCommunityActivity(`feed-activity:${channel}`, event => {
+      if (!active || event.channel !== channel) return;
+      if (event.subject === 'post') {
+        if (event.op === 'DELETE') setPosts(prev => prev.filter(p => p.id !== event.post_id));
+        else void refresh();
+        return;
+      }
+      const delta = event.op === 'INSERT' ? 1 : event.op === 'DELETE' ? -1 : 0;
+      if (!delta) return;
+      setPosts(prev => prev.map(p => p.id !== event.post_id ? p
+        : { ...p, commentCount: Math.max(0, p.commentCount + delta) }));
+    }, { onLive: live => { activityLive = live; } });
 
     const channelSub = supabase
       .channel(`feed:${channel}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, payload => {
-        if (!active) return;
+        if (!active || activityLive) return;
         const row = (payload.new ?? payload.old) as { id?: string; channel?: PostChannel } | null;
         if (row?.channel && row.channel !== channel) return;
 
@@ -206,7 +225,7 @@ export function useFeed(channel: PostChannel): UseFeed {
         }));
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, payload => {
-        if (!active) return;
+        if (!active || activityLive) return;
         const row = (payload.new ?? payload.old) as { post_id: string };
         const delta = payload.eventType === 'INSERT' ? 1 : payload.eventType === 'DELETE' ? -1 : 0;
         if (!delta) return;
@@ -217,6 +236,7 @@ export function useFeed(channel: PostChannel): UseFeed {
 
     return () => {
       active = false;
+      stopActivity();
       supabase.removeChannel(channelSub);
     };
   }, [channel, user, refresh]);

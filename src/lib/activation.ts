@@ -146,6 +146,10 @@ export async function submitMembershipRequest(
   });
   if (error) {
     console.error('[activation] membership submit failed:', error);
+    // 23505: one request per account stays open until the admin reviews it.
+    if (error.code === '23505') {
+      return { ok: false, message: 'Your request is already with us. We will contact you after reviewing it.' };
+    }
     return { ok: false, message: GENERIC };
   }
   return { ok: true };

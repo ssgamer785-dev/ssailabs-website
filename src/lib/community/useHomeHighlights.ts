@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabase';
+import { subscribeCommunityActivity } from './activity';
 import { useAuth } from '../auth-context';
 import type { PostChannel } from '../database.types';
 import { fetchFeedPage, type FeedPost } from './useFeed';
@@ -143,10 +144,16 @@ export function useHomeHighlights(): HomeHighlights {
         scheduleReload();
       })
       .subscribe();
+    const stopActivity = subscribeCommunityActivity('home:highlights-activity', event => {
+      if (!active || event.subject !== 'post') return;
+      if (event.op === 'DELETE') applyDelete(event.post_id);
+      scheduleReload();
+    });
 
     return () => {
       active = false;
       clearTimeout(pendingReload.current);
+      stopActivity();
       supabase.removeChannel(channel);
     };
   }, [user, load]);

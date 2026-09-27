@@ -46,6 +46,8 @@ export async function updateFullName(userId: string, fullName: string): Promise<
 
   if (error) {
     console.error('[profile] name update failed:', error);
+    // 22023: the database refuses names that pose as the brand or the admin.
+    if (error.code === '22023') return { ok: false, message: 'That name is reserved. Please choose a different name.' };
     return { ok: false, message: 'Could not save your name. Please try again.' };
   }
   return { ok: true };

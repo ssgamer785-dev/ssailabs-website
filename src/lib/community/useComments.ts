@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabase';
+import { subscribeCommunityActivity } from './activity';
 import { useAuth } from '../auth-context';
 
 const PAGE_SIZE = 20;
@@ -7,7 +8,8 @@ const PAGE_SIZE = 20;
 export interface PostComment {
   id: string;
   postId: string;
-  authorId: string;
+  /** Null on anonymous comments for everyone but their author and admins. */
+  authorId: string | null;
   body: string | null;
   isAnonymous: boolean;
   createdAt: string;
@@ -18,7 +20,7 @@ export interface PostComment {
 }
 
 type CommentRow = {
-  id: string; post_id: string; author_id: string; body: string | null;
+  id: string; post_id: string; author_id: string | null; body: string | null;
   voice_url: string | null; voice_duration_seconds: number | null;
   is_anonymous: boolean; display_name: string; created_at: string;
   author_name: string; is_mine: boolean;
@@ -99,7 +101,11 @@ export function useComments(postId: string | null): UseComments {
         { event: '*', schema: 'public', table: 'comments', filter: `post_id=eq.${postId}` },
         () => { if (active) void refresh(); })
       .subscribe();
-    return () => { active = false; supabase.removeChannel(sub); };
+    // Anonymous comments by others only arrive through the activity stream.
+    const stopActivity = subscribeCommunityActivity(`comments-activity:${postId}`, event => {
+      if (active && event.subject === 'comment') void refresh();
+    }, { postId });
+    return () => { active = false; stopActivity(); supabase.removeChannel(sub); };
   }, [postId, user, refresh]);
 
   const loadMore = useCallback(async () => {

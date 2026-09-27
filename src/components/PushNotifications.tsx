@@ -4,6 +4,7 @@ import { useAuth } from '../lib/auth-context';
 import { isInstalledApp, registerWorker, supportsPush } from '../lib/notifications/push';
 import { ensureSubscribed, usePushSetup } from '../lib/notifications/usePushSetup';
 import { supabase } from '../lib/supabase';
+import { subscribeCommunityActivity } from '../lib/community/activity';
 import { playNotificationChime } from '../lib/useNotificationSound';
 import { foregroundNotificationSoundId, incomingStudentPostSoundId } from '../lib/notifications/sound-events';
 import { notificationDestination } from '../lib/notifications/destination';
@@ -81,7 +82,7 @@ export function PushNotifications() {
       related_comment_id?: string | null;
     }>();
     const posts = createIncomingGate<{
-      id: string; author_id: string; channel: string; title: string | null; body: string | null;
+      id: string; author_id?: string | null; is_mine?: boolean; channel: string; title: string | null; body: string | null;
     }>();
     const show = (id: string, body: string, url: string) => {
       if (!active || document.visibilityState !== 'visible') return;
@@ -112,7 +113,9 @@ export function PushNotifications() {
     const reconcile = async (initial: boolean, quiet = false) => {
       const [notificationResult, postResult] = await Promise.all([
         supabase.from('notifications').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(30),
-        supabase.from('posts').select('id,author_id,channel,title,body').eq('channel', 'students').order('created_at', { ascending: false }).limit(15),
+        // posts_feed, not the table: anonymous posts by others are only listed
+        // there, and is_mine is how an anonymous post of our own stays silent.
+        supabase.rpc('posts_feed', { p_channel: 'students', p_before: null, p_limit: 15 }),
       ]);
       if (!active) return;
       if (!notificationResult.error) {
@@ -121,7 +124,9 @@ export function PushNotifications() {
         if (fresh.length) window.dispatchEvent(new CustomEvent(NOTIFICATIONS_CHANGED_EVENT, { detail: { userId } }));
       }
       if (!postResult.error) {
-        const fresh = initial ? posts.baseline(postResult.data ?? []) : posts.poll(postResult.data ?? []);
+        const rows = ((postResult.data ?? []) as { id: string; author_id: string | null; is_mine: boolean; channel: string; title: string | null; body: string | null }[])
+          .map(r => ({ id: r.id, author_id: r.author_id, is_mine: r.is_mine, channel: r.channel, title: r.title, body: r.body }));
+        const fresh = initial ? posts.baseline(rows) : posts.poll(rows);
         if (!quiet) fresh.forEach(deliverPost);
       }
     };
@@ -141,6 +146,11 @@ export function PushNotifications() {
       }).subscribe(status => {
         if (active && status === 'SUBSCRIBED') void reconcile(false);
       });
+    // Another member's anonymous post never reaches us as a posts row; its
+    // activity cue triggers the same reconciliation, which sees it via posts_feed.
+    const stopActivity = subscribeCommunityActivity(`app-activity-${user.id}`, event => {
+      if (active && event.subject === 'post' && event.op === 'INSERT' && event.channel === 'students') void reconcile(false);
+    });
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void reconcile(false);
     }, 20_000);
@@ -152,6 +162,7 @@ export function PushNotifications() {
       clearTimeout(toastTimer.current);
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
+      stopActivity();
       void supabase.removeChannel(sub);
     };
   }, [user?.id, isActivated]);
