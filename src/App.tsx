@@ -1,5 +1,7 @@
-import { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Suspense, type ReactNode } from 'react';
+import { lazyWithRetry } from './lib/lazy-retry';
+import { RouteErrorBoundary } from './components/RouteErrorBoundary';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AppStateProvider } from './lib/app-state';
 import { AuthProvider } from './lib/auth-context';
 import { ThemeProvider } from './lib/theme';
@@ -23,22 +25,28 @@ import { NotificationNavigation } from './components/NotificationNavigation';
 import { AudioPreferencesRuntime } from './components/AudioPreferencesRuntime';
 import { PresenceRuntime } from './lib/presence/usePresence';
 
-const AdminActivationCodesScreen = lazy(() => import('./screens/AdminActivationCodesScreen').then(module => ({ default: module.AdminActivationCodesScreen })));
-const HomeScreen = lazy(() => import('./screens/HomeScreen').then(module => ({ default: module.HomeScreen })));
-const ChatListScreen = lazy(() => import('./screens/ChatListScreen').then(module => ({ default: module.ChatListScreen })));
-const AdminMembershipRequestsScreen = lazy(() => import('./screens/AdminMembershipRequestsScreen').then(module => ({ default: module.AdminMembershipRequestsScreen })));
-const CommunityPage = lazy(() => import('./screens/CommunityPage').then(module => ({ default: module.CommunityPage })));
-const CreatePostScreen = lazy(() => import('./screens/CreatePostScreen').then(module => ({ default: module.CreatePostScreen })));
-const RiskCalculatorScreen = lazy(() => import('./screens/RiskCalculatorScreen').then(module => ({ default: module.RiskCalculatorScreen })));
-const EconomicCalendarScreen = lazy(() => import('./screens/EconomicCalendarScreen').then(module => ({ default: module.EconomicCalendarScreen })));
-const AdminChatRoute = lazy(() => import('./screens/AdminChatScreen').then(module => ({ default: module.AdminChatRoute })));
-const PostDetailScreen = lazy(() => import('./screens/PostDetailScreen').then(module => ({ default: module.PostDetailScreen })));
-const NotificationsScreen = lazy(() => import('./screens/NotificationsScreen').then(module => ({ default: module.NotificationsScreen })));
-const AdminInboxScreen = lazy(() => import('./screens/AdminInboxScreen').then(module => ({ default: module.AdminInboxScreen })));
-const PersonalInformationScreen = lazy(() => import('./screens/PersonalInformationScreen').then(module => ({ default: module.PersonalInformationScreen })));
-const PrivacyPolicyScreen = lazy(() => import('./screens/PrivacyPolicyScreen').then(module => ({ default: module.PrivacyPolicyScreen })));
-const TermsScreen = lazy(() => import('./screens/TermsScreen').then(module => ({ default: module.TermsScreen })));
-const HapticsScreen = lazy(() => import('./screens/HapticsScreen').then(module => ({ default: module.HapticsScreen })));
+const AdminActivationCodesScreen = lazyWithRetry(() => import('./screens/AdminActivationCodesScreen').then(module => ({ default: module.AdminActivationCodesScreen })));
+const HomeScreen = lazyWithRetry(() => import('./screens/HomeScreen').then(module => ({ default: module.HomeScreen })));
+const ChatListScreen = lazyWithRetry(() => import('./screens/ChatListScreen').then(module => ({ default: module.ChatListScreen })));
+const AdminMembershipRequestsScreen = lazyWithRetry(() => import('./screens/AdminMembershipRequestsScreen').then(module => ({ default: module.AdminMembershipRequestsScreen })));
+const CommunityPage = lazyWithRetry(() => import('./screens/CommunityPage').then(module => ({ default: module.CommunityPage })));
+const CreatePostScreen = lazyWithRetry(() => import('./screens/CreatePostScreen').then(module => ({ default: module.CreatePostScreen })));
+const RiskCalculatorScreen = lazyWithRetry(() => import('./screens/RiskCalculatorScreen').then(module => ({ default: module.RiskCalculatorScreen })));
+const EconomicCalendarScreen = lazyWithRetry(() => import('./screens/EconomicCalendarScreen').then(module => ({ default: module.EconomicCalendarScreen })));
+const AdminChatRoute = lazyWithRetry(() => import('./screens/AdminChatScreen').then(module => ({ default: module.AdminChatRoute })));
+const PostDetailScreen = lazyWithRetry(() => import('./screens/PostDetailScreen').then(module => ({ default: module.PostDetailScreen })));
+const NotificationsScreen = lazyWithRetry(() => import('./screens/NotificationsScreen').then(module => ({ default: module.NotificationsScreen })));
+const AdminInboxScreen = lazyWithRetry(() => import('./screens/AdminInboxScreen').then(module => ({ default: module.AdminInboxScreen })));
+const PersonalInformationScreen = lazyWithRetry(() => import('./screens/PersonalInformationScreen').then(module => ({ default: module.PersonalInformationScreen })));
+const PrivacyPolicyScreen = lazyWithRetry(() => import('./screens/PrivacyPolicyScreen').then(module => ({ default: module.PrivacyPolicyScreen })));
+const TermsScreen = lazyWithRetry(() => import('./screens/TermsScreen').then(module => ({ default: module.TermsScreen })));
+const HapticsScreen = lazyWithRetry(() => import('./screens/HapticsScreen').then(module => ({ default: module.HapticsScreen })));
+
+/** A fresh boundary per route, so leaving a failed screen clears the error. */
+function LocationKeyedBoundary({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  return <RouteErrorBoundary key={location.pathname}>{children}</RouteErrorBoundary>;
+}
 
 export default function App() {
   return (
@@ -51,7 +59,7 @@ export default function App() {
           <NotificationNavigation />
           <PushNotifications />
           <PresenceRuntime />
-          <Suspense fallback={<AuthLoading />}><Routes>
+          <LocationKeyedBoundary><Suspense fallback={<AuthLoading />}><Routes>
             <Route path="/" element={<SplashScreen />} />
             {/* The entry point for anyone signed out. */}
             <Route path="/welcome" element={<RedirectIfAuthed><WelcomeScreen /></RedirectIfAuthed>} />
@@ -91,7 +99,7 @@ export default function App() {
             <Route path="/haptics" element={<RequireActivated><HapticsScreen /></RequireActivated>} />
             <Route path="/admin-inbox" element={<RequireAdmin><AdminInboxScreen /></RequireAdmin>} />
             <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes></Suspense>
+          </Routes></Suspense></LocationKeyedBoundary>
         </BrowserRouter>
       </AppStateProvider>
       </AuthProvider>
