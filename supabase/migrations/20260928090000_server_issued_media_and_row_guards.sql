@@ -1,10 +1,12 @@
 -- Server-issued media, row guards and activation on every client write.
 --
--- Deployment order: the API that records upload grants (server/upload-grants.ts)
--- must be live BEFORE this migration runs; until then, rows that name a
--- storage object have no grant to match and are refused. Nothing below
--- deletes or rewrites existing rows: every check applies to new inserts and
--- to future updates only.
+-- Deployment: this migration can run before or after the API that records
+-- upload grants (server/upload-grants.ts). Until that API records its first
+-- grant, rows naming a storage object are held to the key shape and size
+-- limits the API mints; from the first recorded grant on, they must match an
+-- unused grant (private.feature_flags, switched on automatically, one way).
+-- Nothing below deletes or rewrites existing rows: every check applies to new
+-- inserts and to future updates only.
 --
 -- Convention for "is this a direct client write?": guard functions that must
 -- tell clients apart from our own SECURITY DEFINER routines are SECURITY
@@ -20,6 +22,27 @@
 create schema if not exists private;
 revoke all on schema private from public;
 grant usage on schema private to authenticated, service_role;
+
+create table if not exists private.feature_flags (
+  name    text primary key,
+  enabled boolean not null default false,
+  changed_at timestamptz not null default now()
+);
+revoke all on private.feature_flags from public, anon, authenticated;
+insert into private.feature_flags (name, enabled) values ('enforce_upload_grants', false)
+on conflict (name) do nothing;
+
+create or replace function private.upload_grants_enforced()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce((select f.enabled from private.feature_flags f where f.name = 'enforce_upload_grants'), false);
+$$;
+revoke all on function private.upload_grants_enforced() from public;
+grant execute on function private.upload_grants_enforced() to authenticated, service_role;
 
 create table if not exists public.media_upload_grants (
   storage_key       text primary key,
@@ -46,10 +69,33 @@ alter table public.media_upload_grants enable row level security;
 revoke all on public.media_upload_grants from anon, authenticated;
 grant select, insert, update, delete on public.media_upload_grants to service_role;
 
+-- The first grant the API records proves it is the recording version, so
+-- enforcement switches on then, and stays on.
+create or replace function private.enforce_upload_grants_on_first_use()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  update private.feature_flags
+     set enabled = true, changed_at = now()
+   where name = 'enforce_upload_grants' and not enabled;
+  return null;
+end;
+$$;
+revoke all on function private.enforce_upload_grants_on_first_use() from public;
+
+drop trigger if exists media_upload_grants_enforce on public.media_upload_grants;
+create trigger media_upload_grants_enforce
+  after insert on public.media_upload_grants
+  for each statement execute function private.enforce_upload_grants_on_first_use();
+
 comment on table public.media_upload_grants is
   'One row per object key the API signed an upload for. A client row may only name an object through an unused grant it owns; size and type are copied from the grant.';
 
--- Grants older than this cannot be claimed (the signed PUT expires in minutes;
+-- Returns the grant (marking it used), or null when no grant exists and
+-- enforcement is still off. Grants older than this cannot be claimed (the signed PUT expires in minutes;
 -- the allowance covers an offline client inserting its row later).
 create or replace function private.claim_upload_grant(
   p_storage_key text,
@@ -74,6 +120,10 @@ begin
     from public.media_upload_grants g
    where g.storage_key = p_storage_key
    for update;
+
+  if not found and not private.upload_grants_enforced() then
+    return null; -- the API does not record grants yet; the caller checks the key shape
+  end if;
 
   if not found
      or v_grant.owner_id <> p_owner
@@ -135,6 +185,23 @@ begin
   end if;
 
   v_grant := private.claim_upload_grant(new.storage_key, new.sender_id, 'chat', new.conversation_id);
+
+  if v_grant.storage_key is null then
+    -- Before the API records grants: only a key of the shape /upload-url mints
+    -- for this conversation, a matching poster, and sizes within its limits.
+    if new.storage_key !~ ('^chat/' || new.conversation_id::text || '/[0-9]{13}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]{2,5}$')
+       or (new.poster_key is not null
+           and new.poster_key <> regexp_replace(new.storage_key, '\.[a-z0-9]{2,5}$', '') || '-poster.jpg')
+       or new.size_bytes is null or new.size_bytes <= 0 or new.size_bytes > 52428800
+       or (new.poster_key is null) <> (new.poster_size_bytes is null)
+       or new.poster_size_bytes > 2097152 then
+      raise exception 'This attachment was not uploaded through the app' using errcode = '42501';
+    end if;
+    if new.file_name is not null then
+      new.file_name := left(new.file_name, 255);
+    end if;
+    return new;
+  end if;
 
   if new.kind::text <> v_grant.kind then
     raise exception 'The attachment type does not match its upload' using errcode = '22023';
@@ -248,6 +315,20 @@ begin
   end if;
 
   v_grant := private.claim_upload_grant(new.storage_key, new.author_id, 'post', null);
+
+  if v_grant.storage_key is null then
+    if new.storage_key !~ ('^posts/' || new.author_id::text || '/[0-9]{13}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]{2,5}$')
+       or (new.poster_key is not null
+           and new.poster_key <> regexp_replace(new.storage_key, '\.[a-z0-9]{2,5}$', '') || '-poster.jpg')
+       or new.size_bytes is null or new.size_bytes <= 0 or new.size_bytes > 52428800
+       or new.poster_size_bytes > 2097152 then
+      raise exception 'This attachment was not uploaded through the app' using errcode = '42501';
+    end if;
+    if new.file_name is not null then
+      new.file_name := left(new.file_name, 255);
+    end if;
+    return new;
+  end if;
 
   if new.attachment::text <> v_grant.kind then
     raise exception 'The attachment type does not match its upload' using errcode = '22023';

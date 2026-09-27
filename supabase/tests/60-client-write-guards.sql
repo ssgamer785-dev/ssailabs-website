@@ -316,3 +316,47 @@ set local role service_role;
 update public.messages set size_bytes = 5000, media_purged = true where id = '6e000000-0000-4000-8000-000000000001';
 select pg_temp.check((select size_bytes = 5000 and media_purged from public.messages where id = '6e000000-0000-4000-8000-000000000001'), 'M1. the service role corrects sizes and purge flags');
 rollback;
+
+-- ---------------------------------------------------------------------------
+\echo '--- N. Before the API records grants (migration applied ahead of the API)'
+begin;
+update private.feature_flags set enabled = false where name = 'enforce_upload_grants';
+set local role authenticated;
+set local app.current_user_id = '6aaaaaaa-0000-4000-8000-000000000001';
+insert into public.messages (id, conversation_id, sender_id, kind, storage_key, mime_type, size_bytes, upload_status)
+  values ('6e000000-0000-4000-8000-0000000000d1','6ccccccc-0000-4000-8000-0000000000a1','6aaaaaaa-0000-4000-8000-000000000001','image',
+          'chat/6ccccccc-0000-4000-8000-0000000000a1/1790000000100-aaaaaaaa-1111-4111-8111-111111111111.bin','image/png',2048,'pending');
+select pg_temp.check(true, 'N1. a key of the shape the API mints for this thread is accepted');
+select pg_temp.must_fail($$insert into public.messages (conversation_id, sender_id, kind, storage_key, mime_type, size_bytes, upload_status)
+  values ('6ccccccc-0000-4000-8000-0000000000a1','6aaaaaaa-0000-4000-8000-000000000001','image','posts/11111111-1111-1111-1111-111111111111/1790000000006-66666666-6666-4666-8666-666666666666.bin','image/png',10,'pending')$$,
+  'not uploaded through the app', 'N2. an Official object is still refused');
+select pg_temp.must_fail($$insert into public.messages (conversation_id, sender_id, kind, storage_key, mime_type, size_bytes, upload_status)
+  values ('6ccccccc-0000-4000-8000-0000000000a1','6aaaaaaa-0000-4000-8000-000000000001','image','chat/6ccccccc-0000-4000-8000-0000000000b1/1790000000101-aaaaaaaa-1111-4111-8111-111111111111.bin','image/png',10,'pending')$$,
+  'not uploaded through the app', 'N3. another thread''s key is still refused');
+select pg_temp.must_fail($$insert into public.messages (conversation_id, sender_id, kind, storage_key, poster_key, poster_size_bytes, mime_type, size_bytes, upload_status)
+  values ('6ccccccc-0000-4000-8000-0000000000a1','6aaaaaaa-0000-4000-8000-000000000001','video','chat/6ccccccc-0000-4000-8000-0000000000a1/1790000000102-aaaaaaaa-1111-4111-8111-111111111111.bin','avatars/6bbbbbbb-0000-4000-8000-000000000001/x.bin',100,'video/mp4',10,'pending')$$,
+  'not uploaded through the app', 'N4. a foreign poster is still refused');
+select pg_temp.must_fail($$insert into public.messages (conversation_id, sender_id, kind, storage_key, mime_type, size_bytes, upload_status)
+  values ('6ccccccc-0000-4000-8000-0000000000a1','6aaaaaaa-0000-4000-8000-000000000001','image','chat/6ccccccc-0000-4000-8000-0000000000a1/1790000000103-aaaaaaaa-1111-4111-8111-111111111111.bin','image/png',0,'pending')$$,
+  'not uploaded through the app', 'N5. a zero size is refused');
+insert into public.posts (author_id, channel, body, attachment, storage_key, mime_type, size_bytes)
+  values ('6aaaaaaa-0000-4000-8000-000000000001','students','n','image','posts/6aaaaaaa-0000-4000-8000-000000000001/1790000000104-aaaaaaaa-1111-4111-8111-111111111111.bin','image/png',3000);
+select pg_temp.check(true, 'N6. an own post key of the minted shape is accepted');
+select pg_temp.must_fail($$insert into public.posts (author_id, channel, body, attachment, storage_key, mime_type, size_bytes)
+  values ('6aaaaaaa-0000-4000-8000-000000000001','students','n','image','posts/11111111-1111-1111-1111-111111111111/1790000000105-aaaaaaaa-1111-4111-8111-111111111111.bin','image/png',3000)$$,
+  'not uploaded through the app', 'N7. the admin''s key is still refused on a post');
+rollback;
+
+\echo '--- O. The first recorded grant switches enforcement on, one way'
+begin;
+update private.feature_flags set enabled = false where name = 'enforce_upload_grants';
+insert into public.media_upload_grants (storage_key, owner_id, scope, kind, mime_type, size_bytes)
+  values ('posts/6aaaaaaa-0000-4000-8000-000000000001/1790000000200-bbbbbbbb-1111-4111-8111-111111111111.bin','6aaaaaaa-0000-4000-8000-000000000001','post','image','image/png',100);
+select pg_temp.check(private.upload_grants_enforced(), 'O1. enforcement is on after the first grant');
+set local role authenticated;
+set local app.current_user_id = '6aaaaaaa-0000-4000-8000-000000000001';
+select pg_temp.must_fail($$insert into public.posts (author_id, channel, body, attachment, storage_key, mime_type, size_bytes)
+  values ('6aaaaaaa-0000-4000-8000-000000000001','students','n','image','posts/6aaaaaaa-0000-4000-8000-000000000001/1790000000201-cccccccc-1111-4111-8111-111111111111.bin','image/png',3000)$$,
+  'not uploaded through the app', 'O2. a minted-shape key without a grant is refused once enforcement is on');
+select pg_temp.must_fail($$select private.upload_grants_enforced() from private.feature_flags$$, 'permission denied', 'O3. members cannot read or change the flag');
+rollback;
