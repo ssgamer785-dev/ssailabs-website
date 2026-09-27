@@ -46,6 +46,9 @@ export function pushRouter(): Router {
     if (!configured()) return res.status(503).json({ error: 'Push notifications are not configured.' });
     const caller = await authenticate(req);
     if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
+    // Push carries the same content as the in-app notifications list, which
+    // only activated members can read.
+    if (!caller.isActivated) return res.status(403).json({ error: 'Activate your account first.' });
     const { endpoint, keys } = req.body ?? {};
     if (!validEndpoint(endpoint) || !KEY.test(keys?.p256dh ?? '') || !KEY.test(keys?.auth ?? '')) {
       return res.status(400).json({ error: 'Invalid push subscription.' });
@@ -83,6 +86,13 @@ export function pushRouter(): Router {
       .select('*')
       .eq('id', id).single();
     if (rowError || !row) return res.status(404).json({ error: 'Notification not found.' });
+    // Delivered only to accounts that could read this notification in the app.
+    const { data: recipient, error: recipientError } = await db.from('profiles')
+      .select('role, activated_at').eq('id', row.user_id).maybeSingle();
+    if (recipientError) throw recipientError;
+    if (!recipient || (recipient.role !== 'admin' && !recipient.activated_at)) {
+      return res.json({ ok: true, attempted: 0, uncertainFailures: 0, skipped: 'recipient-not-activated' });
+    }
     const { data: subscriptions, error: subError } = await db.from('push_subscriptions')
       .select('id,endpoint,p256dh,auth_key').eq('user_id', row.user_id);
     if (subError) throw subError;
