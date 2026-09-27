@@ -11,8 +11,12 @@ type Source = {
   disconnect: () => void;
 };
 
+type Gain = { gain: { value: number }; connect: (destination: AudioNode) => unknown; disconnect: () => void };
+
 export type RefreshContext = OutputLike & {
   destination: AudioNode;
+  /** The refresh sound's own gain path, separate from the notification chime's. */
+  createGain?: () => Gain;
   getOutputTimestamp?: () => AudioTimestamp;
   outputLatency?: number;
   decodeAudioData: (bytes: ArrayBuffer) => Promise<AudioBuffer>;
@@ -49,6 +53,7 @@ export function createRefreshSoundPlayer<C extends RefreshContext>(options: {
   let buffer: BufferLike | null = null;
   let decoding: Promise<BufferLike> | null = null;
   let source: Source | null = null;
+  let sourceGain: Gain | null = null;
   let timers: ReturnType<typeof setTimeout>[] = [];
   let lastGestureAt = -Infinity;
 
@@ -62,6 +67,9 @@ export function createRefreshSoundPlayer<C extends RefreshContext>(options: {
     previous.onended = null;
     try { previous.stop(); } catch { /* It may never have started. */ }
     previous.disconnect();
+    // Only this sound's own nodes: nothing here can touch the chime's graph.
+    sourceGain?.disconnect();
+    sourceGain = null;
     trace(event, detail);
   };
 
@@ -97,7 +105,11 @@ export function createRefreshSoundPlayer<C extends RefreshContext>(options: {
 
       const target = options.output.unlock(hasActivation);
       if (!target) { trace('play-no-context'); return; }
-      trace('play-gesture', `${target.state} clock=${target.currentTime.toFixed(3)} decoded=${!!buffer}`);
+      const unlocked = options.output.isUnlocked();
+      trace('play-gesture', `${target.state} clock=${target.currentTime.toFixed(3)} decoded=${!!buffer} unlocked=${unlocked} activation=${hasActivation}`);
+      // iOS: a context that has never run needs a tap's activation to start,
+      // and a pull is not a tap. Recorded so a silent pull explains itself.
+      if (!unlocked && !hasActivation) trace('output-locked', 'waiting for a tap anywhere to unlock audio');
       drop('source-replaced', target.state);
       // Never queue a sound behind a decode: this refresh stays silent and
       // the next one plays.
@@ -106,14 +118,19 @@ export function createRefreshSoundPlayer<C extends RefreshContext>(options: {
       const sound = buffer;
       const next = target.createBufferSource();
       next.buffer = sound as AudioBuffer;
-      next.connect(target.destination);
+      const gain = target.createGain?.() ?? null;
+      if (gain) { gain.gain.value = 1; gain.connect(target.destination); next.connect(gain as unknown as AudioNode); }
+      else next.connect(target.destination);
       source = next;
+      sourceGain = gain;
       next.onended = () => {
         if (source !== next) return;
         source = null;
         next.onended = null;
         clearTimers();
         next.disconnect();
+        gain?.disconnect();
+        if (sourceGain === gain) sourceGain = null;
         trace('source-ended', `${target.state} clock=${target.currentTime.toFixed(3)}`);
       };
       const scheduledAt = target.currentTime;

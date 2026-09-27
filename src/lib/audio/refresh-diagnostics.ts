@@ -8,8 +8,8 @@ const ENABLE_KEY = 'tp:refresh-audio-diagnostics';
  */
 const LOG_KEY = 'tp:refresh-audio-diagnostics:log';
 const EVENT_NAME = 'tp:refresh-audio-diagnostic';
-/** ~18 events per refresh: room for ~30 refreshes, so the audible→silent transition survives. */
-const MAX_EVENTS = 600;
+/** ~20 events per refresh (with passive input tracing): room for a 50-pull run and its lead-up. */
+const MAX_EVENTS = 1500;
 let events: readonly RefreshAudioDiagnostic[] = [];
 let restored = false;
 let persistTimer: ReturnType<typeof setTimeout> | undefined;
@@ -135,6 +135,33 @@ export function userActivationSnapshot(): string {
   return activation.hasBeenActive ? 'expired' : 'none';
 }
 
+/** A coarse, non-personal label for what was touched: never text, and never labels that carry content. */
+function describeTarget(target: EventTarget | null): string {
+  const element = typeof Element !== 'undefined' && target instanceof Element ? target : null;
+  if (!element) return 'document';
+  if (element.closest('section[aria-label="Refresh audio diagnostic"]')) return 'diag-panel';
+  if (element.closest('[aria-label="Open menu"]')) return 'sidebar-open';
+  if (element.closest('[aria-label="Close menu"], .overlay-scrim')) return 'sidebar-close';
+  if (element.closest('.app-overlay')) return 'sidebar-item';
+  return (element.closest('button, a, input, textarea, select') ?? element).tagName.toLowerCase();
+}
+
+let inputTracing = false;
+/**
+ * Records every input that can carry a user activation, with WebKit's verdict
+ * at that moment. Purely passive (no unlock, no resume), so installing it
+ * never changes what it measures, in either audio mode.
+ */
+export function installPassiveInputTrace(): void {
+  if (inputTracing || typeof document === 'undefined' || !refreshAudioDiagnosticsEnabled()) return;
+  inputTracing = true;
+  for (const type of ['mousedown', 'pointerup', 'touchend', 'touchcancel', 'click', 'keydown'] as const) {
+    document.addEventListener(type, event => {
+      traceRefreshAudio('input', `${type} ${describeTarget(event.target)} activation=${userActivationSnapshot()}`);
+    }, { passive: true, capture: true });
+  }
+}
+
 /** One line of counts so the pasted log shows where audible turned silent. */
 export function summarizeRefreshAudioDiagnostics(trace: readonly RefreshAudioDiagnostic[]): string {
   const count = (test: (item: RefreshAudioDiagnostic) => boolean) => trace.filter(test).length;
@@ -147,8 +174,15 @@ export function summarizeRefreshAudioDiagnostics(trace: readonly RefreshAudioDia
     if (item.event === 'heard: yes') lastHeardAfter = refresh;
     if (item.event === 'heard: silent' && firstSilentAfter === null) firstSilentAfter = refresh;
   }
+  const marks = [...trace].reverse().find(item => item.event === 'user-marks')?.detail;
+  const locked = count(item => item.event === 'output-locked');
+  // A pull's own touch-end: does iOS count the release of a drag as a user activation?
+  const pulls = trace.filter(item => item.event === 'touch-end' && /activation=/.test(item.detail ?? ''));
   return [
     `refreshes ${count(item => item.event === 'refresh-fire')}`,
+    `marks ${marks ?? '-'}`,
+    `output-locked pulls ${locked}`,
+    `pull touch-end activation active/not ${pulls.filter(item => /activation=active/.test(item.detail ?? '')).length}/${pulls.filter(item => !/activation=active/.test(item.detail ?? '')).length}`,
     `heard yes/silent/delayed ${count(item => item.event === 'heard: yes')}/${count(item => item.event === 'heard: silent')}/${count(item => item.event === 'heard: delayed')}`,
     `last heard after #${lastHeardAfter ?? '-'}, first silent after #${firstSilentAfter ?? '-'}`,
     `ctx created/closed ${count(item => item.event === 'ctx-created')}/${count(item => item.event === 'ctx-statechange' && / closed/.test(item.detail ?? ''))}`,

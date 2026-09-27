@@ -32,8 +32,14 @@ export type OutputLike = {
 const MIN_CLOCK_RATE = 0.4;
 /** Shorter intervals are too noisy to judge (render quanta, timer jitter). */
 const MIN_JUDGE_INTERVAL_MS = 100;
-/** A stale context is closed once its replacement runs, or after this long. */
-const RETIRE_AFTER_MS = 3_000;
+/**
+ * A replaced context is closed this long after its replacement runs, so a
+ * refresh sound or chime already playing on it finishes instead of being cut.
+ * Until then its session stays registered, so WebKit never sees "no session".
+ */
+const RETIRE_GRACE_MS = 3_000;
+/** Close it even if the replacement never runs. */
+const RETIRE_MAX_MS = 6_000;
 /** While running, how often the clock is checked, so a freeze is known before the next gesture. */
 const HEARTBEAT_MS = 250;
 
@@ -51,6 +57,8 @@ export interface AudioOutput<C extends OutputLike> {
   markStalled(target: C, reason: string): void;
   /** After the page returns to the foreground: re-baseline, then judge the clock. */
   foreground(): void;
+  /** Whether the current context has ever run: on iOS it cannot start without a tap's activation until then. */
+  isUnlocked(): boolean;
   /** Page unload only. */
   close(): void;
 }
@@ -64,6 +72,8 @@ export function createAudioOutput<C extends OutputLike>(options: {
   const now = options.now ?? (() => performance.now());
   let context: C | null = null;
   let stalled = false;
+  /** The current context has reached "running" at least once (WebKit lifted its gesture restriction). */
+  let unlocked = false;
   /** (wall, clock) taken while running; null whenever the context is not running. */
   let sample: { wall: number; clock: number } | null = null;
   let foregroundTimer: ReturnType<typeof setTimeout> | undefined;
@@ -74,6 +84,7 @@ export function createAudioOutput<C extends OutputLike>(options: {
   const stopHeartbeat = () => { if (heartbeat) clearInterval(heartbeat); heartbeat = undefined; };
 
   const rebase = (target: C) => {
+    if (target === context && target.state === 'running') unlocked = true;
     sample = target === context && target.state === 'running' ? { wall: now(), clock: target.currentTime } : null;
     if (!sample) { stopHeartbeat(); return; }
     if (heartbeat) return;
@@ -90,23 +101,27 @@ export function createAudioOutput<C extends OutputLike>(options: {
     next.addEventListener?.('statechange', () => { if (next === context) rebase(next); });
     context = next;
     stalled = false;
+    unlocked = false;
     rebase(next);
     return next;
   };
 
   const retire = (old: C, replacement: C) => {
     let done = false;
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = () => {
       if (done) return;
       done = true;
       trace('output-retired', old.state);
       void old.close().catch(() => {});
     };
-    // Keep the old session registered until the new one is running, so
-    // WebKit never sees "no active session" and deactivates the audio session.
-    replacement.addEventListener?.('statechange', () => { if (replacement.state === 'running') finish(); });
-    if (replacement.state === 'running') finish();
-    setTimeout(finish, RETIRE_AFTER_MS);
+    const replacementRunning = () => {
+      if (graceTimer || replacement.state !== 'running') return;
+      graceTimer = setTimeout(finish, RETIRE_GRACE_MS);
+    };
+    replacement.addEventListener?.('statechange', replacementRunning);
+    replacementRunning();
+    setTimeout(finish, RETIRE_MAX_MS);
   };
 
   const clock = (target: C): 'moving' | 'stalled' | 'unknown' => {
@@ -157,6 +172,7 @@ export function createAudioOutput<C extends OutputLike>(options: {
 
     clock,
     markStalled,
+    isUnlocked: () => unlocked,
 
     foreground() {
       const target = context;

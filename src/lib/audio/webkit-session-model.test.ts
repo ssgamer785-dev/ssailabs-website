@@ -30,11 +30,19 @@ class WebKitModel {
   activations = 0;
   deactivations = 0;
   inGesture = false;
+  /** WebKit: a tap grants transient activation for 5 s (LocalDOMWindow defaultTransientActivationDuration), scaled here. */
+  activationUntil = -Infinity;
+  activationMs = 600;
   contexts: FakeContext[] = [];
   constructor(public activationLatencyMs: number) {}
 
   create = () => { const context = new FakeContext(this); this.contexts.push(context); return context; };
-  gesture<T>(fn: () => T): T { this.inGesture = true; try { return fn(); } finally { this.inGesture = false; } }
+  gesture<T>(fn: () => T): T { this.inGesture = true; this.activationUntil = now() + this.activationMs; try { return fn(); } finally { this.inGesture = false; } }
+  /** A tap anywhere (opening the sidebar, any button): an activation-triggering input. */
+  tap<T>(fn: () => T): T { return this.gesture(fn); }
+  /** A pull-to-refresh drag: iOS synthesises no click for it, so it grants no activation. */
+  pull<T>(fn: () => T): T { return fn(); }
+  hasActivation() { return this.inGesture || now() < this.activationUntil; }
 
   register(context: FakeContext, onAdmitted: () => void) {
     this.sessions.add(context);
@@ -109,7 +117,7 @@ class FakeContext {
     if (this.state === 'closed') return Promise.reject(new Error('closed'));
     const settled = new Promise<void>(resolve => this.waiting.push(resolve));
     if (this.state === 'running') { this.setState('running'); return Promise.resolve(); }
-    if (!this.unlocked && !this.webkit.inGesture) return settled;   // parked until something runs it
+    if (!this.unlocked && !this.webkit.hasActivation()) return settled;   // parked: WebKit needs transient activation to start a context
     this.unlocked = true;
     if (!this.webkit.sessions.has(this)) this.webkit.register(this, () => { if (this.state !== 'closed') this.setState('running'); });
     else setTimeout(() => { if (this.state !== 'closed') this.setState('running'); }, 5);
@@ -250,10 +258,14 @@ describe('WebKit audio-session model: the shared long-lived output', () => {
     await wait(80);
     expect(webkit.contexts).toHaveLength(2);
     expect(verdict(gestureAt, webkit.contexts[1].sources).heard).toBe(true);
-    expect(stale.state).toBe('closed');          // retired only after its replacement ran
+    // Kept open for the grace period, so a sound already playing on it is not cut…
+    expect(stale.state).not.toBe('closed');
+    await wait(3_100);
+    // …then retired, after its replacement ran, without ever dropping the session.
+    expect(stale.state).toBe('closed');
     expect(webkit.deactivations).toBe(0);
     expect(webkit.activations).toBe(1);
-  });
+  }, 10_000);
 
   it('a stalled context is never used for a later sound: the next gesture schedules on its replacement', async () => {
     const webkit = new WebKitModel(100);
@@ -333,4 +345,73 @@ describe('start window vs WebKit reporting state late', () => {
     await wait(160);
     expect(sources[0].stopped).toBe(true);
   });
+});
+
+describe('user activation: taps grant a 5 s window, a pull grants none (WebKit rules, window scaled)', () => {
+  /** PhoneShell's order for one pull: touchstart → prepare, touchend → play, then settle → release. */
+  async function legacyPull(webkit: WebKitModel, player: ReturnType<typeof createOneShotAudioPlayer>): Promise<Result> {
+    webkit.pull(() => player.prepareFromGesture());
+    await wait(20);
+    const gestureAt = now();
+    webkit.pull(() => player.playFromGesture());
+    await wait(400);
+    player.cancelPreparation();
+    await wait(80);
+    return verdict(gestureAt, webkit.contexts.flatMap(context => context.sources));
+  }
+
+  it('production player: plays only within the activation window of the last tap; any tap (e.g. sidebar open/close) restores it', async () => {
+    const webkit = new WebKitModel(20);
+    const player = createOneShotAudioPlayer({ createContext: webkit.create, loadBuffer: async () => SOUND });
+    await player.preload();
+    webkit.tap(() => {});                                 // e.g. navigating to Home
+    const first = await legacyPull(webkit, player);       // within the window
+    await wait(webkit.activationMs);                      // the window lapses while pulling on
+    const later = [await legacyPull(webkit, player), await legacyPull(webkit, player)];
+    webkit.tap(() => {});                                 // open the sidebar…
+    webkit.tap(() => {});                                 // …and close it
+    const afterSidebar = await legacyPull(webkit, player);
+    expect(first.heard).toBe(true);
+    expect(later.map(result => result.heard)).toEqual([false, false]);   // the reported silence
+    expect(afterSidebar.heard).toBe(true);                               // the reported recovery
+  }, 10_000);
+
+  it('shared output: one tap unlocks it for the page; every later pull plays with no further taps', async () => {
+    const webkit = new WebKitModel(20);
+    const output = createAudioOutput<FakeContext>({ createContext: webkit.create });
+    const player = createRefreshSoundPlayer<FakeContext>({ output, loadBuffer: async () => SOUND });
+    await player.preload();
+    webkit.tap(() => output.unlock(true));                // the app's capture listener on any tap
+    await wait(60);
+    const results: Result[] = [];
+    for (let i = 0; i < 8; i++) {
+      await wait(i === 1 ? webkit.activationMs : 90);     // well past the activation window
+      const gestureAt = now();
+      webkit.pull(() => player.playFromGesture(false));
+      await wait(60);
+      results.push(verdict(gestureAt, webkit.contexts.flatMap(context => context.sources)));
+    }
+    expect(results.every(result => result.heard && result.delayMs! < 30)).toBe(true);
+    expect(webkit.contexts).toHaveLength(1);
+    expect(webkit.activations).toBe(1);
+  }, 10_000);
+
+  it('shared output: pulls before the first tap of a session cannot start audio (platform rule); the first tap fixes it for good', async () => {
+    const webkit = new WebKitModel(20);
+    const output = createAudioOutput<FakeContext>({ createContext: webkit.create });
+    const player = createRefreshSoundPlayer<FakeContext>({ output, loadBuffer: async () => SOUND });
+    await player.preload();
+    let gestureAt = now();
+    webkit.pull(() => player.playFromGesture(false));
+    await wait(450);
+    expect(verdict(gestureAt, webkit.contexts[0].sources).heard).toBe(false);
+    expect(webkit.contexts[0].sources[0].stoppedAt).not.toBeNull();   // dropped at the window, never late
+    webkit.tap(() => output.unlock(true));
+    await wait(60);
+    await wait(webkit.activationMs);
+    gestureAt = now();
+    webkit.pull(() => player.playFromGesture(false));
+    await wait(60);
+    expect(verdict(gestureAt, webkit.contexts[0].sources).heard).toBe(true);
+  }, 10_000);
 });

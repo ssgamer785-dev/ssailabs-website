@@ -150,9 +150,11 @@ export function installNotificationAudioUnlock(): void {
   unlockInstalled = true;
   const onGesture = () => unlockNotificationAudio();
   if (!legacy) {
-    // Activation-triggering events on iOS: touchend/pointerup/click/keydown.
-    // A touch pointerdown is not one, so it alone never started this output.
-    for (const type of ['pointerup', 'touchend', 'click', 'keydown'] as const) {
+    // Every event that can carry a user activation. On iOS a TAP carries one
+    // (WebKit synthesises mousedown/click for it); a pull-to-refresh drag does
+    // not, so the output must already be unlocked by an earlier tap for a pull
+    // to sound. A touch pointerdown alone never carries one.
+    for (const type of ['mousedown', 'pointerup', 'touchend', 'click', 'keydown'] as const) {
       document.addEventListener(type, onGesture, { passive: true, capture: true });
     }
     return;

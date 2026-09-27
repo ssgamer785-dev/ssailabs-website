@@ -5,7 +5,7 @@ import { lockAppZoom } from './lib/app-zoom';
 import './index.css';
 import { installNotificationAudioUnlock } from './lib/useNotificationSound';
 import { handleRefreshAudioLifecycle, preloadMoneyRefreshSound } from './lib/useMoneySound';
-import { refreshAudioDiagnosticsEnabled, refreshAudioExperimentMode, traceRefreshAudio } from './lib/audio/refresh-diagnostics';
+import { installPassiveInputTrace, refreshAudioDiagnosticsEnabled, refreshAudioExperimentMode, traceRefreshAudio } from './lib/audio/refresh-diagnostics';
 import { RefreshAudioDiagnosticPanel } from './components/RefreshAudioDiagnosticPanel';
 
 // Installed here rather than in a component effect: it is app-wide and
@@ -28,6 +28,7 @@ if (refreshAudioDiagnosticsEnabled()) {
   window.addEventListener('blur', () => traceRefreshAudio('blur'));
 }
 installNotificationAudioUnlock();
+installPassiveInputTrace();
 preloadMoneyRefreshSound();
 document.addEventListener('visibilitychange', () => {
   traceRefreshAudio('visibility', document.visibilityState);

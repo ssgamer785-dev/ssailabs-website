@@ -24,6 +24,8 @@ type RefreshHandler = () => unknown | Promise<unknown>;
 const refreshHandlers = new Set<RefreshHandler>();
 /** Diagnostic: links one pull's touch-start, touch-end and refresh-fire in the trace. */
 let gestureSerial = 0;
+/** Diagnostic: gesture-listener registrations, so a remount or re-registration shows in the trace. */
+let listenerSerial = 0;
 
 /**
  * Registers `fn` as this screen's pull-to-refresh action while it is mounted.
@@ -197,11 +199,13 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
 
     const onTouchEnd = (e: TouchEvent) => {
       if (e.touches.length) return;
-      traceRefreshAudio('touch-end', `g${gestureSerial} pull=${state.target.toFixed(0)} threshold=${THRESHOLD}`);
+      traceRefreshAudio('touch-end', `g${gestureSerial} pull=${state.target.toFixed(0)} threshold=${THRESHOLD} activation=${userActivationSnapshot()}`);
       state.tracking = false;
       release();
     };
     const onTouchCancel = () => {
+      // The system took the touch (e.g. a scroll or an edge gesture): no refresh.
+      if (state.tracking || state.pulling) traceRefreshAudio('touch-cancel', `g${gestureSerial}`);
       state.tracking = false;
       settle();
     };
@@ -254,6 +258,8 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
       }
     };
 
+    const listenerId = ++listenerSerial;
+    traceRefreshAudio('shell-listeners', `attached #${listenerId}`);
     frame.addEventListener('touchstart', onTouchStart, { passive: true });
     frame.addEventListener('touchmove', onTouchMove, { passive: false });
     frame.addEventListener('touchend', onTouchEnd, { passive: true });
@@ -264,6 +270,7 @@ export function PhoneShell({ children, scrollRef }: { children: ReactNode; scrol
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerCancel);
     return () => {
+      traceRefreshAudio('shell-listeners', `removed #${listenerId}`);
       frame.removeEventListener('touchstart', onTouchStart);
       frame.removeEventListener('touchmove', onTouchMove);
       frame.removeEventListener('touchend', onTouchEnd);

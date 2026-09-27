@@ -42,6 +42,8 @@ export function RefreshAudioDiagnosticPanel() {
   const events = useSyncExternalStore(subscribeRefreshAudioDiagnostics, getRefreshAudioDiagnostics);
   const [expanded, setExpanded] = useState(false);
   const [copyStatus, setCopyStatus] = useState('');
+  const [silentMarks, setSilentMarks] = useState('');
+  const [delayedMarks, setDelayedMarks] = useState('');
   const logRef = useRef<HTMLPreElement>(null);
   // Subscribed, not read once: Close leaves the event list untouched, so a
   // plain read never re-rendered and the panel stayed on screen.
@@ -110,14 +112,20 @@ export function RefreshAudioDiagnosticPanel() {
   }}>
     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
       <strong>Audio diagnostic</strong>
+      <span style={{ opacity: .75 }}>{events.filter(item => item.event === 'refresh-fire').length} refreshes logged</span>
       <button type="button" onClick={() => setExpanded(!expanded)}>{expanded ? 'Hide log' : 'Show log'}</button>
-      <button type="button" onClick={() => traceRefreshAudio('heard: yes')}>Heard</button>
-      <button type="button" onClick={() => traceRefreshAudio('heard: silent')}>Silent</button>
-      <button type="button" onClick={() => traceRefreshAudio('heard: delayed')}>Delayed</button>
       <button type="button" onClick={stopRefreshAudioDiagnostics}>Close</button>
     </div>
     {expanded && <>
-      <p style={{ margin: '8px 0' }}>Pull to refresh, then mark what you heard. The log stays on this device, survives a reload, and contains no account data.</p>
+      <p style={{ margin: '8px 0' }}>Recording runs by itself: do your pulls WITHOUT tapping this panel (a tap here is a tap, and changes what is measured). Afterwards, note which refresh numbers were silent or late, save them below, then share the log. It stays on this device, survives a reload, and contains no account data.</p>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', margin: '0 0 8px' }}>
+        <label>Silent #s <input value={silentMarks} onChange={e => setSilentMarks(e.target.value.replace(/[^0-9,\- ]/g, ''))} placeholder="e.g. 7-12, 15" inputMode="numeric" style={{ width: 110 }} /></label>
+        <label>Late #s <input value={delayedMarks} onChange={e => setDelayedMarks(e.target.value.replace(/[^0-9,\- ]/g, ''))} placeholder="e.g. 3" inputMode="numeric" style={{ width: 80 }} /></label>
+        <button type="button" onClick={() => {
+          traceRefreshAudio('user-marks', `silent=[${silentMarks.trim() || '-'}] late=[${delayedMarks.trim() || '-'}]`);
+          setCopyStatus('Marks saved into the log.');
+        }}>Save marks</button>
+      </div>
       <button type="button" onClick={() => { void share(); }}>Share log</button>{' '}
       <button type="button" onClick={() => { void copy(); }}>Copy log</button>{' '}
       <button type="button" onClick={download}>Download .txt</button>{' '}
