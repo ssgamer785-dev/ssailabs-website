@@ -4,8 +4,8 @@ import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { useAuth } from '../lib/auth-context';
 import { useFeed, type FeedPost } from '../lib/community/useFeed';
+import { postComment } from '../lib/community/comments-api';
 import { useRefreshHandler } from './PhoneShell';
-import { useComments } from '../lib/community/useComments';
 import { PostMedia } from './community/PostMedia';
 import { formatDateTime } from '../lib/format-date-time';
 import { displayPostBody } from '../lib/community/display-body';
@@ -73,19 +73,24 @@ const VERIFIED = (
 
 /** Reply row on a student post — posts a real comment. */
 function ReplyRow({ postId, anonymous }: { postId: string; anonymous: boolean }) {
-  const { addComment } = useComments(postId);
+  const { user } = useAuth();
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [status, setStatus] = useState<{ kind: 'sent' | 'error'; message: string } | null>(null);
 
   async function send() {
-    if (!text.trim() || sending) return;
+    if (!text.trim() || sending || !user) return;
     setSending(true);
-    await addComment(text, anonymous);
-    setText('');
+    setStatus(null);
+    const problem = await postComment({ postId, userId: user.id, body: text, anonymous });
     setSending(false);
+    if (problem) { setStatus({ kind: 'error', message: problem }); return; }
+    setText('');
+    setStatus({ kind: 'sent', message: anonymous ? 'Reply posted as Unknown User.' : 'Reply posted.' });
   }
 
   return (
+    <div style={css('display:flex;flex-direction:column;gap:4px')}>
     <div style={css('display:flex;align-items:center;gap:9px')}>
       <div style={css('flex:1;height:38px;border-radius:999px;background:var(--surface-secondary);display:flex;align-items:center;padding:0 14px')}>
         <input
@@ -99,6 +104,10 @@ function ReplyRow({ postId, anonymous }: { postId: string; anonymous: boolean })
       <Hoverable as="div" onClick={send} style={css('width:36px;height:36px;border-radius:50%;background:var(--accent-soft-2);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none')} hoverStyle={css('background:var(--accent-soft-3)')}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="var(--accent-ink)" style={css('margin-left:-1px')}><path d="M20.8 3.2 3.9 9.9c-.7.3-.6 1.3.1 1.5l6.3 1.9 1.9 6.3c.2.7 1.2.8 1.5.1z" /></svg>
       </Hoverable>
+    </div>
+    {status && (
+      <div role="status" style={css('font-size:11px;padding-left:14px;color:' + (status.kind === 'error' ? 'var(--danger-ink)' : 'var(--text-faint)'))}>{status.message}</div>
+    )}
     </div>
   );
 }

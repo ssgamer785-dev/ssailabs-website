@@ -4,6 +4,7 @@ import { useAuth } from '../auth-context';
 import type { AttachmentKind, PostChannel, UserRole } from '../database.types';
 import { deletePostMedia } from './media-api';
 import { subscribeCommunityActivity } from './activity';
+import { likeCountDelta } from './like-events';
 
 const PAGE_SIZE = 15;
 
@@ -218,12 +219,11 @@ export function useFeed(channel: PostChannel): UseFeed {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'likes' }, payload => {
         if (!active) return;
         const row = (payload.new ?? payload.old) as { post_id: string; user_id: string };
-        const delta = payload.eventType === 'INSERT' ? 1 : -1;
+        const delta = likeCountDelta(payload.eventType, row, user.id);
+        if (!delta) return;
         setPosts(prev => prev.map(p => p.id !== row.post_id ? p : {
           ...p,
           likeCount: Math.max(0, p.likeCount + delta),
-          // Our own likes are already applied optimistically.
-          likedByMe: row.user_id === user.id ? p.likedByMe : p.likedByMe,
         }));
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, payload => {
