@@ -4,6 +4,8 @@ import { createOneShotAudioPlayer } from './audio/one-shot-audio';
 import { audioPreferenceEnabled } from './audio/preferences';
 import { refreshAudioDiagnosticsEnabled, traceRefreshAudio } from './audio/refresh-diagnostics';
 
+let diagnosticContextSerial = 0;
+
 const moneyPlayer = createOneShotAudioPlayer({
   trace: refreshAudioDiagnosticsEnabled() ? traceRefreshAudio : undefined,
   createContext: () => {
@@ -13,8 +15,18 @@ const moneyPlayer = createOneShotAudioPlayer({
     }).webkitAudioContext;
     if (!Constructor) return null;
     try {
-      return new Constructor();
+      const context = new Constructor();
+      // Diagnostic-only: numbered so the log shows which context changed, and
+      // every transition is recorded — including WebKit's non-standard
+      // 'interrupted' state, which call-site snapshots can miss entirely.
+      if (refreshAudioDiagnosticsEnabled()) {
+        const id = ++diagnosticContextSerial;
+        traceRefreshAudio('ctx-created', `#${id} ${context.state} ${context.sampleRate}Hz`);
+        context.addEventListener('statechange', () => traceRefreshAudio('ctx-statechange', `#${id} ${context.state}`));
+      }
+      return context;
     } catch {
+      traceRefreshAudio('ctx-create-failed');
       return null;
     }
   },

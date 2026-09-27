@@ -12,6 +12,9 @@ import { RefreshAudioDiagnosticPanel } from './components/RefreshAudioDiagnostic
 // lifetime-long, and StrictMode double-invokes effects, which would register
 // it twice in development.
 lockAppZoom();
+// The first load's pageshow fires before this module runs, so mark boot here.
+// A reload also takes the separate tryAutoplay path, so record which it was.
+traceRefreshAudio('boot', (performance.getEntriesByType?.('navigation')[0] as PerformanceNavigationTiming | undefined)?.type ?? 'unknown');
 installNotificationAudioUnlock();
 preloadMoneyRefreshSound();
 document.addEventListener('visibilitychange', () => {
@@ -19,8 +22,8 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') preloadMoneyRefreshSound();
   else resetMoneyRefreshAudioSession();
 });
-window.addEventListener('pagehide', () => { traceRefreshAudio('pagehide'); resetMoneyRefreshAudioSession(); });
-window.addEventListener('pageshow', () => { traceRefreshAudio('pageshow'); preloadMoneyRefreshSound(); });
+window.addEventListener('pagehide', e => { traceRefreshAudio('pagehide', e.persisted ? 'to bfcache' : 'unload'); resetMoneyRefreshAudioSession(); });
+window.addEventListener('pageshow', e => { traceRefreshAudio('pageshow', e.persisted ? 'from bfcache' : 'fresh load'); preloadMoneyRefreshSound(); });
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
