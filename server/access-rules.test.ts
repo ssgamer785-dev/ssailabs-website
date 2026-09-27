@@ -644,3 +644,23 @@ describe('anonymous authors: post media keys never name the author', () => {
     expect(signedKey(own.body.uploadUrl)).toBe(neutral(6));
   });
 });
+
+describe('anonymous authors: download names', () => {
+  const disposition = (url: unknown) => new URL(String(url)).searchParams.get('response-content-disposition');
+  test('another member downloads an anonymous document under a neutral name; the author and the admin under the original', async () => {
+    Object.assign(fake.tables.posts[1], { attachment: 'file', mime_type: 'text/csv', file_name: 'Priya Sharma P&L.CSV', is_anonymous: true });
+    const other = await call(`/api/posts/media-url?key=${encodeURIComponent(STUDENT_POST_KEY)}`, 'other-token', undefined, 'GET');
+    const author = await call(`/api/posts/media-url?key=${encodeURIComponent(STUDENT_POST_KEY)}`, 'student-token', undefined, 'GET');
+    const admin = await call(`/api/posts/media-url?key=${encodeURIComponent(STUDENT_POST_KEY)}`, 'admin-token', undefined, 'GET');
+    expect(disposition(other.body.url)).toBe('attachment; filename="Attachment.csv"');
+    expect(disposition(author.body.url)).toBe('attachment; filename="Priya Sharma P_L.CSV"');
+    expect(disposition(admin.body.url)).toBe('attachment; filename="Priya Sharma P_L.CSV"');
+    expect(String(other.body.url)).not.toContain('Priya');
+  });
+
+  test('a named post keeps its original download name for everyone', async () => {
+    Object.assign(fake.tables.posts[1], { attachment: 'file', mime_type: 'text/csv', file_name: 'Priya Sharma P&L.CSV', is_anonymous: false });
+    const other = await call(`/api/posts/media-url?key=${encodeURIComponent(STUDENT_POST_KEY)}`, 'other-token', undefined, 'GET');
+    expect(disposition(other.body.url)).toBe('attachment; filename="Priya Sharma P_L.CSV"');
+  });
+});

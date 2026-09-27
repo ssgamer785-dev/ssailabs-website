@@ -206,6 +206,22 @@ export function isAuthorPostKey(key: unknown, authorId: unknown): key is string 
   return !!resolved && resolved === key && resolved.startsWith(`posts/${authorId}/`);
 }
 
+/**
+ * The name a download is saved under. For another member viewing an anonymous
+ * post it is neutral ("Attachment.docx"): an original file name often carries
+ * the author's own name, and it would sit in the signed URL too. Same rule as
+ * the feed functions apply to file_name.
+ */
+export function downloadName(
+  post: { file_name?: string | null; author_id?: string | null; is_anonymous?: boolean | null },
+  caller: { userId: string; isAdmin: boolean },
+): string | null {
+  if (!post.file_name) return null;
+  if (!post.is_anonymous || caller.isAdmin || post.author_id === caller.userId) return post.file_name;
+  const extension = /(\.[A-Za-z0-9]{1,5})$/.exec(post.file_name)?.[1]?.toLowerCase() ?? '';
+  return `Attachment${extension}`;
+}
+
 function signPut(key: string, mimeType: string, sizeBytes: number): Promise<string> {
   // Type and size are signed: the upload can't exceed the size we just
   // validated or arrive as a different type.
@@ -317,7 +333,7 @@ export function postMediaRouter(): Router {
     }
 
     const db = getAdmin()!;
-    const base = () => db.from('posts').select('id, attachment, mime_type, file_name').eq('media_purged', false);
+    const base = () => db.from('posts').select('id, attachment, mime_type, file_name, author_id, is_anonymous').eq('media_purged', false);
     const { data: object, error: objectError } = await base().eq('storage_key', storageKey).maybeSingle();
     if (objectError) throw objectError;
     const { data: poster, error: posterError } = object ? { data: object, error: null } : await base().eq('poster_key', storageKey).maybeSingle();
@@ -329,7 +345,7 @@ export function postMediaRouter(): Router {
           mimeType: object.mime_type,
           allowed: isAllowedAttachment(object.attachment, object.mime_type),
           download: object.attachment === 'file',
-          fileName: object.file_name,
+          fileName: downloadName(object, caller),
         })
       : servedAs({ mimeType: POSTER_MIME, allowed: true, download: false });
     const url = await getSignedUrl(
