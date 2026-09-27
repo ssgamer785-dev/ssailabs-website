@@ -3,6 +3,7 @@ import { supabase } from '../supabase';
 import { useAuth } from '../auth-context';
 import type { NotificationKind } from '../database.types';
 import { friendlyError, withTimeout } from '../errors';
+import { mergeFirstPage } from '../community/comments-merge';
 
 const PAGE_SIZE = 30;
 export const NOTIFICATIONS_CHANGED_EVENT = 'tp:notifications-changed';
@@ -75,6 +76,10 @@ export interface UseNotifications {
   deleteAllNotifications: () => Promise<void>;
   /** Re-reads the feed. Already used internally; exposed for pull-to-refresh. */
   refresh: () => Promise<void>;
+  /** Only the newest page used to be reachable; older notifications load on request. */
+  hasMore: boolean;
+  loadingMore: boolean;
+  loadMore: () => Promise<void>;
 }
 
 /** The signed-in user's notification feed, live via Realtime. */
@@ -83,6 +88,9 @@ export function useNotifications(): UseNotifications {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const oldestRef = useRef<string | null>(null);
   const userId = user?.id;
   const activeUser = useRef(userId);
   activeUser.current = userId;
@@ -106,13 +114,22 @@ export function useNotifications(): UseNotifications {
 
     if (activeUser.current !== userId) return;
     if (qError) { console.error('[notifications] load failed:', qError); setError(friendlyError(qError, 'Could not load notifications.')); return; }
-    setNotifications(((data ?? []) as NotificationRow[]).map(toNotification));
+    const rows = ((data ?? []) as NotificationRow[]).map(toNotification);
+    const pageOldest = rows.length ? rows[rows.length - 1].createdAt : null;
+    if (!oldestRef.current || !pageOldest || pageOldest < oldestRef.current) {
+      oldestRef.current = pageOldest;
+      setHasMore(rows.length === PAGE_SIZE);
+    }
+    // Older pages the person already loaded stay loaded.
+    setNotifications(prev => mergeFirstPage(prev, rows));
     setError(null);
   }, [userId]);
 
   useEffect(() => {
     setNotifications([]);
     setError(null);
+    setHasMore(false);
+    oldestRef.current = null;
     if (!userId) { setLoading(false); return; }
     setLoading(true);
     let active = true;
@@ -212,9 +229,38 @@ export function useNotifications(): UseNotifications {
     }
   }, [notifications, userId]);
 
+  const loadMore = useCallback(async () => {
+    if (!userId || loadingMore || !hasMore || !oldestRef.current) return;
+    setLoadingMore(true);
+    try {
+      const { data, error: qError } = await withTimeout(supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', userId)
+        .lt('created_at', oldestRef.current)
+        .order('created_at', { ascending: false })
+        .limit(PAGE_SIZE), 12_000);
+      if (qError) throw qError;
+      const rows = ((data ?? []) as NotificationRow[]).map(toNotification);
+      setHasMore(rows.length === PAGE_SIZE);
+      if (rows.length) {
+        oldestRef.current = rows[rows.length - 1].createdAt;
+        setNotifications(prev => {
+          const seen = new Set(prev.map(n => n.id));
+          return [...prev, ...rows.filter(n => !seen.has(n.id))];
+        });
+      }
+    } catch (e) {
+      console.error('[notifications] older page failed:', e);
+      setError(friendlyError(e, 'Could not load earlier notifications.'));
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [userId, loadingMore, hasMore]);
+
   const unreadCount = notifications.reduce((n, item) => n + (item.readAt ? 0 : 1), 0);
 
-  return { notifications, unreadCount, loading, error, markRead, markAllRead, deleteNotification, deleteAllNotifications, refresh };
+  return { notifications, unreadCount, loading, error, markRead, markAllRead, deleteNotification, deleteAllNotifications, refresh, hasMore, loadingMore, loadMore };
 }
 
 /**

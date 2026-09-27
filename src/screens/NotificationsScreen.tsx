@@ -85,7 +85,7 @@ function whenLabel(iso: string): string {
 
 export function NotificationsScreen() {
   const navigate = useNavigate();
-  const { notifications, loading, error, markRead, markAllRead, deleteNotification, deleteAllNotifications, refresh } = useNotifications();
+  const { notifications, loading, error, markRead, markAllRead, deleteNotification, deleteAllNotifications, refresh, hasMore, loadingMore, loadMore } = useNotifications();
   useRefreshHandler(refresh);
   const [notifCat, setNotifCat] = useState<typeof NCATS[number]>('All');
   const [confirmClearAll, setConfirmClearAll] = useState(false);
@@ -205,6 +205,12 @@ export function NotificationsScreen() {
         {renderRows('today')}
         <div style={css('flex:none;padding:16px 20px 9px;font-size:11px;font-weight:700;color:var(--text-faint);letter-spacing:.07em;white-space:nowrap')}>EARLIER</div>
         {renderRows('earlier')}
+        {hasMore && (
+          <button type="button" onClick={() => void loadMore()} disabled={loadingMore}
+            style={css('flex:none;margin:10px auto 0;min-height:44px;padding:0 18px;font-size:12.5px;font-weight:600;color:var(--accent-ink);cursor:pointer')}>
+            {loadingMore ? 'Loading…' : 'Load earlier notifications'}
+          </button>
+        )}
         <div style={css('height:16px;flex:none')} />
         </>
         )}
