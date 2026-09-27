@@ -21,7 +21,7 @@ export function notificationsRouter(): Router {
     const { error } = await db.from('notifications').delete().eq('user_id', caller.userId);
     if (error) throw error;
     return res.json({ ok: true });
-  }));
+  }, 'Notifications are temporarily unavailable. Please try again.'));
 
   router.delete('/:id', asyncRoute(async (req, res) => {
     const caller = await authenticate(req);
@@ -38,7 +38,7 @@ export function notificationsRouter(): Router {
     if (error) throw error;
     if (!data?.length) return res.status(404).json({ error: 'Notification not found.' });
     return res.json({ ok: true });
-  }));
+  }, 'Notifications are temporarily unavailable. Please try again.'));
 
   return router;
 }

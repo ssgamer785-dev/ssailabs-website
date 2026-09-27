@@ -114,6 +114,17 @@ describe('asyncRoute: a rejecting handler is contained', () => {
     expect(JSON.stringify(body)).not.toContain('DeleteObjects');
   });
 
+  test('a route outside media says what actually failed, not "media storage"', async () => {
+    const app = express();
+    app.post('/push', asyncRoute(async () => { throw new Error('push_subscriptions query failed'); }, 'Notifications are temporarily unavailable. Please try again.'));
+    const base = await serve(app);
+    const res = await fetch(`${base}/push`, { method: 'POST' });
+    expect(res.status).toBe(503);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('Notifications are temporarily unavailable. Please try again.');
+    expect(body.error).not.toMatch(/media/i);
+  });
+
   test('the server keeps serving after a failure, and repeat failures stay contained', async () => {
     let succeedNext = false;
     const app = express();

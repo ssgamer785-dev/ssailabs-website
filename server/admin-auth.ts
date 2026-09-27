@@ -248,7 +248,7 @@ export function adminAuthRouter(): Router {
       access_token: data.session.access_token,
       refresh_token: data.session.refresh_token,
     });
-  }));
+  }, 'Admin sign-in is temporarily unavailable. Please try again.'));
 
   return router;
 }

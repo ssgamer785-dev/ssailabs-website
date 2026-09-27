@@ -106,7 +106,7 @@ export function fxRouter(): Router {
       console.error('[fx] could not obtain exchange rates:', error);
       res.status(503).json({ error: 'Exchange rates are temporarily unavailable. Please try again.' });
     }
-  }));
+  }, 'Exchange rates are temporarily unavailable. Please try again.'));
 
   return router;
 }

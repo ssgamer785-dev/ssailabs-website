@@ -73,7 +73,7 @@ export function pushRouter(): Router {
     }, { onConflict: 'endpoint' });
     if (error) throw error;
     res.json({ ok: true });
-  }));
+  }, 'Notifications are temporarily unavailable. Please try again.'));
 
   router.delete('/subscribe', asyncRoute(async (req, res) => {
     const caller = await authenticate(req);
@@ -84,7 +84,7 @@ export function pushRouter(): Router {
       .delete().eq('endpoint', endpoint).eq('user_id', caller.userId);
     if (error) throw error;
     res.json({ ok: true });
-  }));
+  }, 'Notifications are temporarily unavailable. Please try again.'));
 
   /**
    * Sends a test notification to the CALLER's own devices only (the query is
@@ -134,7 +134,7 @@ export function pushRouter(): Router {
       }
     }
     res.json({ attempted: (subscriptions ?? []).length, delivered, statuses, reasons });
-  }));
+  }, 'Notifications are temporarily unavailable. Please try again.'));
 
   // Called only by a Supabase Database Webhook on notifications INSERT.
   router.post('/dispatch', asyncRoute(async (req, res) => {
@@ -188,7 +188,7 @@ export function pushRouter(): Router {
       }
     }
     res.json({ ok: true, attempted: (subscriptions ?? []).length, uncertainFailures: failed });
-  }));
+  }, 'Notifications are temporarily unavailable. Please try again.'));
 
   return router;
 }

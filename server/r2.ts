@@ -75,8 +75,17 @@ export function getAdmin(): SupabaseClient | null {
  * gets a 503 telling them the operation did not happen, so nothing downstream
  * mistakes a failed purge or a failed signature for a successful one.
  */
+/**
+ * What a failed route tells the caller. Every route used to answer "Media
+ * storage is temporarily unavailable", including push, notification and
+ * sign-in failures that had nothing to do with storage (TP-037). The routers
+ * outside media now pass their own sentence; the logged error is unchanged.
+ */
+export const MEDIA_UNAVAILABLE = 'Media storage is temporarily unavailable. Please try again.';
+
 export function asyncRoute(
   handler: (req: Request, res: Response) => Promise<unknown>,
+  failureMessage: string = MEDIA_UNAVAILABLE,
 ): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     handler(req, res).catch((error: unknown) => {
@@ -87,9 +96,7 @@ export function asyncRoute(
         next(error);
         return;
       }
-      res.status(503).json({
-        error: 'Media storage is temporarily unavailable. Please try again.',
-      });
+      res.status(503).json({ error: failureMessage });
     });
   };
 }
