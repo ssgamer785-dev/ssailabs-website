@@ -26,23 +26,35 @@ self.addEventListener('fetch', event => {
   }
 });
 
+// WebKit counts every push that ends without showNotification() and, past a
+// small limit, deletes all of this site's push subscriptions (webpushd's
+// maxSilentPushCount). Chrome exempts a visible page; Apple's engine does not,
+// so skipping the banner while the app is open silently disabled iPhone push.
+const APPLE_WEBKIT = /AppleWebKit/.test(self.navigator.userAgent)
+  && !/Chrome|Chromium|CriOS|Edg|Android/.test(self.navigator.userAgent);
+
 self.addEventListener('push', event => {
   let data;
   try { data = event.data?.json(); } catch { data = null; }
   if (!data || typeof data.id !== 'string') return;
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    if (windows.some(client => client.visibilityState === 'visible')) return;
+    const visible = windows.some(client => client.visibilityState === 'visible');
+    // The open app already chimes and shows its own in-app notice.
+    if (visible && !APPLE_WEBKIT) return;
+    const tag = `tp-${data.id}`;
     const path = typeof data.url === 'string' && data.url.startsWith('/') && !data.url.startsWith('//')
       ? data.url : '/notifications';
     await self.registration.showNotification(String(data.title || 'The Traders Planet'), {
       body: String(data.body || ''),
       icon: '/icon-192.png',
       badge: '/icon-192.png',
-      tag: `tp-${data.id}`,
+      tag,
       renotify: false,
       data: { url: path },
     });
+    // Shown only to keep WebKit's subscription; the app on screen has it covered.
+    if (visible) (await self.registration.getNotifications({ tag })).forEach(shown => shown.close());
   })());
 });
 

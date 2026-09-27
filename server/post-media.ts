@@ -132,6 +132,27 @@ export function postObjectKey(raw: unknown): string | null {
   return resolved;
 }
 
+/**
+ * The extension /upload-url mints for this attachment. Voice keeps a real
+ * audio extension so players pick the right decoder; everything else is
+ * opaque. Shared with /resume-upload: when the two disagreed, every retry of
+ * an admin voice post was refused as "Invalid upload key".
+ */
+export function postUploadExtension(kind: string, mimeType: string): string {
+  if (kind !== 'voice') return EXTENSION[kind];
+  return /^audio\/mp4/i.test(mimeType) ? 'm4a' : /^audio\/aac/i.test(mimeType) ? 'aac'
+    : /^audio\/ogg/i.test(mimeType) ? 'ogg' : /^audio\/wav/i.test(mimeType) ? 'wav' : 'webm';
+}
+
+/** Whether `key` is exactly what /upload-url would have minted for this caller and attachment. */
+export function isResumablePostKey(key: string, userId: string, kind: string, mimeType: string): boolean {
+  const prefix = `posts/${userId}/`;
+  if (!key.startsWith(prefix)) return false;
+  const leaf = key.slice(prefix.length);
+  if (!/^\d{13}-[0-9a-f-]{36}\.[a-z0-9]{3,4}$/i.test(leaf)) return false;
+  return leaf.endsWith(`.${postUploadExtension(kind, mimeType)}`);
+}
+
 function signPut(key: string, mimeType: string, sizeBytes: number): Promise<string> {
   // ContentType and ContentLength are signed, so the upload can't exceed
   // the size we just validated.
@@ -183,8 +204,7 @@ export function postMediaRouter(): Router {
     }
 
     const stem = `posts/${caller.userId}/${Date.now()}-${randomUUID()}`;
-    const voiceExtension = /^audio\/mp4/i.test(mimeType) ? 'm4a' : /^audio\/aac/i.test(mimeType) ? 'aac' : /^audio\/ogg/i.test(mimeType) ? 'ogg' : /^audio\/wav/i.test(mimeType) ? 'wav' : 'webm';
-    const storageKey = `${stem}.${kind === 'voice' ? voiceExtension : EXTENSION[kind]}`;
+    const storageKey = `${stem}.${postUploadExtension(kind, mimeType)}`;
     const uploadUrl = await signPut(storageKey, mimeType, sizeBytes);
 
     const posterKey = wantsPoster ? `${stem}-poster.jpg` : undefined;
@@ -206,12 +226,8 @@ export function postMediaRouter(): Router {
       || !Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > MAX_BYTES[kind]) {
       return res.status(400).json({ error: 'Invalid upload.' });
     }
-    const leaf = key.slice(`posts/${caller.userId}/`.length);
-    if (!/^\d{13}-[0-9a-f-]{36}\.(bin|pdf)$/i.test(leaf)) {
+    if (!isResumablePostKey(key, caller.userId, kind, mimeType)) {
       return res.status(400).json({ error: 'Invalid upload key.' });
-    }
-    if (!key.endsWith(kind === 'pdf' ? '.pdf' : '.bin')) {
-      return res.status(400).json({ error: 'Upload key does not match its attachment type.' });
     }
     const { data: published, error: publishedError } = await getAdmin()!.from('posts').select('id').eq('storage_key', key).maybeSingle();
     if (publishedError) throw publishedError;

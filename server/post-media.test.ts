@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { isAllowedAttachment, postObjectKey } from './post-media';
+import { isAllowedAttachment, isResumablePostKey, postObjectKey, postUploadExtension } from './post-media';
 
 /**
  * Regression cover for the post-media traversal hole.
@@ -236,5 +236,29 @@ describe('isAllowedAttachment: the kinds are not interchangeable', () => {
     expect(isAllowedAttachment('pdf', 'application/pdf')).toBe(true);
     expect(isAllowedAttachment('image', 'image/png')).toBe(true);
     expect(isAllowedAttachment('video', 'video/mp4')).toBe(true);
+  });
+});
+
+describe('resuming an interrupted post upload', () => {
+  const USER = '11111111-1111-4111-8111-111111111111';
+  const stem = `posts/${USER}/1790000000000-0f8fad5b-d9cb-469f-a165-70867728950e`;
+
+  test('accepts the key /upload-url minted for an admin voice post (retry was always refused)', () => {
+    expect(isResumablePostKey(`${stem}.${postUploadExtension('voice', 'audio/mp4')}`, USER, 'voice', 'audio/mp4')).toBe(true);
+    expect(isResumablePostKey(`${stem}.webm`, USER, 'voice', 'audio/webm;codecs=opus')).toBe(true);
+  });
+
+  test('still accepts image, video and PDF keys exactly as before', () => {
+    expect(isResumablePostKey(`${stem}.bin`, USER, 'image', 'image/png')).toBe(true);
+    expect(isResumablePostKey(`${stem}.bin`, USER, 'video', 'video/mp4')).toBe(true);
+    expect(isResumablePostKey(`${stem}.pdf`, USER, 'pdf', 'application/pdf')).toBe(true);
+  });
+
+  test('refuses a key of another type, another user, or an unminted shape', () => {
+    expect(isResumablePostKey(`${stem}.bin`, USER, 'voice', 'audio/mp4')).toBe(false);
+    expect(isResumablePostKey(`${stem}.m4a`, USER, 'image', 'image/png')).toBe(false);
+    expect(isResumablePostKey(`${stem}.pdf`, USER, 'image', 'image/png')).toBe(false);
+    expect(isResumablePostKey(`${stem}.m4a`, '22222222-2222-4222-8222-222222222222', 'voice', 'audio/mp4')).toBe(false);
+    expect(isResumablePostKey(`posts/${USER}/avatar.m4a`, USER, 'voice', 'audio/mp4')).toBe(false);
   });
 });
