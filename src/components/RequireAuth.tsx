@@ -32,31 +32,32 @@ export function RequireAuth({ children }: { children: ReactNode }) {
  * Admins are activated by definition, so the admin never meets this.
  */
 export function RequireActivated({ children }: { children: ReactNode }) {
-  const { session, loading, profileLoading, isActivated } = useAuth();
+  const { session, loading, profileLoading, profile, isActivated } = useAuth();
   if (loading) return <AuthLoading />;
   if (!session) return <LoginRedirect />;
   // The profile decides this, so wait for it rather than guess from its absence.
-  if (profileLoading) return <AuthLoading />;
+  // Only a first load waits; a background re-read keeps the screen mounted.
+  if (profileLoading && !profile) return <AuthLoading />;
   if (!isActivated) return <LoginRedirectToActivation />;
   return <>{children}</>;
 }
 
 /** Admin-only routes. An activated non-admin is sent back to their own home. */
 export function RequireAdmin({ children }: { children: ReactNode }) {
-  const { session, loading, profileLoading, isAdmin } = useAuth();
+  const { session, loading, profileLoading, profile, isAdmin } = useAuth();
   if (loading) return <AuthLoading />;
   if (!session) return <LoginRedirect admin />;
-  if (profileLoading) return <AuthLoading />;
+  if (profileLoading && !profile) return <AuthLoading />;
   if (!isAdmin) return <Navigate to="/home" replace />;
   return <>{children}</>;
 }
 
 /** Keeps an already-signed-in user off /login and /signup. */
 export function RedirectIfAuthed({ children }: { children: ReactNode }) {
-  const { session, loading, profileLoading, isActivated } = useAuth();
+  const { session, loading, profileLoading, profile, isActivated } = useAuth();
   if (loading) return <AuthLoading />;
   if (!session) return <>{children}</>;
-  if (profileLoading) return <AuthLoading />;
+  if (profileLoading && !profile) return <AuthLoading />;
   // Signed in but not yet activated: the gate, not the app.
   return <Navigate to={isActivated ? (pendingDestination() ?? '/home') : '/activate'} replace />;
 }

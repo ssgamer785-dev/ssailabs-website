@@ -3,6 +3,7 @@ import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import type { Database } from './database.types';
 import { unsubscribePush } from './notifications/push';
+import { profileActionFor, stableUser } from './auth-events';
 
 type Profile = Database['public']['Tables']['profiles']['Row'];
 
@@ -87,16 +88,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const sessionRef = useRef<Session | null>(null);
   sessionRef.current = session;
 
-  const loadProfile = useCallback(async (userId: string) => {
+  /** Mirrors `profile` so the auth listener can compare without re-subscribing. */
+  const profileRef = useRef<Profile | null>(null);
+  profileRef.current = profile;
+
+  /** The signed-in user, kept as the same object across token refreshes. */
+  const userRef = useRef<User | null>(null);
+  userRef.current = stableUser(userRef.current, session?.user ?? null);
+
+  /**
+   * `silent` re-reads a profile we already hold: guards keep rendering the
+   * current screen, and a failed re-read keeps the profile we had rather than
+   * signing the screen out from under the person.
+   */
+  const loadProfile = useCallback(async (userId: string, silent = false) => {
     const pending = inFlightProfile.current;
     if (pending?.userId === userId) return pending.promise;
 
-    setProfileLoading(true);
+    if (!silent) setProfileLoading(true);
     const request = (async () => {
       const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-      setProfile(error ? null : data);
+      if (!error) setProfile(data);
+      else if (!silent || profileRef.current?.id !== userId) setProfile(null);
     })().finally(() => {
-      setProfileLoading(false);
+      if (!silent) setProfileLoading(false);
       if (inFlightProfile.current?.userId === userId) inFlightProfile.current = null;
     });
 
@@ -114,11 +129,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (data.session?.user) void loadProfile(data.session.user.id);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
       if (!active) return;
       setSession(newSession);
-      if (newSession?.user) void loadProfile(newSession.user.id);
-      else { setProfile(null); setProfileLoading(false); }
+      const action = profileActionFor(event, newSession?.user?.id, profileRef.current?.id);
+      if (action === 'clear') { setProfile(null); setProfileLoading(false); }
+      else if (action === 'load') void loadProfile(newSession!.user.id);
+      else if (action === 'refresh-silently') void loadProfile(newSession!.user.id, true);
     });
 
     return () => {
@@ -191,10 +208,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const userId = sessionRef.current?.user?.id;
     if (!userId) return;
     inFlightProfile.current = null;
-    await loadProfile(userId);
+    await loadProfile(userId, profileRef.current?.id === userId);
   }, [loadProfile]);
 
-  const role = profile?.role ?? null;
+  // A profile left over from another account (a switch within one tab) is
+  // never presented as the current one.
+  const currentProfile = profile && profile.id === session?.user?.id ? profile : null;
+  const role = currentProfile?.role ?? null;
 
   return (
     <AuthContext.Provider
@@ -202,11 +222,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         profileLoading,
         session,
-        user: session?.user ?? null,
-        profile,
+        user: userRef.current,
+        profile: currentProfile,
         role,
         isAdmin: role === 'admin',
-        isActivated: role === 'admin' || profile?.activated_at != null,
+        isActivated: role === 'admin' || currentProfile?.activated_at != null,
         refreshProfile,
         signIn,
         signInWithGoogle,
