@@ -7,11 +7,11 @@
  */
 
 import { Router, type Response } from 'express';
-import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
 import { posix as posixPath } from 'path';
-import { asyncRoute, authenticate, bucket, deleteObjects, getAdmin, getS3 } from './r2.js';
+import { asyncRoute, authenticate, bucket, deleteObjects, getAdmin, getS3, servedAs, signedPutUrl } from './r2.js';
 import { recordUploadGrant } from './upload-grants.js';
 
 const PUT_URL_TTL_SECONDS = 300;
@@ -168,13 +168,9 @@ export function isAuthorPostKey(key: unknown, authorId: unknown): key is string 
 }
 
 function signPut(key: string, mimeType: string, sizeBytes: number): Promise<string> {
-  // ContentType and ContentLength are signed, so the upload can't exceed
-  // the size we just validated.
-  return getSignedUrl(
-    getS3()!,
-    new PutObjectCommand({ Bucket: bucket()!, Key: key, ContentType: mimeType, ContentLength: sizeBytes }),
-    { expiresIn: PUT_URL_TTL_SECONDS },
-  );
+  // Type and size are signed: the upload can't exceed the size we just
+  // validated or arrive as a different type.
+  return signedPutUrl(key, mimeType, sizeBytes, PUT_URL_TTL_SECONDS);
 }
 
 export function postMediaRouter(): Router {
@@ -275,16 +271,24 @@ export function postMediaRouter(): Router {
     }
 
     const db = getAdmin()!;
-    const base = () => db.from('posts').select('id').eq('media_purged', false);
+    const base = () => db.from('posts').select('id, attachment, mime_type, file_name').eq('media_purged', false);
     const { data: object, error: objectError } = await base().eq('storage_key', storageKey).maybeSingle();
     if (objectError) throw objectError;
     const { data: poster, error: posterError } = object ? { data: object, error: null } : await base().eq('poster_key', storageKey).maybeSingle();
     if (posterError) throw posterError;
     if (!object && !poster) return res.status(404).json({ error: 'Attachment unavailable.' });
 
+    const served = object
+      ? servedAs({
+          mimeType: object.mime_type,
+          allowed: isAllowedAttachment(object.attachment, object.mime_type),
+          download: object.attachment === 'file',
+          fileName: object.file_name,
+        })
+      : servedAs({ mimeType: POSTER_MIME, allowed: true, download: false });
     const url = await getSignedUrl(
       getS3()!,
-      new GetObjectCommand({ Bucket: bucket()!, Key: storageKey }),
+      new GetObjectCommand({ Bucket: bucket()!, Key: storageKey, ...served }),
       { expiresIn: GET_URL_TTL_SECONDS },
     );
     res.json({ url, expiresIn: GET_URL_TTL_SECONDS });

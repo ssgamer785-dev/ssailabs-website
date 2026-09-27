@@ -8,7 +8,8 @@
 
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { DeleteObjectsCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectsCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export function env(name: string): string | undefined {
   const v = process.env[name];
@@ -17,6 +18,39 @@ export function env(name: string): string | undefined {
 
 let s3: S3Client | null = null;
 let admin: SupabaseClient | null = null;
+
+/**
+ * A presigned PUT that binds the object's Content-Type as well as its size.
+ * The S3 presigner leaves content-type out of the signature by default, so
+ * any type could be stored under a validated key (TP-024); `signableHeaders`
+ * puts it back in, and the browser must send exactly the type it asked for.
+ */
+export function signedPutUrl(key: string, mimeType: string, sizeBytes: number, expiresIn: number): Promise<string> {
+  return getSignedUrl(
+    getS3()!,
+    new PutObjectCommand({ Bucket: bucket()!, Key: key, ContentType: mimeType, ContentLength: sizeBytes }),
+    { expiresIn, signableHeaders: new Set(['content-type']) },
+  );
+}
+
+/**
+ * How a signed GET tells the browser to treat an object: the type recorded
+ * for it when that type is on the allow-list for its kind, otherwise a plain
+ * download. So a file stored under a misleading type (possible before the
+ * type was signed) can never be rendered as a page.
+ */
+export function servedAs(args: { mimeType: string | null | undefined; allowed: boolean; download: boolean; fileName?: string | null }): {
+  ResponseContentType: string;
+  ResponseContentDisposition: string;
+} {
+  const type = args.allowed && args.mimeType ? args.mimeType : 'application/octet-stream';
+  const asDownload = args.download || !args.allowed;
+  const safeName = (args.fileName ?? '').replace(/[^A-Za-z0-9._ -]/g, '_').slice(0, 120).trim();
+  const disposition = asDownload
+    ? (safeName ? `attachment; filename="${safeName}"` : 'attachment')
+    : 'inline';
+  return { ResponseContentType: type, ResponseContentDisposition: disposition };
+}
 
 export function bucket(): string | undefined {
   return env('R2_BUCKET');

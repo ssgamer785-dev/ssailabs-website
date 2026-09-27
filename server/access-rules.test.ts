@@ -454,3 +454,73 @@ describe('upload grants', () => {
     expect(res.body.uploadUrl).toBeUndefined();
   });
 });
+
+describe('stored and served types (TP-024)', () => {
+  const query = (url: unknown) => new URL(String(url)).searchParams;
+  const signedHeaders = (url: unknown) => (query(url).get('X-Amz-SignedHeaders') ?? '').split(';');
+  const served = (url: unknown) => ({ type: query(url).get('response-content-type'), disposition: query(url).get('response-content-disposition') });
+
+  test('every upload URL binds the type it was issued for, as well as the size', async () => {
+    const chat = await call('/api/chat/upload-url', 'student-token', { conversationId: CONV, kind: 'video', mimeType: 'video/mp4', sizeBytes: 900_000, posterBytes: 4_000 });
+    const post = await call('/api/posts/upload-url', 'student-token', { kind: 'pdf', mimeType: 'application/pdf', sizeBytes: 50_000 });
+    const avatar = await call('/api/profile/avatar-upload-url', 'student-token', { mimeType: 'image/png', sizeBytes: 20_000 });
+    expect([chat.status, post.status, avatar.status]).toEqual([200, 200, 200]);
+    for (const url of [chat.body.uploadUrl, chat.body.posterUploadUrl, post.body.uploadUrl, avatar.body.uploadUrl]) {
+      expect(signedHeaders(url)).toEqual(expect.arrayContaining(['content-length', 'content-type', 'host']));
+    }
+  });
+
+  test('a resumed chat upload is re-signed for the row\'s own type', async () => {
+    const key = chatKey(CONV, 40);
+    addMessage(message(u(140), { storage_key: key, upload_status: 'pending', kind: 'voice', mime_type: 'audio/webm;codecs=opus' }));
+    const res = await call('/api/chat/resume-upload', 'student-token', { messageId: u(140) });
+    expect(res.status).toBe(200);
+    expect(signedHeaders(res.body.uploadUrl)).toContain('content-type');
+  });
+
+  test('chat media is served as its recorded type: inline for media, a download for documents', async () => {
+    const image = await call(`/api/chat/media-url?key=${encodeURIComponent(OWN_KEY)}`, 'student-token', undefined, 'GET');
+    expect(served(image.body.url)).toEqual({ type: 'image/jpeg', disposition: 'inline' });
+
+    const pdf = await call(`/api/chat/media-url?key=${encodeURIComponent(ADMIN_KEY_IN_THREAD)}`, 'student-token', undefined, 'GET');
+    expect(served(pdf.body.url)).toEqual({ type: 'application/pdf', disposition: 'inline' });
+
+    const docKey = chatKey(CONV, 41);
+    addMessage(message(u(141), { storage_key: docKey, kind: 'file', mime_type: 'text/csv', file_name: 'Q3 "report"/draft.csv' }));
+    const doc = await call(`/api/chat/media-url?key=${encodeURIComponent(docKey)}`, 'student-token', undefined, 'GET');
+    expect(served(doc.body.url)).toEqual({ type: 'text/csv', disposition: 'attachment; filename="Q3 _report__draft.csv"' });
+  });
+
+  test('a row whose type is not on its kind\'s allow-list is never rendered by the browser', async () => {
+    const key = chatKey(CONV, 42);
+    addMessage(message(u(142), { storage_key: key, kind: 'pdf', mime_type: 'text/html' }));
+    const res = await call(`/api/chat/media-url?key=${encodeURIComponent(key)}`, 'student-token', undefined, 'GET');
+    expect(res.status).toBe(200);
+    expect(served(res.body.url)).toEqual({ type: 'application/octet-stream', disposition: 'attachment' });
+  });
+
+  test('a video poster is served as a JPEG', async () => {
+    const key = chatKey(CONV, 43);
+    const poster = key.replace(/\.bin$/, '-poster.jpg');
+    addMessage(message(u(143), { storage_key: key, poster_key: poster, kind: 'video', mime_type: 'video/mp4' }));
+    const res = await call(`/api/chat/media-url?key=${encodeURIComponent(poster)}`, 'student-token', undefined, 'GET');
+    expect(served(res.body.url)).toEqual({ type: 'image/jpeg', disposition: 'inline' });
+  });
+
+  test('community media follows the same rule', async () => {
+    Object.assign(fake.tables.posts[1], { attachment: 'image', mime_type: 'image/webp', file_name: 'chart.webp' });
+    const ok = await call(`/api/posts/media-url?key=${encodeURIComponent(STUDENT_POST_KEY)}`, 'other-token', undefined, 'GET');
+    expect(served(ok.body.url)).toEqual({ type: 'image/webp', disposition: 'inline' });
+
+    Object.assign(fake.tables.posts[1], { attachment: 'image', mime_type: 'text/html' });
+    const bad = await call(`/api/posts/media-url?key=${encodeURIComponent(STUDENT_POST_KEY)}`, 'other-token', undefined, 'GET');
+    expect(served(bad.body.url)).toEqual({ type: 'application/octet-stream', disposition: 'attachment; filename="chart.webp"' });
+  });
+
+  test('a profile picture link downloads rather than renders when opened directly', async () => {
+    Object.assign(fake.tables.profiles[2], { avatar_key: AVATAR_KEY });
+    const res = await call(`/api/profile/avatar-url?userId=${OTHER}`, 'student-token', undefined, 'GET');
+    expect(res.status).toBe(200);
+    expect(served(res.body.url).disposition).toBe('attachment');
+  });
+});

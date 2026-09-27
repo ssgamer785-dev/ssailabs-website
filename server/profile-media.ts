@@ -14,11 +14,11 @@
  */
 
 import { Router, type Response } from 'express';
-import { DeleteObjectsCommand, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { DeleteObjectsCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
 import { posix as posixPath } from 'path';
-import { asyncRoute, authenticate, bucket, getAdmin, getS3 } from './r2.js';
+import { asyncRoute, authenticate, bucket, getAdmin, getS3, signedPutUrl } from './r2.js';
 
 const PUT_URL_TTL_SECONDS = 300;
 /**
@@ -113,16 +113,8 @@ export function profileMediaRouter(): Router {
     // Namespaced by the CALLER's id, from the verified token. This is the whole
     // authorization story for writes: there is no id parameter to forge.
     const storageKey = `avatars/${caller.userId}/${Date.now()}-${randomUUID()}.bin`;
-    const uploadUrl = await getSignedUrl(
-      getS3()!,
-      new PutObjectCommand({
-        Bucket: bucket()!,
-        Key: storageKey,
-        ContentType: mimeType,
-        ContentLength: sizeBytes,
-      }),
-      { expiresIn: PUT_URL_TTL_SECONDS },
-    );
+    // Type and size are signed: the photo arrives as the image type it declared.
+    const uploadUrl = await signedPutUrl(storageKey, mimeType, sizeBytes, PUT_URL_TTL_SECONDS);
 
     res.json({ uploadUrl, storageKey });
   }));
@@ -152,9 +144,12 @@ export function profileMediaRouter(): Router {
     const storageKey = avatarObjectKey(rawKey);
     if (!storageKey) return res.status(400).json({ error: 'Invalid avatar key.' });
 
+    // Pictures are only ever drawn by <img>, which ignores the disposition;
+    // opening the link directly downloads it instead of rendering whatever
+    // type an upload from before the type was signed may have claimed.
     const url = await getSignedUrl(
       getS3()!,
-      new GetObjectCommand({ Bucket: bucket()!, Key: storageKey }),
+      new GetObjectCommand({ Bucket: bucket()!, Key: storageKey, ResponseContentDisposition: 'attachment' }),
       { expiresIn: GET_URL_TTL_SECONDS },
     );
     res.json({ url, expiresIn: GET_URL_TTL_SECONDS });
