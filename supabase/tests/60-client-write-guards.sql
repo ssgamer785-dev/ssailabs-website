@@ -367,14 +367,14 @@ begin;
 -- an anonymous video in her own key namespace (every key minted before
 -- author-free keys), an anonymous image with an author-free key, and a named
 -- image in her namespace. Plus an anonymous comment carrying a voice link.
-insert into public.posts (id, author_id, channel, body, is_anonymous, attachment, storage_key, poster_key, mime_type, size_bytes) values
+insert into public.posts (id, author_id, channel, body, is_anonymous, attachment, storage_key, poster_key, mime_type, size_bytes, file_name) values
   ('6f000000-0000-4000-8000-0000000009a1','6aaaaaaa-0000-4000-8000-000000000001','students','anon, legacy key',true,'video',
    'posts/6aaaaaaa-0000-4000-8000-000000000001/1790000000300-aaaaaaaa-3333-4333-8333-333333333333.bin',
-   'posts/6aaaaaaa-0000-4000-8000-000000000001/1790000000300-aaaaaaaa-3333-4333-8333-333333333333-poster.jpg','video/mp4',900),
+   'posts/6aaaaaaa-0000-4000-8000-000000000001/1790000000300-aaaaaaaa-3333-4333-8333-333333333333-poster.jpg','video/mp4',900,'Alice Sixty trade review.MP4'),
   ('6f000000-0000-4000-8000-0000000009a2','6aaaaaaa-0000-4000-8000-000000000001','students','anon, author-free key',true,'image',
-   'posts/9e1c2d3e-4f50-4a61-8b72-c83d94e5f601/1790000000301-aaaaaaaa-3333-4333-8333-333333333334.bin',null,'image/png',900),
+   'posts/9e1c2d3e-4f50-4a61-8b72-c83d94e5f601/1790000000301-aaaaaaaa-3333-4333-8333-333333333334.bin',null,'image/png',900,'alice_sixty_statement'),
   ('6f000000-0000-4000-8000-0000000009a3','6aaaaaaa-0000-4000-8000-000000000001','students','named, legacy key',false,'image',
-   'posts/6aaaaaaa-0000-4000-8000-000000000001/1790000000302-aaaaaaaa-3333-4333-8333-333333333335.bin',null,'image/png',900);
+   'posts/6aaaaaaa-0000-4000-8000-000000000001/1790000000302-aaaaaaaa-3333-4333-8333-333333333335.bin',null,'image/png',900,'Alice Sixty chart.png');
 insert into public.comments (id, post_id, author_id, body, voice_url, voice_duration_seconds, is_anonymous) values
   ('6f000000-0000-4000-8000-0000000009c1','6f000000-0000-4000-8000-0000000009a2','6aaaaaaa-0000-4000-8000-000000000001',null,
    'posts/6aaaaaaa-0000-4000-8000-000000000001/1790000000303-aaaaaaaa-3333-4333-8333-333333333336.webm',4,true);
@@ -395,11 +395,23 @@ select pg_temp.check((select storage_key is not null from public.post_by_id('6f0
   'P5. a named post keeps its media key (its author is shown anyway)');
 select pg_temp.check((select voice_url is null from public.post_comments('6f000000-0000-4000-8000-0000000009a2') where id = '6f000000-0000-4000-8000-0000000009c1'),
   'P6. comments: an anonymous comment''s voice link is not shown to other members');
+select pg_temp.check((select array_agg(file_name order by id) = array['Attachment.mp4', 'Attachment']
+                        from public.posts_feed('students', null, 50) where id in ('6f000000-0000-4000-8000-0000000009a1','6f000000-0000-4000-8000-0000000009a2')),
+  'P11. feed: an anonymous post''s file name is neutral for other members (extension kept, if any)');
+select pg_temp.check((select file_name = 'Attachment.mp4' from public.post_by_id('6f000000-0000-4000-8000-0000000009a1')),
+  'P12. detail: the same');
+select pg_temp.check((select bool_and(position('sixty' in lower(row_to_json(f)::text)) = 0)
+                        from public.posts_feed('students', null, 50) f where f.id in ('6f000000-0000-4000-8000-0000000009a1','6f000000-0000-4000-8000-0000000009a2')),
+  'P13. no column of an anonymous post''s feed row carries the author''s name');
+select pg_temp.check((select file_name = 'Alice Sixty chart.png' from public.post_by_id('6f000000-0000-4000-8000-0000000009a3')),
+  'P14. a named post keeps its file name');
 set local app.current_user_id = '6aaaaaaa-0000-4000-8000-000000000001';
 select pg_temp.check((select storage_key is not null and poster_key is not null from public.post_by_id('6f000000-0000-4000-8000-0000000009a1')),
   'P7. the author still gets her own media keys');
 select pg_temp.check((select voice_url is not null from public.post_comments('6f000000-0000-4000-8000-0000000009a2') where id = '6f000000-0000-4000-8000-0000000009c1'),
   'P8. the author still sees her own comment''s voice link');
+select pg_temp.check((select file_name = 'Alice Sixty trade review.MP4' from public.post_by_id('6f000000-0000-4000-8000-0000000009a1')),
+  'P15. the author still sees her own file name');
 insert into public.comments (id, post_id, author_id, body, voice_url, voice_duration_seconds, is_anonymous)
   values ('6f000000-0000-4000-8000-0000000009c2','6f000000-0000-4000-8000-0000000009a2','6aaaaaaa-0000-4000-8000-000000000001','hi',
           'https://tracker.example/who-opened-this', 9, true);
@@ -408,4 +420,31 @@ select pg_temp.check((select voice_url is null and voice_duration_seconds is nul
 set local app.current_user_id = '11111111-1111-1111-1111-111111111111';
 select pg_temp.check((select storage_key is not null and poster_key is not null from public.posts_feed('students', null, 50) where id = '6f000000-0000-4000-8000-0000000009a1'),
   'P10. the admin still gets every media key');
+select pg_temp.check((select file_name = 'Alice Sixty trade review.MP4' from public.posts_feed('students', null, 50) where id = '6f000000-0000-4000-8000-0000000009a1'),
+  'P16. the admin still sees the original file name');
 rollback;
+
+\echo '--- Q. Sign-up: what the sign-up request itself may set'
+begin;
+-- Written the way Supabase Auth writes a new account: the metadata is
+-- whatever the sign-up request sent.
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('6f000000-0000-4000-8000-00000000f001', 'mallory@test.local', '{"full_name":"The Traders Planet","role":"admin","activated_at":"2026-01-01T00:00:00Z","activation_code_id":"6f000000-0000-4000-8000-00000000f0ff"}'),
+  ('6f000000-0000-4000-8000-00000000f002', 'admin@test.local', '{"full_name":"  A-d-m-i-n  "}'),
+  ('6f000000-0000-4000-8000-00000000f003', 'priya@test.local', '{"full_name":"Priya Sharma"}'),
+  ('6f000000-0000-4000-8000-00000000f004', 'longname@test.local', jsonb_build_object('full_name', repeat('Rajesh ', 20))),
+  ('6f000000-0000-4000-8000-00000000f005', 'quiet@test.local', '{}');
+select pg_temp.check((select role = 'student' and activated_at is null and activation_code_id is null from public.profiles where id = '6f000000-0000-4000-8000-00000000f001'),
+  'Q1. sign-up metadata cannot grant admin or activation');
+select pg_temp.check((select full_name = 'mallory' from public.profiles where id = '6f000000-0000-4000-8000-00000000f001'),
+  'Q2. a reserved name at sign-up falls back to the email name');
+select pg_temp.check((select full_name = 'Member' from public.profiles where id = '6f000000-0000-4000-8000-00000000f002'),
+  'Q3. ... and to "Member" when the email name is reserved too');
+select pg_temp.check((select full_name = 'Priya Sharma' from public.profiles where id = '6f000000-0000-4000-8000-00000000f003'),
+  'Q4. an ordinary name is kept exactly');
+select pg_temp.check((select char_length(full_name) = 80 from public.profiles where id = '6f000000-0000-4000-8000-00000000f004'),
+  'Q5. a name is capped at 80 characters');
+select pg_temp.check((select full_name = 'quiet' from public.profiles where id = '6f000000-0000-4000-8000-00000000f005'),
+  'Q6. no name: the email name, as before');
+rollback;
+

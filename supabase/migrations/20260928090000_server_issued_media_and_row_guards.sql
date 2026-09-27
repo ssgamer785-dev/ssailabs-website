@@ -478,6 +478,34 @@ begin
 end;
 $$;
 
+-- A new account's name comes from sign-up metadata, which the person signing
+-- up writes. The rule above applied only to later renames, so a sign-up could
+-- still take the brand's or the admin's name. Same rule at sign-up: a reserved
+-- name falls back to the part of the email before the @ (or "Member"), and a
+-- name is capped at 80 characters. Only the name is read from the metadata,
+-- as before: role and activation never come from it.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_name text := btrim(coalesce(new.raw_user_meta_data ->> 'full_name', ''));
+  v_reserved text[] := array['thetradersplanet', 'tradersplanet', 'admin', 'administrator', 'official', 'moderator', 'support'];
+begin
+  if v_name = '' or regexp_replace(lower(v_name), '[^a-z]', '', 'g') = any (v_reserved) then
+    v_name := btrim(split_part(coalesce(new.email, ''), '@', 1));
+  end if;
+  if v_name = '' or regexp_replace(lower(v_name), '[^a-z]', '', 'g') = any (v_reserved) then
+    v_name := 'Member';
+  end if;
+  insert into public.profiles (id, full_name)
+  values (new.id, left(v_name, 80));
+  return new;
+end;
+$$;
+
 drop trigger if exists profiles_guard_update on public.profiles;
 create trigger profiles_guard_update
   before update on public.profiles
@@ -619,7 +647,13 @@ as $$
                    or position(p.author_id::text in coalesce(p.poster_key, '')) > 0)
          then null else p.poster_key end,
     p.mime_type, p.size_bytes,
-    p.file_name, p.media_purged,
+    -- An attachment's original name often contains the author's own name
+    -- ("Rahul_statement.pdf"), so other members get a neutral one that keeps
+    -- only the extension.
+    case when p.is_anonymous and not v.admin and p.author_id is distinct from v.uid and p.file_name is not null
+         then 'Attachment' || coalesce(lower(substring(p.file_name from '(\.[A-Za-z0-9]{1,5})$')), '')
+         else p.file_name end,
+    p.media_purged,
     p.chart_seed, p.is_anonymous, p.display_name, p.created_at, p.updated_at,
     case when v.admin then coalesce(pr.full_name, p.display_name) else p.display_name end,
     case when p.is_anonymous and not v.admin and p.author_id is distinct from v.uid then null else pr.role end,
@@ -673,7 +707,13 @@ as $$
                    or position(p.author_id::text in coalesce(p.poster_key, '')) > 0)
          then null else p.poster_key end,
     p.mime_type, p.size_bytes,
-    p.file_name, p.media_purged,
+    -- An attachment's original name often contains the author's own name
+    -- ("Rahul_statement.pdf"), so other members get a neutral one that keeps
+    -- only the extension.
+    case when p.is_anonymous and not v.admin and p.author_id is distinct from v.uid and p.file_name is not null
+         then 'Attachment' || coalesce(lower(substring(p.file_name from '(\.[A-Za-z0-9]{1,5})$')), '')
+         else p.file_name end,
+    p.media_purged,
     p.chart_seed, p.is_anonymous, p.display_name, p.created_at, p.updated_at,
     case when v.admin then coalesce(pr.full_name, p.display_name) else p.display_name end,
     case when p.is_anonymous and not v.admin and p.author_id is distinct from v.uid then null else pr.role end,
