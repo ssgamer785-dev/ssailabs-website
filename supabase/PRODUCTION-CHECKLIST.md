@@ -91,8 +91,15 @@ short-lived signed ones. It needs CORS allowing the browser to `PUT` directly:
 ```
 
 If the bucket is reachable but CORS is wrong, uploads fail at the browser with
-a network error and the message shows "Tap to retry" — that is the symptom to
-look for.
+a network error: chat shows "Tap to retry — Could not connect to media
+storage", and the console reports the request as blocked by CORS policy. That
+is the symptom to look for.
+
+The rule matches whole origins. A Vercel Preview has its own address (for a
+branch, `https://<project>-git-<branch>-<team>.vercel.app`), so uploads fail
+there until that address is added to `AllowedOrigins`. The API records each
+upload before the browser sends it, so a failed Preview upload still counts as
+the new API's first recorded upload for the database.
 
 ## 4. First admin
 

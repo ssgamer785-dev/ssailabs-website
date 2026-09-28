@@ -13,7 +13,14 @@ function isOffline(): boolean {
 export function isNetworkError(error: unknown): boolean {
   const e = error as { message?: string; name?: string; code?: string } | null;
   const text = `${e?.name ?? ''} ${e?.message ?? String(error ?? '')} ${e?.code ?? ''}`;
-  return /failed to fetch|networkerror|network request failed|load failed|fetch_error|err_internet|err_network|the network connection was lost/i.test(text);
+  // "Load failed" is all Safari says about a fetch that got no answer; \b keeps
+  // our own "Upload failed …" sentences from being read as a lost connection.
+  return /failed to fetch|networkerror|network request failed|\bload failed\b|fetch_error|err_internet|err_network|the network connection was lost/i.test(text);
+}
+
+/** An error whose message was written for people; shown as it is. */
+export class ReadableError extends Error {
+  constructor(message: string) { super(message); this.name = 'ReadableError'; }
 }
 
 /**
@@ -30,6 +37,7 @@ function isReadableRefusal(error: unknown): string | null {
 
 export function friendlyError(error: unknown, fallback: string): string {
   if (error && (error as { name?: string }).name === 'TimeoutError') return TIMEOUT_MESSAGE;
+  if (error instanceof ReadableError) return error.message;
   if (isNetworkError(error) || isOffline()) return OFFLINE_MESSAGE;
   return isReadableRefusal(error) ?? fallback;
 }

@@ -6,6 +6,7 @@
 
 import { supabase } from '../supabase';
 import { fetchSignedUrl } from '../media/fetchSignedUrl';
+import { OFFLINE_MESSAGE, ReadableError } from '../errors';
 import type { MediaKind } from './types';
 
 async function authHeaders(): Promise<Record<string, string>> {
@@ -83,10 +84,22 @@ export function uploadToR2(
         onProgress(1);
         resolve();
       } else {
-        reject(new Error(`Upload failed (${xhr.status}). Tap to retry.`));
+        // R2 answers with XML. Keep the status and its error code, so a refused
+        // signature or a storage failure is not reported as a lost connection.
+        const code = xhr.responseText.match(/<Code>([^<]+)<\/Code>/)?.[1];
+        console.warn('[chat] media storage rejected the upload', xhr.status, code ?? '');
+        reject(new ReadableError(`Media storage rejected the upload (HTTP ${xhr.status}${code ? `: ${code}` : ''}).`));
       }
     };
-    xhr.onerror = () => reject(new Error('Upload failed — check your connection and retry.'));
+    // No readable answer: offline, a dropped connection, or storage refusing
+    // this site's address (its CORS rule). JavaScript cannot tell these apart.
+    xhr.onerror = () => {
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      console.warn('[chat] no answer from media storage (offline, dropped connection, or its CORS rule)');
+      reject(new ReadableError(offline
+        ? OFFLINE_MESSAGE
+        : 'Could not connect to media storage. Please retry; if this continues, contact support.'));
+    };
     xhr.onabort = () => reject(new DOMException('Upload cancelled', 'AbortError'));
 
     signal?.addEventListener('abort', () => xhr.abort(), { once: true });
