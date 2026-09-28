@@ -7,6 +7,8 @@ const CURRENCIES = ['EUR', 'GBP', 'AUD', 'NZD', 'USD', 'CAD', 'CHF', 'JPY'] as c
 /** open.er-api.com USD snapshot, 28 Sep 2026 (1 USD buys this many units). */
 const RATES: Record<string, number> = {
   EUR: 0.878356, GBP: 0.755594, INR: 95.927874, JPY: 157.489371, CHF: 0.829327, CAD: 1.414854, AUD: 1.425788, NZD: 1.767657,
+  SGD: 1.278218, HKD: 7.844488, ZAR: 16.322134, MXN: 17.735545, TRY: 48.948487, SEK: 9.923533, NOK: 9.514776, PLN: 3.840834,
+  CNH: 6.721742, CNY: 6.719488,
 };
 const usdValue = (code: string) => (code === 'USD' ? 1 : 1 / RATES[code]);
 
@@ -58,7 +60,7 @@ describe('Forex catalog', () => {
       expect([spec.contractSize, spec.quoteCurrency, spec.pricePrecision, spec.chartSymbol]).toEqual([contract, quote, precision, chart]);
     }
     // No pip is invented where brokers define it differently.
-    for (const spec of INSTRUMENTS.filter(i => !forex.includes(i))) expect(spec.pipSize).toBeNull();
+    for (const spec of INSTRUMENTS.filter(i => !i.group.startsWith('Forex'))) expect(spec.pipSize).toBeNull();
   });
 
   it('files every instrument under a dropdown heading', () => {
@@ -66,10 +68,81 @@ describe('Forex catalog', () => {
   });
 });
 
+const EXOTICS = ['USDSGD', 'USDHKD', 'USDZAR', 'USDMXN', 'USDTRY', 'USDSEK', 'USDNOK', 'USDPLN', 'USDCNH', 'EURTRY', 'EURSEK', 'EURNOK'];
+const exotics = INSTRUMENTS.filter(i => i.group === 'Forex exotics');
+
+describe('Forex exotics', () => {
+  it('adds exactly the 12 requested pairs, next to the 28 standard ones, with no duplicates', () => {
+    expect(exotics.map(i => i.symbol)).toEqual(EXOTICS);
+    expect(forex).toHaveLength(28);
+    expect(new Set(INSTRUMENTS.map(i => i.symbol)).size).toBe(INSTRUMENTS.length);
+    // 8 others (2 metals, oil, 3 indices, BTC, ETH) + 28 standard + 12 exotics + SOL/USD.
+    expect(INSTRUMENTS).toHaveLength(8 + 28 + 12 + 1);
+  });
+
+  it('uses the market convention: 100,000-unit lot, 0.0001 pip, 5 decimals, the quote currency\'s own rate', () => {
+    for (const pair of exotics) {
+      expect(pair.contractSize).toBe(100_000);
+      expect(pair.pipSize).toBe(0.0001);
+      expect(pair.pricePrecision).toBe(5);
+      expect(pair.quoteCurrency).toBe(pair.symbol.slice(3) as CurrencyCode);
+      expect(pair.label).toBe(`${pair.symbol.slice(0, 3)}/${pair.symbol.slice(3)}`);
+      expect(pair.chartSymbol).toBe(`OANDA:${pair.symbol}`);
+    }
+  });
+
+  it('converts USD/CNH with the offshore CNH rate, never the onshore CNY one', () => {
+    const r = ok({ instrumentSymbol: 'USDCNH', depositCurrency: 'USD', openPrice: '7.00000', stopLossPrice: '6.99000', accountBalance: '10000', risk: '1', riskUnit: 'percent' }, { CNH: 7, CNY: 6 });
+    expect(r.quoteToDeposit).toBeCloseTo(1 / 7, 12);
+    expect(r.pips).toBe(100);
+    // 100 pips x (0.0001 x 100,000 / 7) USD per pip per lot = 142.857 USD per lot.
+    expect(r.lots!).toBeCloseTo(100 / (100 * 10 / 7), 10);
+  });
+
+  it('USD/TRY, USD account: 1,000 pips risking $100 at 48.948487 lira is 0.4895 lots', () => {
+    const r = ok({ instrumentSymbol: 'USDTRY', depositCurrency: 'USD', openPrice: '48.94849', stopLossPrice: '48.84849', accountBalance: '10000', risk: '1', riskUnit: 'percent' }, RATES);
+    expect(r.pips).toBe(1000);
+    expect(r.lots!).toBeCloseTo(100 / (1000 * (0.0001 * 100_000 / 48.948487)), 10);
+    expect(r.lots!).toBeCloseTo(0.48948, 4);
+  });
+
+  it('refuses an exotic whose quote currency has no rate, rather than guessing', () => {
+    const outcome = calculatePositionSize({ instrumentSymbol: 'EURTRY', depositCurrency: 'EUR', openPrice: '43.00000', stopLossPrice: '42.90000', accountBalance: '10000', risk: '1', riskUnit: 'percent' }, { EUR: 0.9 });
+    expect(outcome.status).toBe('error');
+    if (outcome.status === 'error') expect(outcome.error).toContain('TRY/EUR');
+  });
+});
+
+describe('SOL/USD', () => {
+  const sol = findInstrument('SOLUSD')!;
+
+  it('is listed under Crypto with no invented lot or pip: brokers define a Solana lot differently', () => {
+    expect(sol).toMatchObject({ label: 'SOL/USD', quoteCurrency: 'USD', contractSize: null, pipSize: null, group: 'Crypto', chartSymbol: 'BITSTAMP:SOLUSD', pricePrecision: 2 });
+    expect(INSTRUMENTS.filter(i => i.group === 'Crypto').map(i => i.symbol)).toEqual(['BTCUSD', 'ETHUSD', 'SOLUSD']);
+  });
+
+  it('sizes in SOL units only: $100 at risk over a $5 stop is 20 SOL, and Lots stays unknown', () => {
+    const r = ok({ instrumentSymbol: 'SOLUSD', depositCurrency: 'USD', openPrice: '150.00', stopLossPrice: '145.00', accountBalance: '10000', risk: '1', riskUnit: 'percent' }, null);
+    expect(r.units).toBeCloseTo(20, 12);
+    expect(r.lots).toBeNull();
+    expect(r.pips).toBeNull();
+    expect(r.quoteToDeposit).toBe(1);
+  });
+
+  it('converts through the day\'s rate for a EUR account, and a short sizes like a long', () => {
+    const long = ok({ instrumentSymbol: 'SOLUSD', depositCurrency: 'EUR', openPrice: '150.00', stopLossPrice: '145.00', accountBalance: '10000', risk: '1', riskUnit: 'percent' }, RATES);
+    const short = ok({ instrumentSymbol: 'SOLUSD', depositCurrency: 'EUR', openPrice: '150.00', stopLossPrice: '155.00', accountBalance: '10000', risk: '1', riskUnit: 'percent' }, RATES);
+    // €100 at risk; each SOL loses $5 = 5 x 0.878356 EUR.
+    expect(long.units).toBeCloseTo(100 / (5 * 0.878356), 10);
+    expect(short.direction).toBe('short');
+    expect(short.units).toBeCloseTo(long.units, 10);
+  });
+});
+
 describe('every Forex pair against the pip-value formula, in every account currency', () => {
   // Independent of the calculator: lots = risk / (pips x pip value of one lot),
   // pip value of one lot = pip x 100,000 x (value of 1 quote unit in the account currency).
-  for (const pair of forex) for (const deposit of ['USD', 'EUR', 'GBP', 'INR'] as const) {
+  for (const pair of [...forex, ...exotics]) for (const deposit of ['USD', 'EUR', 'GBP', 'INR'] as const) {
     it(`${pair.label} in ${deposit}`, () => {
       const base = pair.symbol.slice(0, 3);
       const quote = pair.symbol.slice(3);

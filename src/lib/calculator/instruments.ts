@@ -8,9 +8,10 @@
  */
 
 /** Deposit currencies (USD, EUR, GBP, INR) and the quote currencies of the Forex pairs. */
-export type CurrencyCode = 'USD' | 'EUR' | 'GBP' | 'INR' | 'JPY' | 'CHF' | 'CAD' | 'AUD' | 'NZD';
+export type CurrencyCode = 'USD' | 'EUR' | 'GBP' | 'INR' | 'JPY' | 'CHF' | 'CAD' | 'AUD' | 'NZD'
+  | 'SGD' | 'HKD' | 'ZAR' | 'MXN' | 'TRY' | 'SEK' | 'NOK' | 'PLN' | 'CNH';
 
-export type InstrumentGroup = 'Metals' | 'Forex majors' | 'Forex crosses' | 'Energy' | 'Indices' | 'Crypto';
+export type InstrumentGroup = 'Metals' | 'Forex majors' | 'Forex crosses' | 'Forex exotics' | 'Energy' | 'Indices' | 'Crypto';
 
 export interface InstrumentSpec {
   /** Value stored/compared internally. */
@@ -53,7 +54,7 @@ const FX_CONTRACT_SIZE = 100_000;
  * three, a standard lot of 100,000 base units, and a pip of 0.01 for
  * JPY-quoted pairs (priced to 3 decimals) or 0.0001 otherwise (5 decimals).
  */
-function forexPair(symbol: string, group: 'Forex majors' | 'Forex crosses', chartSymbol = `OANDA:${symbol}`): InstrumentSpec {
+function forexPair(symbol: string, group: 'Forex majors' | 'Forex crosses' | 'Forex exotics', chartSymbol = `OANDA:${symbol}`): InstrumentSpec {
   const quote = symbol.slice(3) as CurrencyCode;
   const jpy = quote === 'JPY';
   return {
@@ -91,6 +92,11 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     'NZDJPY', 'NZDCHF', 'NZDCAD',
     'CADJPY', 'CADCHF',
     'CHFJPY'].map(symbol => forexPair(symbol, 'Forex crosses')),
+  // Exotics: a major currency against a smaller or emerging-market one. Same
+  // lot and pip conventions; each quote currency's reference rate comes from
+  // the same source (CNH is the offshore yuan, not the onshore CNY).
+  ...['USDSGD', 'USDHKD', 'USDZAR', 'USDMXN', 'USDTRY', 'USDSEK', 'USDNOK', 'USDPLN', 'USDCNH',
+    'EURTRY', 'EURSEK', 'EURNOK'].map(symbol => forexPair(symbol, 'Forex exotics')),
   { symbol: 'USOIL', label: 'USOIL', contractSize: 1000, quoteCurrency: 'USD', pricePrecision: 2, pipSize: null, group: 'Energy', chartSymbol: 'TVC:USOIL' },
   // Broker-dependent lot definitions — Units only, Lots shows "?".
   { symbol: 'US30', label: 'US30', contractSize: null, quoteCurrency: 'USD', pricePrecision: 2, pipSize: null, group: 'Indices', chartSymbol: 'TVC:DJI' },
@@ -98,10 +104,11 @@ export const INSTRUMENTS: InstrumentSpec[] = [
   { symbol: 'SPX500', label: 'SPX500', contractSize: null, quoteCurrency: 'USD', pricePrecision: 2, pipSize: null, group: 'Indices', chartSymbol: 'TVC:SPX' },
   { symbol: 'BTCUSD', label: 'BTC/USD', contractSize: null, quoteCurrency: 'USD', pricePrecision: 2, pipSize: null, group: 'Crypto', chartSymbol: 'BITSTAMP:BTCUSD' },
   { symbol: 'ETHUSD', label: 'ETH/USD', contractSize: null, quoteCurrency: 'USD', pricePrecision: 2, pipSize: null, group: 'Crypto', chartSymbol: 'BITSTAMP:ETHUSD' },
+  { symbol: 'SOLUSD', label: 'SOL/USD', contractSize: null, quoteCurrency: 'USD', pricePrecision: 2, pipSize: null, group: 'Crypto', chartSymbol: 'BITSTAMP:SOLUSD' },
 ];
 
 /** Dropdown headings in display order. */
-export const INSTRUMENT_GROUPS: InstrumentGroup[] = ['Metals', 'Forex majors', 'Forex crosses', 'Energy', 'Indices', 'Crypto'];
+export const INSTRUMENT_GROUPS: InstrumentGroup[] = ['Metals', 'Forex majors', 'Forex crosses', 'Forex exotics', 'Energy', 'Indices', 'Crypto'];
 
 export const DEPOSIT_CURRENCIES: { code: CurrencyCode; label: string; symbol: string }[] = [
   { code: 'USD', label: 'US Dollar', symbol: 'US$' },
