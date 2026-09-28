@@ -24,12 +24,16 @@ function parseList(raw: string): string[] {
   return raw.replace(/^\(|\)$/g, '').split(',').map(v => v.trim().replace(/^"|"$/g, ''));
 }
 
-function filtersFrom(query: URLSearchParams): { filters: Filter[]; limit: number | null } {
+function filtersFrom(query: URLSearchParams): { filters: Filter[]; limit: number | null; offset: number; order: string | null } {
   const filters: Filter[] = [];
   let limit: number | null = null;
+  let offset = 0;
+  let order: string | null = null;
   for (const [column, raw] of query) {
-    if (['select', 'order', 'offset', 'on_conflict', 'columns'].includes(column)) continue;
+    if (['select', 'on_conflict', 'columns'].includes(column)) continue;
     if (column === 'limit') { limit = Number(raw); continue; }
+    if (column === 'offset') { offset = Number(raw); continue; }
+    if (column === 'order') { order = raw; continue; }
     const dot = raw.indexOf('.');
     const op = raw.slice(0, dot);
     const value = raw.slice(dot + 1);
@@ -42,7 +46,7 @@ function filtersFrom(query: URLSearchParams): { filters: Filter[]; limit: number
     else if (raw === 'not.is.null') filters.push(row => row[column] != null);
     else throw new Error(`fake-supabase: unsupported filter ${column}=${raw}`);
   }
-  return { filters, limit };
+  return { filters, limit, offset, order };
 }
 
 export async function startFakeSupabase(options: {
@@ -52,6 +56,8 @@ export async function startFakeSupabase(options: {
   rpc?: Record<string, (args: Record<string, unknown>, tables: Record<string, Row[]>) => unknown>;
   /** Tables whose writes fail: 'missing' answers as PostgREST does for an unknown table. */
   failWrites?: Record<string, 'missing' | 'error'>;
+  /** Tables that do not exist: reads answer as PostgREST does for an unknown table. */
+  missingTables?: string[];
   /** Composite primary/unique keys to enforce on insert (answered as Postgres does: 23505). */
   uniqueKeys?: Record<string, string[]>;
 }): Promise<FakeSupabase> {
@@ -74,12 +80,22 @@ export async function startFakeSupabase(options: {
   });
 
   const matching = (table: string, query: URLSearchParams) => {
-    const { filters, limit } = filtersFrom(query);
-    const rows = (tables[table] ?? []).filter(row => filters.every(f => f(row)));
+    const { filters, limit, offset, order } = filtersFrom(query);
+    let rows = (tables[table] ?? []).filter(row => filters.every(f => f(row)));
+    // Single-column ordering (`column.asc|desc`), compared as strings like the other filters.
+    const [orderColumn, direction] = order ? order.split('.') : [];
+    if (orderColumn) {
+      const sign = direction === 'desc' ? -1 : 1;
+      rows = [...rows].sort((a, b) => sign * (String(a[orderColumn] ?? '') < String(b[orderColumn] ?? '') ? -1 : String(a[orderColumn] ?? '') > String(b[orderColumn] ?? '') ? 1 : 0));
+    }
+    rows = rows.slice(offset);
     return limit === null ? rows : rows.slice(0, limit);
   };
 
   app.get('/rest/v1/:table', (req, res) => {
+    if (options.missingTables?.includes(req.params.table)) {
+      return res.status(404).json({ code: 'PGRST205', message: `Could not find the table 'public.${req.params.table}' in the schema cache` });
+    }
     const rows = matching(req.params.table, new URL(req.originalUrl, 'http://fake').searchParams);
     if ((req.get('accept') ?? '').includes('vnd.pgrst.object')) {
       if (rows.length !== 1) return res.status(406).json({ code: 'PGRST116', message: `${rows.length} rows` });

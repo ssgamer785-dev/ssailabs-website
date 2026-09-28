@@ -15,6 +15,7 @@ import { profileMediaRouter } from "./profile-media.js";
 import { fxRouter } from "./fx.js";
 import { pushRouter } from "./push.js";
 import { notificationsRouter } from "./notifications.js";
+import { storageCleanupRouter } from "./storage-cleanup.js";
 
 dotenv.config();
 
@@ -35,6 +36,8 @@ app.use("/api/fx", fxRouter());
 app.use("/api/push", pushRouter());
 // Authenticated, per-owner notification deletion; does not touch content rows.
 app.use("/api/notifications", notificationsRouter());
+// Admin-only: finds and removes media files no row uses any more.
+app.use("/api/storage", storageCleanupRouter());
 
 // The S.S AI LABS contact-form routes (/api/start-project, /api/leads) were
 // removed: nothing in this app calls them.

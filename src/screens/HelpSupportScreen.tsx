@@ -5,6 +5,8 @@ import { supportWhatsAppDisplay, supportWhatsAppUrl } from '../lib/support';
 import { useAuth } from '../lib/auth-context';
 import { B, DocumentScreen, P, Section } from '../components/ui/DocumentScreen';
 import { checkPushHealth, pushHealthMessage } from '../lib/notifications/push';
+import { CLEANUP_CONFIRM_WORD, cleanupSummary, runStorageCleanup, type CleanupTotals } from '../lib/storage-cleanup';
+import { requestCleanupPage } from '../lib/storage-cleanup-api';
 
 /**
  * Support that uses what the app already has rather than standing up anything
@@ -205,6 +207,7 @@ export function HelpSupportScreen() {
       </Section>
 
       {isAdmin && <PushDeliveryCheck />}
+      {isAdmin && <StorageCleanup />}
 
       <Section title="Before you write in">
         <P>
@@ -243,6 +246,76 @@ function PushDeliveryCheck() {
         {state.busy ? 'Checking…' : 'Check notification delivery'}
       </button>
       {state.message && <p role={state.error ? 'alert' : 'status'} style={css('margin-top:10px;font-size:13px;line-height:1.5;color:' + (state.error ? 'var(--danger-ink)' : 'var(--text-secondary)'))}>{state.message}</p>}
+    </Section>
+  );
+}
+
+const buttonStyle = 'margin-top:8px;min-height:40px;padding:0 16px;border-radius:999px;cursor:pointer;font-size:13px;font-weight:600;' +
+  'background:var(--surface-secondary);border:1px solid var(--border-4);color:var(--text-primary)';
+
+/**
+ * Admin only: finds media files that no message, post or profile uses any more
+ * and, after a typed confirmation, deletes them. The check always runs first;
+ * files from the last hour are never touched.
+ */
+function StorageCleanup() {
+  const [phase, setPhase] = useState<'idle' | 'checking' | 'checked' | 'deleting' | 'done'>('idle');
+  const [totals, setTotals] = useState<CleanupTotals | null>(null);
+  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
+  const [typed, setTyped] = useState('');
+  const busy = phase === 'checking' || phase === 'deleting';
+
+  const check = async () => {
+    setPhase('checking'); setMessage(null); setTyped('');
+    try {
+      const result = await runStorageCleanup(requestCleanupPage, { remove: false, onProgress: setTotals });
+      setTotals(result);
+      setMessage({ text: cleanupSummary(result, false), error: false });
+      setPhase('checked');
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : 'The storage check could not run. Try again.', error: true });
+      setPhase('idle');
+    }
+  };
+
+  const remove = async () => {
+    if (typed !== CLEANUP_CONFIRM_WORD) return;
+    setPhase('deleting'); setMessage(null);
+    try {
+      const result = await runStorageCleanup(requestCleanupPage, { remove: true, onProgress: setTotals });
+      setTotals(result);
+      setMessage({ text: cleanupSummary(result, true), error: false });
+    } catch (error) {
+      setMessage({ text: `${error instanceof Error ? error.message : 'The clean-up stopped.'} Files deleted before it stopped stay deleted; run the check again to see what is left.`, error: true });
+    }
+    setTyped('');
+    setPhase('done');
+  };
+
+  return (
+    <Section title="Storage clean-up">
+      <P>
+        Finds photos, videos, voice notes and documents that no message, post or profile uses any more.
+        Files from the last hour are never included.
+      </P>
+      <button type="button" onClick={() => { void check(); }} disabled={busy} className="pressable row-focus" style={css(buttonStyle)}>
+        {phase === 'checking' ? `Checking… ${totals?.scanned ?? 0} files` : 'Check storage'}
+      </button>
+      {message && <p role={message.error ? 'alert' : 'status'} style={css('margin-top:10px;font-size:13px;line-height:1.5;color:' + (message.error ? 'var(--danger-ink)' : 'var(--text-secondary)'))}>{message.text}</p>}
+      {(phase === 'checked' || phase === 'deleting') && totals && totals.unused > 0 && (
+        <div style={css('margin-top:10px;display:flex;flex-direction:column;gap:8px')}>
+          <label style={css('font-size:13px;color:var(--text-secondary)')}>
+            Deleting cannot be undone. Type {CLEANUP_CONFIRM_WORD} to delete these {totals.unused} files.
+            <input value={typed} onChange={e => setTyped(e.target.value)} disabled={busy} autoCapitalize="characters" autoComplete="off" spellCheck={false}
+              aria-label={`Type ${CLEANUP_CONFIRM_WORD} to confirm`}
+              style={css('display:block;margin-top:6px;width:100%;min-height:40px;padding:0 12px;border-radius:10px;font-size:14px;background:var(--surface-secondary);border:1px solid var(--border-4);color:var(--text-primary)')} />
+          </label>
+          <button type="button" onClick={() => { void remove(); }} disabled={busy || typed !== CLEANUP_CONFIRM_WORD} className="pressable row-focus"
+            style={css(buttonStyle + ';align-self:flex-start;color:var(--danger-ink)')}>
+            {phase === 'deleting' ? `Deleting… ${totals.deleted} files` : `Delete ${totals.unused} unused files`}
+          </button>
+        </div>
+      )}
     </Section>
   );
 }
