@@ -35,6 +35,11 @@ export interface CalculatorResult {
   units: number;
   riskAmount: number;
   stopDistance: number;
+  /** The stop distance in pips, for Forex pairs only (rounded to 0.1 pip). */
+  pips: number | null;
+  /** Deposit-currency value of one unit of the quote currency used for this result (1 when they match). */
+  quoteToDeposit: number;
+  depositCurrency: CurrencyCode;
   direction: 'long' | 'short';
   instrument: InstrumentSpec;
 }
@@ -70,9 +75,9 @@ function parseNumber(raw: string): number | null {
  * never a key in it). Converting quote -> deposit is a cross-rate through
  * that common USD base: how many deposit-currency units one USD buys, divided
  * by how many quote-currency units one USD buys. When either side IS USD, its
- * factor is exactly 1 rather than a lookup, which is also what keeps this
- * exact for every instrument today (all USD-quoted) instead of compounding
- * two roundings for no reason.
+ * factor is exactly 1 rather than a lookup, so a USD-quoted instrument never
+ * compounds two roundings. A JPY-, CHF-, CAD-, AUD- or NZD-quoted Forex pair
+ * uses the same cross-rate for its quote currency.
  *
  * Returns null — never an invented number — when no rate map was supplied, or
  * when it does not carry the currency this calculation needs.
@@ -159,7 +164,11 @@ export function calculatePositionSize(
     return { status: 'error', error: 'Those values produce a position size that cannot be calculated.' };
   }
 
-  return { status: 'ok', result: { lots, units, riskAmount, stopDistance, direction, instrument } };
+  // Price differences carry float noise (1.08500 - 1.08000 = 0.004999...), so
+  // pips are rounded to the tenth of a pip that 5- and 3-decimal quotes show.
+  const pips = instrument.pipSize === null ? null : Math.round((stopDistance / instrument.pipSize) * 10) / 10;
+
+  return { status: 'ok', result: { lots, units, riskAmount, stopDistance, pips, quoteToDeposit: rate, depositCurrency: input.depositCurrency, direction, instrument } };
 }
 
 /**

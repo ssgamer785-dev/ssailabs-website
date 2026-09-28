@@ -4,6 +4,7 @@ import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import {
   DEPOSIT_CURRENCIES,
+  INSTRUMENT_GROUPS,
   INSTRUMENTS,
   historicalChartUrl,
   liveChartUrl,
@@ -195,7 +196,11 @@ export function RiskCalculatorScreen() {
           <Field label="Instrument">
             <div style={FIELD}>
               <select aria-label="Instrument" value={instrumentSymbol} onChange={e => setInstrumentSymbol(e.target.value)} style={SELECT}>
-                {INSTRUMENTS.map(i => <option key={i.symbol} value={i.symbol}>{i.label}</option>)}
+                {INSTRUMENT_GROUPS.map(group => (
+                  <optgroup key={group} label={group}>
+                    {INSTRUMENTS.filter(i => i.group === group).map(i => <option key={i.symbol} value={i.symbol}>{i.label}</option>)}
+                  </optgroup>
+                ))}
               </select>
               <Chevron />
             </div>
@@ -349,8 +354,13 @@ export function RiskCalculatorScreen() {
 
         {result && (
           <div style={css('padding:18px 20px 0;text-align:center;font-size:11.5px;color:var(--text-faint);line-height:1.5')}>
-            {result.direction === 'long' ? 'Long' : 'Short'} · over {formatSize(result.stopDistance, result.instrument.pricePrecision)} points
+            {result.direction === 'long' ? 'Long' : 'Short'} · over {result.pips !== null
+              ? `${formatSize(result.pips, 1)} pips (${formatSize(result.stopDistance, result.instrument.pricePrecision)})`
+              : `${formatSize(result.stopDistance, result.instrument.pricePrecision)} points`}
             {result.instrument.contractSize !== null && ` · ${formatSize(result.instrument.contractSize, 0)} units per lot`}
+            {result.quoteToDeposit !== 1 && (
+              <div>Converted at the day's reference rate: 1 {result.instrument.quoteCurrency} = {formatSize(result.quoteToDeposit, 6)} {result.depositCurrency}</div>
+            )}
           </div>
         )}
 
