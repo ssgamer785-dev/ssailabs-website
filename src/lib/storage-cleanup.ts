@@ -73,6 +73,7 @@ export function cleanupSummary(totals: CleanupTotals, removed: boolean): string 
   if (removed) {
     return `Deleted ${files(totals.deleted)} (${megabytes(totals.unusedBytes)}) that nothing used. ${files(totals.inUse)} still in use ${totals.inUse === 1 ? 'was' : 'were'} kept.${recent}`;
   }
+  if (!totals.scanned) return 'No media files found. Nothing to clean up.';
   if (!totals.unused) {
     return `Nothing to clean up: all ${files(totals.inUse)} ${totals.inUse === 1 ? 'is' : 'are'} in use.${recent}`;
   }

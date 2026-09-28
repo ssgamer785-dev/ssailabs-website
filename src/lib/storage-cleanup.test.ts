@@ -43,6 +43,8 @@ describe('runStorageCleanup', () => {
 
 describe('cleanupSummary', () => {
   it('says plainly what a check found and what a delete did', () => {
+    expect(cleanupSummary({ scanned: 0, inUse: 0, recent: 0, unused: 0, unusedBytes: 0, deleted: 0 }, false))
+      .toBe('No media files found. Nothing to clean up.');
     expect(cleanupSummary({ scanned: 3, inUse: 3, recent: 0, unused: 0, unusedBytes: 0, deleted: 0 }, false))
       .toBe('Nothing to clean up: all 3 files are in use.');
     expect(cleanupSummary({ scanned: 12, inUse: 2, recent: 1, unused: 9, unusedBytes: 5 * 1024 * 1024, deleted: 0 }, false))
