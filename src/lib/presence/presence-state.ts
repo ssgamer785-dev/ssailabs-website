@@ -7,6 +7,8 @@ export type PresenceTarget = { kind: 'admin' } | { kind: 'student'; userId: stri
 
 export interface PresenceHeartbeat {
   heartbeatAt?: unknown;
+  /** Realtime's presence ref for this tracked payload (changes on every track). */
+  ref?: string;
 }
 
 /**
@@ -28,17 +30,42 @@ export function ownPresenceTarget(userId: string, isAdmin: boolean): PresenceTar
   return isAdmin ? { kind: 'admin' } : { kind: 'student', userId };
 }
 
-export function statusFromPresence(
-  payloads: readonly PresenceHeartbeat[],
+/**
+ * One device session on a presence topic, as this observer saw it. A tracked
+ * heartbeat gets a new presence ref every time it is sent, so "first saw this
+ * ref" is when this device received that heartbeat.
+ */
+export interface PresenceObservation {
+  /** The publisher's own stamp, from the publisher's clock. */
+  heartbeatAt?: unknown;
+  /** This device's clock when the ref first appeared here. */
+  seenAt: number;
+  /**
+   * true when the heartbeat arrived while this device was watching; false
+   * when it was already in the snapshot the server sent on (re)joining.
+   */
+  live: boolean;
+}
+
+/**
+ * Freshness is measured on this device's own clock, so a phone or PC whose
+ * clock is minutes out neither hides a live account nor keeps a gone one. A
+ * live heartbeat is as old as the time since it arrived. A snapshot entry's
+ * age is unknown, so the publisher's stamp may only make it older than the
+ * moment it was first seen, never newer; the next live heartbeat (every 30 s)
+ * then replaces it.
+ */
+export function statusFromObservations(
+  observations: readonly PresenceObservation[],
   synchronized: boolean,
   now = Date.now(),
 ): PresenceStatus {
   if (!synchronized) return 'unknown';
-  return payloads.some(payload => {
-    if (typeof payload.heartbeatAt !== 'string') return false;
-    const heartbeat = Date.parse(payload.heartbeatAt);
-    return Number.isFinite(heartbeat)
-      && heartbeat <= now + 5_000
-      && now - heartbeat <= PRESENCE_STALE_AFTER_MS;
+  return observations.some(observation => {
+    if (typeof observation.heartbeatAt !== 'string') return false;
+    const stamped = Date.parse(observation.heartbeatAt);
+    if (!Number.isFinite(stamped)) return false;
+    const heardAt = observation.live ? observation.seenAt : Math.min(observation.seenAt, stamped);
+    return now - heardAt <= PRESENCE_STALE_AFTER_MS;
   }) ? 'online' : 'offline';
 }

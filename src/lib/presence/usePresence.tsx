@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../supabase';
 import { useAuth } from '../auth-context';
+import { isAppleMobileWebKit } from '../notifications/push';
 import { createPresenceManager } from './presence-manager';
 import {
   ownPresenceTarget,
@@ -51,10 +52,39 @@ const manager = createPresenceManager({
     },
   }),
   removeChannel: channel => supabase.removeChannel(channel),
-  readState: channel => Object.values(channel.presenceState<PresenceHeartbeat>()).flat(),
+  readState: channel => Object.values(channel.presenceState<PresenceHeartbeat>()).flat()
+    .map(meta => ({ heartbeatAt: meta.heartbeatAt, ref: meta.presence_ref })),
   ensureAuth: ensureRealtimeSession,
   warn: (message, detail) => console.warn(`[presence] ${message}`, detail ?? ''),
 });
+
+/** A heartbeat unanswered for this long means the connection is dead even if it looks open. */
+const PROBE_TIMEOUT_MS = 5_000;
+/** Hidden at least this long: what this device holds may be out of date. */
+const RECHECK_AFTER_HIDDEN_MS = 5_000;
+
+/**
+ * After the page comes back, finds out quickly whether the Realtime
+ * connection still works. A phone can resume with a socket that looks open
+ * but died while suspended; Realtime itself only notices at its next missed
+ * heartbeat, up to 50 s later. Sends one heartbeat and, if that same one is
+ * still unanswered after 5 s, sends another, which makes Realtime drop the
+ * connection and reconnect (every channel then rejoins with a fresh snapshot).
+ */
+async function probeRealtime(): Promise<'alive' | 'reconnecting'> {
+  const realtime = supabase.realtime;
+  if (!realtime.isConnected()) return 'reconnecting';
+  if (!realtime.pendingHeartbeatRef) await realtime.sendHeartbeat();
+  const ref = realtime.pendingHeartbeatRef;
+  if (!ref) return realtime.isConnected() ? 'alive' : 'reconnecting';
+  const deadline = Date.now() + PROBE_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 200));
+    if (realtime.pendingHeartbeatRef !== ref) return realtime.isConnected() ? 'alive' : 'reconnecting';
+  }
+  await realtime.sendHeartbeat();
+  return 'reconnecting';
+}
 
 /** One publisher per authenticated tab; reader screens share its topic channel. */
 export function PresenceRuntime() {
@@ -62,18 +92,46 @@ export function PresenceRuntime() {
 
   useEffect(() => {
     if (!user?.id || (role !== 'admin' && role !== 'student')) return;
-    const release = manager.acquire(user.id, ownPresenceTarget(user.id, role === 'admin'), true);
-    const resume = () => {
-      if (document.visibilityState !== 'visible') return;
-      void ensureRealtimeSession(user.id).then(ready => {
+    const userId = user.id;
+    const release = manager.acquire(userId, ownPresenceTarget(userId, role === 'admin'), true);
+    const pausesWhenHidden = isAppleMobileWebKit();
+    let hiddenAt = document.visibilityState === 'hidden' ? Date.now() : 0;
+    let probing = false;
+
+    const recheck = (hiddenFor: number) => {
+      if (hiddenFor >= RECHECK_AFTER_HIDDEN_MS) manager.unconfirm();
+      if (probing) return;
+      probing = true;
+      void probeRealtime().then(result => {
+        if (result === 'alive') manager.confirm();
+      }).finally(() => { probing = false; });
+      void ensureRealtimeSession(userId).then(ready => {
         if (ready) manager.refreshPublishers();
       });
     };
-    document.addEventListener('visibilitychange', resume);
-    window.addEventListener('online', resume);
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now();
+        if (pausesWhenHidden) manager.pausePublishing();
+        return;
+      }
+      const hiddenFor = hiddenAt ? Date.now() - hiddenAt : 0;
+      hiddenAt = 0;
+      if (pausesWhenHidden) manager.resumePublishing();
+      recheck(hiddenFor);
+    };
+    // Back from the back/forward cache, or the network came back: the
+    // connection may be gone even though the page never reported hidden.
+    const onPageShow = (event: PageTransitionEvent) => { if (event.persisted) recheck(RECHECK_AFTER_HIDDEN_MS); };
+    const onOnline = () => recheck(RECHECK_AFTER_HIDDEN_MS);
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pageshow', onPageShow);
+    window.addEventListener('online', onOnline);
     return () => {
-      document.removeEventListener('visibilitychange', resume);
-      window.removeEventListener('online', resume);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onPageShow);
+      window.removeEventListener('online', onOnline);
+      if (pausesWhenHidden) manager.resumePublishing();
       release();
     };
   }, [user?.id, role]);

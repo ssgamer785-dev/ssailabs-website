@@ -6,6 +6,9 @@ class FakeChannel {
   onCount = 0;
   subscribeCount = 0;
   trackCount = 0;
+  untrackCount = 0;
+  /** When set, track() never settles: what a push does when its channel is torn down mid-flight. */
+  hang = false;
   state: Record<string, PresenceHeartbeat[]> = {};
   sync?: () => void;
   status?: (status: string, error?: Error) => void;
@@ -21,11 +24,13 @@ class FakeChannel {
   }
   async track(payload: { heartbeatAt: string }) {
     this.trackCount++;
+    if (this.hang) return new Promise<string>(() => {});
     this.state.session = [payload];
     this.sync?.();
     return 'ok';
   }
   async untrack() {
+    this.untrackCount++;
     delete this.state.session;
     this.sync?.();
     return 'ok';
@@ -169,6 +174,130 @@ describe('shared private Presence channel lifecycle', () => {
     await flush();
     expect(channels).toHaveLength(1);
     expect(channels[0].trackCount).toBe(1);
+    release();
+  });
+
+  it('keeps sending heartbeats after one is caught by a reconnect and never settles', async () => {
+    const test = harness();
+    const release = test.manager.acquire('student-id', { kind: 'student', userId: 'student-id' }, true);
+    await flush();
+    const channel = test.created[0];
+    expect(channel.trackCount).toBe(1);
+    channel.hang = true;
+    test.manager.refreshPublishers();
+    await flush();
+    expect(channel.trackCount).toBe(2);
+    // The socket drops and the channel rejoins; the stuck heartbeat never settles.
+    channel.status?.('CHANNEL_ERROR', new Error('socket closed'));
+    channel.hang = false;
+    channel.status?.('SUBSCRIBED');
+    await flush();
+    expect(channel.trackCount).toBe(3);
+    release();
+  });
+
+  it('frees the next heartbeat when one gets no answer at all', async () => {
+    const channels: FakeChannel[] = [];
+    const manager = createPresenceManager({
+      channel: () => { const channel = new FakeChannel(); channels.push(channel); return channel; },
+      removeChannel: async () => {},
+      readState: channel => Object.values(channel.state).flat(),
+      ensureAuth: async () => true,
+      retryDelayMs: 1,
+      trackTimeoutMs: 20,
+    });
+    const release = manager.acquire('student-id', { kind: 'student', userId: 'student-id' }, true);
+    await flush();
+    channels[0].hang = true;
+    manager.refreshPublishers();
+    await flush();
+    const stuck = channels[0].trackCount;
+    await new Promise(resolve => setTimeout(resolve, 60));
+    channels[0].hang = false;
+    manager.refreshPublishers();
+    await flush();
+    expect(channels[0].trackCount).toBe(stuck + 1);
+    release();
+  });
+
+  it('holds every status after the page returns until the connection is confirmed', async () => {
+    const test = harness();
+    const seen: PresenceStatus[] = [];
+    const release = test.manager.acquire('admin-id', { kind: 'student', userId: 'student-id' }, false, value => seen.push(value));
+    await flush();
+    const channel = test.created[0];
+    channel.state.remote = [{ heartbeatAt: new Date().toISOString(), ref: 'r1' }];
+    channel.sync?.();
+    expect(seen.at(-1)).toBe('online');
+    test.manager.unconfirm();
+    expect(seen.at(-1)).toBe('unknown');
+    // A queued change arriving before confirmation does not decide anything.
+    channel.state.remote = [];
+    channel.sync?.();
+    expect(seen.at(-1)).toBe('unknown');
+    test.manager.confirm();
+    expect(seen.at(-1)).toBe('offline');
+    test.manager.unconfirm();
+    // A rejoin's fresh snapshot confirms on its own.
+    channel.status?.('SUBSCRIBED');
+    channel.state.remote = [{ heartbeatAt: new Date().toISOString(), ref: 'r2' }];
+    channel.sync?.();
+    expect(seen.at(-1)).toBe('online');
+    release();
+  });
+
+  it('judges heartbeats by arrival on this device, not by the sender\'s clock', async () => {
+    let clock = 1_800_000_000_000;
+    const channels: FakeChannel[] = [];
+    const manager = createPresenceManager({
+      channel: () => { const channel = new FakeChannel(); channels.push(channel); return channel; },
+      removeChannel: async () => {},
+      readState: channel => Object.values(channel.state).flat(),
+      ensureAuth: async () => true,
+      now: () => clock,
+    });
+    const seen: PresenceStatus[] = [];
+    const release = manager.acquire('admin-id', { kind: 'student', userId: 'student-id' }, false, value => seen.push(value));
+    await flush();
+    const channel = channels[0];
+    const twoMinutesAhead = new Date(clock + 120_000).toISOString();
+    channel.state.remote = [{ heartbeatAt: twoMinutesAhead, ref: 'a' }];
+    channel.sync?.();
+    expect(seen.at(-1)).toBe('online');
+    // Heartbeats keep arriving live, each stamped by a clock 2 min fast.
+    for (let beat = 0; beat < 6; beat++) {
+      clock += 30_000;
+      channel.state.remote = [{ heartbeatAt: new Date(clock + 120_000).toISOString(), ref: `b${beat}` }];
+      channel.sync?.();
+      expect(seen.at(-1)).toBe('online');
+    }
+    // A sender 2 min slow is just as online.
+    clock += 30_000;
+    channel.state.remote = [{ heartbeatAt: new Date(clock - 120_000).toISOString(), ref: 'slow' }];
+    channel.sync?.();
+    expect(seen.at(-1)).toBe('online');
+    // Heartbeats stop: offline once the last one is more than 90 s old here.
+    clock += 91_000;
+    manager.confirm();
+    expect(seen.at(-1)).toBe('offline');
+    release();
+  });
+
+  it('leaves presence while an iPhone app is in the background and returns on resume', async () => {
+    const test = harness();
+    const release = test.manager.acquire('student-id', { kind: 'student', userId: 'student-id' }, true);
+    await flush();
+    const channel = test.created[0];
+    expect(channel.trackCount).toBe(1);
+    test.manager.pausePublishing();
+    await flush();
+    expect(channel.untrackCount).toBe(1);
+    test.manager.refreshPublishers();
+    await flush();
+    expect(channel.trackCount).toBe(1);
+    test.manager.resumePublishing();
+    await flush();
+    expect(channel.trackCount).toBe(2);
     release();
   });
 });
