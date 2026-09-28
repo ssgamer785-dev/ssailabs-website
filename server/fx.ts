@@ -25,7 +25,7 @@ const FX_SOURCE_URL = 'https://open.er-api.com/v6/latest/USD';
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 8000;
 
-interface FxCache { rates: Record<string, number>; fetchedAt: number }
+interface FxCache { rates: Record<string, number>; fetchedAt: number; updatedAt: string | null }
 let cache: FxCache | null = null;
 
 /** Only for tests: a fresh module would otherwise carry state between them. */
@@ -61,6 +61,23 @@ export function parseRates(body: unknown): Record<string, number> | null {
 }
 
 /**
+ * When the provider published these rates, from its own
+ * `time_last_update_unix`, so the calculator can say how old a rate is and
+ * flag one that has gone stale. Null when the provider did not say.
+ */
+export function parseUpdatedAt(body: unknown): string | null {
+  const seconds = (body as { time_last_update_unix?: unknown } | null)?.time_last_update_unix;
+  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0
+    ? new Date(seconds * 1000).toISOString()
+    : null;
+}
+
+/** Publication time of the cached rates (see parseUpdatedAt). */
+export function cachedRatesUpdatedAt(): string | null {
+  return cache?.updatedAt ?? null;
+}
+
+/**
  * Cached USD-based rates: `{ EUR: 0.87, GBP: 0.75, INR: 95.6, ... }` meaning
  * 1 USD buys that many units of the currency. Refetches only once the cache
  * has gone stale; throws on any failure so the caller can answer honestly
@@ -77,10 +94,11 @@ export async function getUsdRates(): Promise<Record<string, number>> {
     const res = await fetch(FX_SOURCE_URL, { signal: controller.signal });
     if (!res.ok) throw new Error(`FX provider responded ${res.status}`);
 
-    const rates = parseRates(await res.json());
+    const body = await res.json();
+    const rates = parseRates(body);
     if (!rates) throw new Error('FX provider returned an unexpected response shape');
 
-    cache = { rates, fetchedAt: Date.now() };
+    cache = { rates, fetchedAt: Date.now(), updatedAt: parseUpdatedAt(body) };
     return rates;
   } finally {
     clearTimeout(timer);
@@ -99,7 +117,7 @@ export function fxRouter(): Router {
   router.get('/rates', asyncRoute(async (_req, res: Response) => {
     try {
       const rates = await getUsdRates();
-      res.json({ base: 'USD', rates });
+      res.json({ base: 'USD', rates, updatedAt: cachedRatesUpdatedAt() });
     } catch (error) {
       // The failure is logged in full server-side; the caller gets an honest
       // "unavailable" rather than a stale or guessed rate.

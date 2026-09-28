@@ -2,7 +2,7 @@ import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import express from 'express';
 import type { AddressInfo } from 'net';
 import type { Server } from 'http';
-import { fxRouter, getUsdRates, parseRates, resetFxCacheForTests } from './fx';
+import { fxRouter, getUsdRates, parseRates, parseUpdatedAt, resetFxCacheForTests } from './fx';
 
 /**
  * The FX rate endpoint the Risk Calculator's cross-currency conversion
@@ -141,6 +141,26 @@ describe('getUsdRates: provider failure', () => {
     mockFetchOnce(providerResponse({ EUR: 0.9 }));
     const recovered = await getUsdRates();
     expect(recovered).toEqual({ EUR: 0.9 });
+  });
+});
+
+describe('publication time', () => {
+  test('is read from the provider\'s time_last_update_unix', () => {
+    expect(parseUpdatedAt({ time_last_update_unix: 1790553751 })).toBe('2026-09-28T00:02:31.000Z');
+  });
+  test('is null when absent or malformed, never invented', () => {
+    for (const body of [{}, { time_last_update_unix: 'x' }, { time_last_update_unix: -1 }, null, 'text']) {
+      expect(parseUpdatedAt(body)).toBeNull();
+    }
+  });
+  test('is returned with the rates', async () => {
+    mockFetchOnce(new Response(JSON.stringify({ result: 'success', base_code: 'USD', time_last_update_unix: 1790553751, rates: { EUR: 0.9 } }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const base = await serve();
+    const body = await (await fetch(`${base}/api/fx/rates`)).json();
+    expect(body.updatedAt).toBe('2026-09-28T00:02:31.000Z');
+    expect(body.rates.EUR).toBe(0.9);
   });
 });
 

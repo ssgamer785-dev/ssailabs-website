@@ -8,6 +8,17 @@
  * honest "unavailable" state instead of a stack trace.
  */
 export async function fetchUsdRates(): Promise<Record<string, number> | null> {
+  return (await fetchFxRates())?.rates ?? null;
+}
+
+/** A rate this much older than now is flagged as stale: the provider publishes once a day. */
+export const FX_RATE_STALE_AFTER_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * The rates with the time the provider published them (null when it did not
+ * say), so a result can show how old its conversion rate is.
+ */
+export async function fetchFxRates(): Promise<{ rates: Record<string, number>; updatedAt: string | null } | null> {
   try {
     const res = await fetch('/api/fx/rates');
     if (!res.ok) return null;
@@ -16,7 +27,8 @@ export async function fetchUsdRates(): Promise<Record<string, number> | null> {
     const rates = body?.rates;
     if (!rates || typeof rates !== 'object') return null;
 
-    return rates as Record<string, number>;
+    const updatedAt = typeof body.updatedAt === 'string' && Number.isFinite(Date.parse(body.updatedAt)) ? body.updatedAt : null;
+    return { rates: rates as Record<string, number>, updatedAt };
   } catch {
     return null;
   }

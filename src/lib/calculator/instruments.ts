@@ -117,6 +117,28 @@ export const DEPOSIT_CURRENCIES: { code: CurrencyCode; label: string; symbol: st
   { code: 'INR', label: 'Indian Rupee', symbol: '₹' },
 ];
 
+/** Spot Forex: the one family whose lot is the same at every broker (100,000 base units). */
+export function isForex(spec: InstrumentSpec): boolean {
+  return spec.group === 'Forex majors' || spec.group === 'Forex crosses' || spec.group === 'Forex exotics';
+}
+
+/** What one unit of the instrument is: the base currency or coin, a troy ounce, a barrel or an index unit. */
+export function unitName(spec: InstrumentSpec): string {
+  if (spec.group === 'Metals') return 'oz';
+  if (spec.group === 'Energy') return 'barrels';
+  if (spec.group === 'Indices') return 'units';
+  return spec.symbol.slice(0, 3);
+}
+
+/**
+ * The contract size MT4/MT5 mode starts with. Only spot Forex has a standard
+ * one; for every other instrument it is the broker's own, so the field starts
+ * empty and has to be filled in from the broker's Symbol Specification.
+ */
+export function defaultMtContractSize(spec: InstrumentSpec): string {
+  return isForex(spec) && spec.contractSize !== null ? String(spec.contractSize) : '';
+}
+
 export function findInstrument(symbol: string): InstrumentSpec | undefined {
   return INSTRUMENTS.find(i => i.symbol === symbol);
 }
