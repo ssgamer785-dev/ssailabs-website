@@ -38,7 +38,7 @@ function seedFrom(id: string): number {
 const AVATAR = css('width:30px;height:30px;border-radius:50%;background:var(--avatar-bg);color:var(--avatar-ink);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:none');
 
 function VoiceBubble({ message, out, onRetry }: { message: ChatMessage; out: boolean; onRetry: () => void }) {
-  const { playing, progress, elapsed, toggle, loading, error, seek } = useAudioPlayer(
+  const { playing, progress, elapsed, toggle, loading, error, hint, seek } = useAudioPlayer(
     message.id,
     async () => message.localPreviewUrl ?? (message.storageKey ? getMediaUrl(message.storageKey, true) : null),
   );
@@ -65,6 +65,7 @@ function VoiceBubble({ message, out, onRetry }: { message: ChatMessage; out: boo
       <UploadBar message={message} />
       <FailedNote message={message} onRetry={onRetry} />
       {error && <div role="alert" style={css('font-size:11px;color:var(--danger-ink)')}>{error}</div>}
+      {hint && !error && <div role="status" style={css('font-size:11px;color:var(--text-muted)')}>{hint}</div>}
       {message.mediaPurged && <div style={css('font-size:11px;color:var(--text-faint)')}>Removed (storage limit)</div>}
       <MetaRow message={message} out={out} />
     </div>

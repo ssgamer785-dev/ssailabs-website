@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { css } from '../../lib/css';
 import { clampVideoPosition, shouldRestoreVideoSource, snapshotVideoPlayback, type VideoPlaybackSnapshot } from '../../lib/media/video-playback-state';
+import { claimPlayback, releasePlayback } from '../../lib/media/exclusive-playback';
+
+/** One viewer is open at a time; the number only tells its claim apart from a clip's or a voice message's. */
+let viewerSerial = 0;
 
 type WebkitVideo = HTMLVideoElement & {
   webkitEnterFullscreen?: () => void;
@@ -24,6 +28,7 @@ export function VideoViewer({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const onCloseRef = useRef(onClose);
+  const [claimId] = useState(() => `viewer:${++viewerSerial}`);
   const [playing, setPlaying] = useState(false);
   const previousSrc = useRef(src);
   const initialSeekPending = useRef(initialTime > 0);
@@ -74,6 +79,7 @@ export function VideoViewer({
       document.body.style.overflow = previousOverflow;
       document.removeEventListener('keydown', onKey);
       videoRef.current?.pause();
+      releasePlayback(claimId);
     };
   }, []);
 
@@ -120,12 +126,14 @@ export function VideoViewer({
           }}
           onPlay={event => {
             setPlaying(true);
+            claimPlayback(claimId, () => videoRef.current?.pause());
             const state = snapshotVideoPlayback(event.currentTarget);
             playbackRef.current = state;
             onPlaybackUpdate?.(state);
           }}
           onPause={event => {
             setPlaying(false);
+            releasePlayback(claimId);
             const state = snapshotVideoPlayback(event.currentTarget);
             playbackRef.current = state;
             onPlaybackUpdate?.(state);

@@ -20,6 +20,7 @@ import { NameVisibilityScreen } from './screens/NameVisibilityScreen';
 import { AuthLoading } from './components/AuthLoading';
 import { HelpSupportScreen } from './screens/HelpSupportScreen';
 import { PushNotifications } from './components/PushNotifications';
+import { AppBadgeSync } from './components/AppBadgeSync';
 import { LifecycleSplash } from './components/LifecycleSplash';
 import { NotificationNavigation } from './components/NotificationNavigation';
 import { AudioPreferencesRuntime } from './components/AudioPreferencesRuntime';
@@ -58,6 +59,7 @@ export default function App() {
           <LifecycleSplash />
           <NotificationNavigation />
           <PushNotifications />
+          <AppBadgeSync />
           <PresenceRuntime />
           <LocationKeyedBoundary><Suspense fallback={<AuthLoading />}><Routes>
             <Route path="/" element={<SplashScreen />} />

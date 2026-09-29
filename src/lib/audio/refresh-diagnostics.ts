@@ -178,7 +178,8 @@ export function summarizeRefreshAudioDiagnostics(trace: readonly RefreshAudioDia
   const locked = count(item => item.event === 'output-locked');
   // A pull's own touch-end: does iOS count the release of a drag as a user activation?
   const pulls = trace.filter(item => item.event === 'touch-end' && /activation=/.test(item.detail ?? ''));
-  return [
+  const voiceTaps = count(item => item.event === 'voice-tap');
+  const parts = [
     `refreshes ${count(item => item.event === 'refresh-fire')}`,
     `marks ${marks ?? '-'}`,
     `output-locked pulls ${locked}`,
@@ -190,7 +191,12 @@ export function summarizeRefreshAudioDiagnostics(trace: readonly RefreshAudioDia
     `deadline ${count(item => item.event === 'start-deadline')}`,
     `stalled ${count(item => / STALLED/.test(item.detail ?? ''))}`,
     `watchdog ${count(item => item.event === 'source-watchdog')}`,
-  ].join(' · ');
+  ];
+  // Voice messages, only when the trace has any: taps, refusals for want of a gesture, real failures.
+  if (voiceTaps > 0) {
+    parts.push(`voice taps/blocked/failed ${voiceTaps}/${count(item => item.event === 'voice-play-blocked')}/${count(item => item.event === 'voice-play-failed' || item.event === 'voice-address-failed')}`);
+  }
+  return parts.join(' · ');
 }
 
 export function getRefreshAudioDiagnostics(): readonly RefreshAudioDiagnostic[] {

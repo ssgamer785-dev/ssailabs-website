@@ -182,7 +182,7 @@ async function saveSubscription(subscription: PushSubscription, trace: Trace): P
  * to be the first await of the tap that asked for it (WebKit consumes the
  * tap's user activation in Notification.requestPermission).
  */
-export async function subscribePush(trace: Trace = () => {}): Promise<void> {
+export async function subscribePush(trace: Trace = () => {}): Promise<string> {
   const availability = pushAvailability();
   if (availability === 'install-required') throw new PushSetupError('install-required', '', 'Install the app to enable notifications.');
   if (availability === 'insecure') throw new PushSetupError('insecure-context', '', 'Notifications need a secure (https) connection.');
@@ -216,6 +216,42 @@ export async function subscribePush(trace: Trace = () => {}): Promise<void> {
   } else trace('push-stage', 'existing subscription reused');
 
   await saveSubscription(subscription, trace);
+  return subscription.endpoint;
+}
+
+/** The endpoint of this browser's current subscription, or null when it has none. */
+export async function currentEndpoint(): Promise<string | null> {
+  if (!supportsPush()) return null;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration('/');
+    return (await registration?.pushManager.getSubscription())?.endpoint ?? null;
+  } catch { return null; }
+}
+
+/** A short stable fingerprint of an endpoint, so "the subscription changed" can be noticed without storing the endpoint. */
+export async function endpointFingerprint(endpoint: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(endpoint));
+  return [...new Uint8Array(digest)].slice(0, 8).map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export type PushServerStatus = { registered: boolean; devices: number; serverConfigured: boolean };
+
+/**
+ * Whether the server still holds this device for the signed-in account. Null
+ * when that cannot be found out right now (offline, server trouble): the
+ * caller then keeps what it knew instead of claiming either way.
+ */
+export async function fetchPushStatus(endpoint: string): Promise<PushServerStatus | null> {
+  try {
+    const token = await accessToken();
+    const res = await fetch('/api/push/status', {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint }),
+    });
+    if (!res.ok) return null;
+    const body = await res.json().catch(() => null) as Partial<PushServerStatus> | null;
+    if (typeof body?.registered !== 'boolean') return null;
+    return { registered: body.registered, devices: Number(body.devices) || 0, serverConfigured: body.serverConfigured !== false };
+  } catch { return null; }
 }
 
 export async function unsubscribePush(): Promise<void> {

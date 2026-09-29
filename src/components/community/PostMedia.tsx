@@ -11,6 +11,7 @@ import { formatDuration } from '../../lib/chat/types';
 import { VideoViewer } from '../media/VideoViewer';
 import { clampVideoPosition, snapshotVideoPlayback, type VideoPlaybackSnapshot } from '../../lib/media/video-playback-state';
 import { isWithheldForAnonymity } from '../../lib/community/media-visibility';
+import { claimPlayback, releasePlayback } from '../../lib/media/exclusive-playback';
 
 function bytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -37,11 +38,25 @@ function PostVideo({ post }: { post: FeedPost }) {
   const resumeInline = useRef(false);
   const wasViewerOpen = useRef(false);
 
+  /**
+   * Inside the tap, before the address exists: WebKit lifts its gesture requirement
+   * for an element that is loaded in a gesture, so the play() that finishes this
+   * request after the address arrives (outside the gesture) is still allowed.
+   * Only an element with no source yet is touched; a paused clip keeps its place.
+   */
+  function primeVideo() {
+    const video = videoRef.current;
+    if (video && !video.currentSrc && video.paused) {
+      try { video.load(); } catch { /* Nothing to prime. */ }
+    }
+  }
+
   function playInline() {
     playIntent.current = true;
     const video = videoRef.current;
     if (!video || !media.url) {
       pendingPlay.current = true;
+      primeVideo();
       return;
     }
     pendingPlay.current = false;
@@ -62,11 +77,17 @@ function PostVideo({ post }: { post: FeedPost }) {
     }
     if (media.failed) {
       pendingPlay.current = true;
+      primeVideo();
       media.forceRetry();
       return;
     }
     playInline();
   }
+
+  // Only one thing plays sound at a time: a clip that starts stops a voice message
+  // or another clip, and a clip that stops (or is unmounted) gives the turn back.
+  const claimId = `clip:${post.id}`;
+  useEffect(() => () => releasePlayback(claimId), [claimId]);
 
   // The signed URL is normally ready by the time the visible bubble is tapped.
   // If signing is still in flight, finish the original play request as soon as
@@ -175,9 +196,12 @@ function PostVideo({ post }: { post: FeedPost }) {
         preload="none"
         onLoadedMetadata={event => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
         onTimeUpdate={event => { lastPosition.current = snapshotVideoPlayback(event.currentTarget).currentTime; }}
-        onPlay={() => { setPlaying(true); playIntent.current = true; pendingPlay.current = false; setBlocked(false); }}
-        onPause={() => { setPlaying(false); }}
-        onEnded={() => { setPlaying(false); playIntent.current = false; lastPosition.current = 0; }}
+        onPlay={() => {
+          setPlaying(true); playIntent.current = true; pendingPlay.current = false; setBlocked(false);
+          claimPlayback(claimId, () => videoRef.current?.pause());
+        }}
+        onPause={() => { setPlaying(false); releasePlayback(claimId); }}
+        onEnded={() => { setPlaying(false); playIntent.current = false; lastPosition.current = 0; releasePlayback(claimId); }}
         onError={() => {
           const video = videoRef.current;
           lastPosition.current = snapshotVideoPlayback(video).currentTime || lastPosition.current;
@@ -321,7 +345,7 @@ export function PostMedia({ post, height }: { post: FeedPost; height: number }) 
   return <NoMedia height={height} purged={post.mediaPurged} />;
 }
 function VoicePost({ post }: { post: FeedPost }) {
-  const { playing, loading, progress, elapsed, duration, error, toggle, seek } = useAudioPlayer(
+  const { playing, loading, progress, elapsed, duration, error, hint, toggle, seek } = useAudioPlayer(
     `post:${post.id}`, async () => post.storageKey ? getPostMediaUrl(post.storageKey, true) : null,
   );
   return <div onClick={event => event.stopPropagation()} style={css('background:var(--surface);border:1px solid var(--border-2);border-radius:12px;padding:13px;display:flex;flex-direction:column;gap:8px')}>
@@ -339,6 +363,7 @@ function VoicePost({ post }: { post: FeedPost }) {
         </div>
       </div>
       {error && <span role="alert" style={css('font-size:11px;color:var(--danger-ink)')}>{error}</span>}
+      {hint && !error && <span role="status" style={css('font-size:11px;color:var(--text-muted)')}>{hint}</span>}
     </>}
   </div>;
 }

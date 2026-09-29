@@ -78,6 +78,54 @@ self.addEventListener('message', event => {
 const APPLE_WEBKIT = /AppleWebKit/.test(self.navigator.userAgent)
   && !/Chrome|Chromium|CriOS|Edg|Android/.test(self.navigator.userAgent);
 
+const SAFE_TAG = /^[A-Za-z0-9_-]{1,120}$/;
+
+/** Only an in-app path ever leaves this worker as a destination. */
+function safePath(value) {
+  return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') ? value : '/notifications';
+}
+
+/** The number on the installed app's icon, kept right even when no banner is shown. Best effort. */
+async function setBadge(unread) {
+  const count = Number(unread);
+  if (!Number.isFinite(count) || count < 0) return;
+  try {
+    if (count > 0 && self.navigator.setAppBadge) await self.navigator.setAppBadge(Math.floor(count));
+    else if (self.navigator.clearAppBadge) await self.navigator.clearAppBadge();
+  } catch { /* No permission, or the platform declined: no badge. */ }
+}
+
+async function showPush(data) {
+  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  const visible = windows.some(client => client.visibilityState === 'visible');
+  // The open app already chimes and shows its own in-app notice. A test push
+  // has no in-app counterpart, so it is always shown.
+  const test = data.test === true;
+  await setBadge(data.unread);
+  if (visible && !APPLE_WEBKIT && !test) return;
+
+  // Pushes about one thing share a tag, so a new one REPLACES the banner on the
+  // device instead of stacking beside it; the count says how many there are.
+  const tag = typeof data.tag === 'string' && SAFE_TAG.test(data.tag) ? data.tag : `tp-${data.id}`;
+  const count = Number.isInteger(data.count) && data.count > 1 ? data.count : 1;
+  const path = safePath(data.url);
+  // The same push delivered twice (a retry after no answer) is one banner.
+  const already = (await self.registration.getNotifications({ tag })).some(shown => shown.data && shown.data.id === data.id);
+  if (!already) {
+    await self.registration.showNotification(String(data.title || 'The Traders Planet'), {
+      body: String(data.body || ''),
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      tag,
+      // A further message in a group alerts again; a lone notification has nothing to replace.
+      renotify: count > 1,
+      data: { url: path, id: data.id, tag },
+    });
+  }
+  // Shown only to keep WebKit's subscription; the app on screen has it covered.
+  if (visible && !test) (await self.registration.getNotifications({ tag })).forEach(shown => shown.close());
+}
+
 self.addEventListener('push', event => {
   let data;
   try { data = event.data?.json(); } catch { data = null; }
@@ -91,42 +139,60 @@ self.addEventListener('push', event => {
     }
     return;
   }
-  event.waitUntil((async () => {
-    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    const visible = windows.some(client => client.visibilityState === 'visible');
-    // The open app already chimes and shows its own in-app notice. A test push
-    // has no in-app counterpart, so it is always shown.
-    const test = data.test === true;
-    if (visible && !APPLE_WEBKIT && !test) return;
-    const tag = `tp-${data.id}`;
-    const path = typeof data.url === 'string' && data.url.startsWith('/') && !data.url.startsWith('//')
-      ? data.url : '/notifications';
-    await self.registration.showNotification(String(data.title || 'The Traders Planet'), {
-      body: String(data.body || ''),
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
-      tag,
-      renotify: false,
-      data: { url: path },
-    });
-    // Shown only to keep WebKit's subscription; the app on screen has it covered.
-    if (visible && !test) (await self.registration.getNotifications({ tag })).forEach(shown => shown.close());
-  })());
+  event.waitUntil(showPush(data));
 });
+
+/**
+ * Asks a running app window to open the destination itself (no reload, its
+ * state kept). The page answers "ok" on the channel; a page that does not
+ * answer, or an engine without messaging, falls back to navigating it.
+ */
+function askAppToOpen(client, path) {
+  return new Promise(resolve => {
+    let done = false;
+    const finish = value => { if (!done) { done = true; clearTimeout(timer); resolve(value); } };
+    const timer = setTimeout(() => finish(false), 1500);
+    try {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = message => finish(message.data === 'ok');
+      client.postMessage({ type: 'tp:open', url: path }, [channel.port2]);
+    } catch { finish(false); }
+  });
+}
+
+async function openDestination(destination) {
+  // Sanitised here as well as at the caller: nothing but an in-app path is ever opened or navigated to.
+  const path = safePath(destination);
+  const url = new URL(path, self.location.origin).href;
+  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  const app = windows.find(client => new URL(client.url).origin === self.location.origin);
+  if (!app) { await self.clients.openWindow(url); return; }
+  try { await app.focus(); } catch { /* Focus can be refused; the routing below still applies. */ }
+  if (await askAppToOpen(app, path)) return;
+  try { if (app.navigate) { await app.navigate(url); return; } } catch { /* Fall through. */ }
+  await self.clients.openWindow(url);
+}
 
 self.addEventListener('notificationclick', event => {
   event.notification.close();
-  const path = event.notification.data?.url || '/notifications';
-  const url = new URL(path, self.location.origin).href;
+  event.waitUntil(openDestination(safePath(event.notification.data?.url)));
+});
+
+// The browser replaced or dropped this device's subscription (an expired or
+// rotated one). Make a new one with the same key so the device can receive
+// again, and tell any open app to register it: this worker has no sign-in.
+// With no app open, the next launch notices the change and registers it.
+self.addEventListener('pushsubscriptionchange', event => {
   event.waitUntil((async () => {
+    let resubscribed = false;
+    try {
+      const key = event.oldSubscription && event.oldSubscription.options && event.oldSubscription.options.applicationServerKey;
+      if (key) {
+        await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+        resubscribed = true;
+      }
+    } catch { /* The app re-subscribes on its next launch. */ }
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    const app = windows.find(client => new URL(client.url).origin === self.location.origin);
-    if (app) {
-      await app.focus();
-      try { if (app.navigate) await app.navigate(url); else await self.clients.openWindow(url); }
-      catch { await self.clients.openWindow(url); }
-    } else {
-      await self.clients.openWindow(url);
-    }
+    windows.forEach(client => { try { client.postMessage({ type: 'tp:push-resync', resubscribed }); } catch { /* Gone. */ } });
   })());
 });

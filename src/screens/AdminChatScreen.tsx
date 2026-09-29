@@ -70,16 +70,20 @@ export function AdminChatScreen() {
   const targetMessageId = params.get('m');
   // Admins open a specific student's thread via ?c=<id>; students get their own.
   const chat = useConversation(conversationId ?? undefined);
-  const chatReady = !!chat.conversationId && !chat.loading;
+  // A notification can lead to a conversation that no longer exists (or that
+  // this admin cannot read); say so instead of offering to start one.
+  const [threadMissing, setThreadMissing] = useState(false);
+  const chatReady = !!chat.conversationId && !chat.loading && !threadMissing;
   const [peer, setPeer] = useState<{ id: string; name: string; avatarKey: string | null } | null>(null);
   useEffect(() => {
-    if (!isAdmin || !conversationId) { setPeer(null); return; }
+    if (!isAdmin || !conversationId) { setPeer(null); setThreadMissing(false); return; }
     let active = true;
+    setThreadMissing(false);
     // Just this thread's member: it used to load every member's conversation
     // summary (admin_conversations) to find one name.
     void (async () => {
       const { data: conv } = await supabase.from('conversations').select('student_id').eq('id', conversationId).maybeSingle();
-      if (!active || !conv?.student_id) { if (active) setPeer(null); return; }
+      if (!active || !conv?.student_id) { if (active) { setPeer(null); setThreadMissing(true); } return; }
       const { data: profile } = await supabase.from('profiles').select('full_name, avatar_key').eq('id', conv.student_id).maybeSingle();
       if (!active) return;
       setPeer(profile ? { id: conv.student_id, name: profile.full_name, avatarKey: profile.avatar_key } : null);
@@ -257,6 +261,10 @@ export function AdminChatScreen() {
           <div role="alert" style={css('flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:24px;color:var(--danger-ink);font-size:12.5px')}>
             <span>{chat.error}</span>
             <button type="button" onClick={chat.retryOpen} style={css('padding:9px 18px;border-radius:10px;background:var(--accent);color:var(--on-accent);font-weight:700;cursor:pointer')}>Retry opening chat</button>
+          </div>
+        ) : threadMissing ? (
+          <div role="status" style={css('flex:1;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12.5px;color:var(--text-muted);line-height:1.5;padding:0 30px')}>
+            This conversation is no longer available. It may have been removed, or you may not have access to it.
           </div>
         ) : messages.length === 0 ? (
           <div style={css('flex:1;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12.5px;color:var(--text-faint);line-height:1.5;padding:0 30px')}>

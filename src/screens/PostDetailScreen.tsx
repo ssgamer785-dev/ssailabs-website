@@ -141,7 +141,7 @@ export function PostDetailScreen() {
         </div>
         <StatusLine>
           {postId
-            ? 'This post is no longer available. It may have been deleted by its author.'
+            ? 'This post is no longer available. It may have been deleted by its author or removed by an admin.'
             : 'No post was specified.'}
         </StatusLine>
         <AuthenticatedBottomNav />

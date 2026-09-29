@@ -4,9 +4,14 @@ import { useAuth } from '../auth-context';
 import type { NotificationKind } from '../database.types';
 import { friendlyError, withTimeout } from '../errors';
 import { mergeFirstPage } from '../community/comments-merge';
+import { NOTIFICATIONS_CHANGED_EVENT, announceNotificationsChanged } from './events';
+import { categoryOfNotification, type NotificationCategory } from './categories';
+
+// The number for badges lives in one shared store (one Realtime channel, however many screens show it).
+export { NOTIFICATIONS_CHANGED_EVENT } from './events';
+export { useUnreadNotificationCount } from './unread-store';
 
 const PAGE_SIZE = 30;
-export const NOTIFICATIONS_CHANGED_EVENT = 'tp:notifications-changed';
 
 async function deleteNotificationRequest(path: string): Promise<void> {
   const { data, error } = await supabase.auth.getSession();
@@ -26,10 +31,6 @@ async function deleteNotificationRequest(path: string): Promise<void> {
   throw new Error(payload?.error || 'Could not delete notifications. Please retry.');
 }
 
-function announceNotificationsChanged(userId: string): void {
-  window.dispatchEvent(new CustomEvent(NOTIFICATIONS_CHANGED_EVENT, { detail: { userId } }));
-}
-
 export interface AppNotification {
   id: string;
   kind: NotificationKind;
@@ -39,6 +40,11 @@ export interface AppNotification {
   relatedConversationId: string | null;
   relatedMessageId: string | null;
   relatedCommentId: string | null;
+  /** What the notification is about; derived from the kind for rows made before categories existed. */
+  category: NotificationCategory;
+  /** In-app path for events that are not a chat or a post; validated again before use. */
+  link: string | null;
+  actorId: string | null;
   readAt: string | null;
   createdAt: string;
 }
@@ -47,6 +53,7 @@ type NotificationRow = {
   id: string; user_id: string; kind: NotificationKind; title: string; body: string | null;
   related_post_id: string | null; related_conversation_id: string | null;
   related_message_id?: string | null; related_comment_id?: string | null;
+  category?: NotificationCategory | null; link?: string | null; actor_id?: string | null;
   read_at: string | null; created_at: string;
 };
 
@@ -60,6 +67,9 @@ function toNotification(r: NotificationRow): AppNotification {
     relatedConversationId: r.related_conversation_id,
     relatedMessageId: r.related_message_id ?? null,
     relatedCommentId: r.related_comment_id ?? null,
+    category: categoryOfNotification(r.kind, r.category),
+    link: r.link ?? null,
+    actorId: r.actor_id ?? null,
     readAt: r.read_at,
     createdAt: r.created_at,
   };
@@ -171,8 +181,8 @@ export function useNotifications(): UseNotifications {
     if (upError) {
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, readAt: null } : n));
       setError(upError.message);
-    }
-  }, [notifications]);
+    } else if (userId) announceNotificationsChanged(userId);
+  }, [notifications, userId]);
 
   const markAllRead = useCallback(async () => {
     const previous = notifications;
@@ -182,8 +192,8 @@ export function useNotifications(): UseNotifications {
     if (rpcError) {
       setNotifications(previous);
       setError(rpcError.message);
-    }
-  }, [notifications]);
+    } else if (userId) announceNotificationsChanged(userId);
+  }, [notifications, userId]);
 
   const deleteNotification = useCallback(async (id: string) => {
     if (!userId) throw new Error('Sign in to manage notifications.');
@@ -261,51 +271,4 @@ export function useNotifications(): UseNotifications {
   const unreadCount = notifications.reduce((n, item) => n + (item.readAt ? 0 : 1), 0);
 
   return { notifications, unreadCount, loading, error, markRead, markAllRead, deleteNotification, deleteAllNotifications, refresh, hasMore, loadingMore, loadMore };
-}
-
-/**
- * Just the badge number, for screens that shouldn't pull the whole feed.
- * Counted server-side and refreshed on any change to the user's rows.
- */
-export function useUnreadNotificationCount(): number {
-  const { user } = useAuth();
-  const [count, setCount] = useState(0);
-
-  useEffect(() => {
-    if (!user) { setCount(0); return; }
-    let active = true;
-
-    const refresh = async () => {
-      const { data } = await supabase.rpc('my_unread_notification_count');
-      if (active) setCount(Number(data) || 0);
-    };
-    void refresh();
-
-    const onNotificationsChanged = (event: Event) => {
-      const changedUserId = (event as CustomEvent<{ userId?: string }>).detail?.userId;
-      if (changedUserId === user.id) void refresh();
-    };
-    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onNotificationsChanged);
-
-    const sub = supabase
-      .channel('notification-badge')
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
-        payload => {
-          if (!active) return;
-          // Screens that show only the badge never mount the feed hook, so the
-          // unread count is refreshed here too. Sound is handled by the single
-          // app-wide listener in PushNotifications.
-          void refresh();
-        })
-      .subscribe();
-
-    return () => {
-      active = false;
-      window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onNotificationsChanged);
-      supabase.removeChannel(sub);
-    };
-  }, [user]);
-
-  return count;
 }

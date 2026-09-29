@@ -60,6 +60,8 @@ export async function startFakeSupabase(options: {
   missingTables?: string[];
   /** Composite primary/unique keys to enforce on insert (answered as Postgres does: 23505). */
   uniqueKeys?: Record<string, string[]>;
+  /** Columns a table does not have yet (a migration not applied): selecting or writing one is refused as PostgREST does. */
+  rejectColumns?: Record<string, string[]>;
 }): Promise<FakeSupabase> {
   const tables: Record<string, Row[]> = options.tables ?? {};
   const rpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
@@ -96,6 +98,9 @@ export async function startFakeSupabase(options: {
     if (options.missingTables?.includes(req.params.table)) {
       return res.status(404).json({ code: 'PGRST205', message: `Could not find the table 'public.${req.params.table}' in the schema cache` });
     }
+    const select = (new URL(req.originalUrl, 'http://fake').searchParams.get('select') ?? '').split(',');
+    const unknown = (options.rejectColumns?.[req.params.table] ?? []).find(column => select.includes(column));
+    if (unknown) return res.status(400).json({ code: '42703', message: `column ${req.params.table}.${unknown} does not exist` });
     const rows = matching(req.params.table, new URL(req.originalUrl, 'http://fake').searchParams);
     if ((req.get('accept') ?? '').includes('vnd.pgrst.object')) {
       if (rows.length !== 1) return res.status(406).json({ code: 'PGRST116', message: `${rows.length} rows` });
@@ -112,6 +117,8 @@ export async function startFakeSupabase(options: {
     if (failure === 'error') return res.status(503).json({ code: 'XX000', message: 'fake write failure' });
     const table = (tables[req.params.table] ??= []);
     const incoming: Row[] = Array.isArray(req.body) ? req.body : [req.body];
+    const unknown = (options.rejectColumns?.[req.params.table] ?? []).find(column => incoming.some(row => column in row));
+    if (unknown) return res.status(400).json({ code: 'PGRST204', message: `Could not find the '${unknown}' column of '${req.params.table}' in the schema cache` });
     const conflict = new URL(req.originalUrl, 'http://fake').searchParams.get('on_conflict');
     const merge = (req.get('prefer') ?? '').includes('merge-duplicates');
     const key = options.uniqueKeys?.[req.params.table];

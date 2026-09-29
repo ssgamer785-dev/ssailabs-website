@@ -19,6 +19,7 @@ import {
   uploadToR2,
 } from './media-api';
 import { friendlyError } from '../errors';
+import { announceNotificationsChanged } from '../notifications/events';
 
 const PAGE_SIZE = 30;
 const TYPING_TIMEOUT_MS = 3500;
@@ -603,7 +604,12 @@ export function useConversation(explicitConversationId?: string): UseConversatio
   const markRead = useCallback(async () => {
     if (!conversationId) return;
     await supabase.rpc('mark_conversation_read', { p_conversation_id: conversationId });
-  }, [conversationId]);
+    // The notifications about this conversation are read too, so the unread
+    // badge and the count on the next banner are true. Ignored where the
+    // function does not exist yet.
+    const { data, error: notificationError } = await supabase.rpc('mark_related_notifications_read', { p_conversation_id: conversationId });
+    if (!notificationError && Number(data) > 0 && userId) announceNotificationsChanged(userId);
+  }, [conversationId, userId]);
 
   const broadcastTyping = useCallback((isTyping: boolean) => {
     channelRef.current?.send({

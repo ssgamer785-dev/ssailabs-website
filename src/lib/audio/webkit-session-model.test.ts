@@ -415,3 +415,163 @@ describe('user activation: taps grant a 5 s window, a pull grants none (WebKit r
     expect(verdict(gestureAt, webkit.contexts[0].sources).heard).toBe(true);
   }, 10_000);
 });
+
+describe('coming back to the app after the system stopped the audio (foreground resume)', () => {
+  /** The system stopped the output and tore down its audio session; WebKit\'s own "interruption ended" notification never arrives. */
+  const systemStopsAudio = (webkit: WebKitModel, context: FakeContext) => {
+    webkit.unregister(context);          // the audio session goes with the interruption
+    context.interrupt();
+  };
+
+  it('resumes by itself when the app returns, so a pull a moment later sounds at once (no tap needed: the context has run before)', async () => {
+    const webkit = new WebKitModel(500);                      // re-activating the session takes longer than the 400 ms start window
+    const output = createAudioOutput<FakeContext>({ createContext: webkit.create });
+    const player = createRefreshSoundPlayer<FakeContext>({ output, loadBuffer: async () => SOUND });
+    await player.preload();
+    webkit.tap(() => output.unlock(true));
+    await wait(700);
+    const context = webkit.contexts[0];
+    expect(context.state).toBe('running');
+    systemStopsAudio(webkit, context);
+    output.foreground();                                      // visibilitychange → visible
+    await wait(700);                                          // the member looks at the screen, then pulls
+    expect(context.state).toBe('running');
+    const gestureAt = now();
+    webkit.pull(() => player.playFromGesture(false));
+    await wait(60);
+    expect(verdict(gestureAt, context.sources)).toEqual({ heard: true, delayMs: expect.any(Number) });
+    expect(verdict(gestureAt, context.sources).delayMs!).toBeLessThan(30);
+  }, 10_000);
+
+  it('without that resume the same pull is the one that waits for the session, misses its start window and stays silent', async () => {
+    const webkit = new WebKitModel(500);
+    const output = createAudioOutput<FakeContext>({ createContext: webkit.create });
+    const player = createRefreshSoundPlayer<FakeContext>({ output, loadBuffer: async () => SOUND });
+    await player.preload();
+    webkit.tap(() => output.unlock(true));
+    await wait(700);
+    const context = webkit.contexts[0];
+    systemStopsAudio(webkit, context);                        // and nothing calls foreground()
+    await wait(700);
+    const gestureAt = now();
+    webkit.pull(() => player.playFromGesture(false));
+    await wait(650);
+    expect(verdict(gestureAt, context.sources).heard).toBe(false);
+  }, 10_000);
+
+  it('never asks a context that has not run yet to resume without a tap (it would only sit pending)', async () => {
+    const webkit = new WebKitModel(20);
+    const output = createAudioOutput<FakeContext>({ createContext: webkit.create });
+    output.ensure();
+    let resumes = 0;
+    const context = webkit.contexts[0];
+    const original = context.resume.bind(context);
+    context.resume = () => { resumes += 1; return original(); };
+    output.foreground();
+    await wait(400);
+    expect(resumes).toBe(0);
+    expect(output.status()).toBe('locked');
+  });
+
+  it('status: locked → running → interrupted → running again → stalled → closed, and listeners hear each change', async () => {
+    const webkit = new WebKitModel(20);
+    const output = createAudioOutput<FakeContext>({ createContext: webkit.create });
+    const seen: string[] = [];
+    output.subscribe(() => seen.push(output.status()));
+    expect(output.status()).toBe('none');
+    output.ensure();
+    expect(output.status()).toBe('locked');
+    webkit.tap(() => output.unlock(true));
+    await wait(80);
+    expect(output.status()).toBe('running');
+    const context = webkit.contexts[0];
+    context.interrupt();
+    expect(output.status()).toBe('interrupted');
+    context.setState('running');
+    expect(output.status()).toBe('running');
+    output.markStalled(context, 'test');
+    expect(output.status()).toBe('stalled');
+    output.close();
+    expect(output.status()).toBe('none');
+    expect(seen).toContain('locked');
+    expect(seen).toContain('running');
+    expect(seen).toContain('interrupted');
+    expect(seen).toContain('stalled');
+    expect(seen.at(-1)).toBe('none');
+  });
+});
+
+describe('an interruption that ends without "may resume" (WebKit leaves the context suspended)', () => {
+  it('while the page is on screen the app restarts the output by itself, so the next pull sounds with no tap', async () => {
+    const webkit = new WebKitModel(200);
+    const output = createAudioOutput<FakeContext>({ createContext: webkit.create, visible: () => true });
+    const player = createRefreshSoundPlayer<FakeContext>({ output, loadBuffer: async () => SOUND });
+    await player.preload();
+    webkit.tap(() => output.unlock(true));
+    await wait(400);
+    const context = webkit.contexts[0];
+    expect(context.state).toBe('running');
+    webkit.unregister(context);                 // the audio session went with the interruption
+    context.interrupt();                        // e.g. a phone call
+    await wait(50);
+    context.setState('suspended');              // the call ended without the "may resume" flag: WebKit stops here
+    await wait(400);                            // the app asks again; the session re-activates in ~200 ms
+    expect(context.state).toBe('running');
+    const gestureAt = now();
+    webkit.pull(() => player.playFromGesture(false));
+    await wait(60);
+    expect(verdict(gestureAt, context.sources).heard).toBe(true);
+    expect(verdict(gestureAt, context.sources).delayMs!).toBeLessThan(30);
+  }, 10_000);
+
+  it('does nothing while the page is hidden, and restarts it the moment the page is back', async () => {
+    let onScreen = false;
+    const webkit = new WebKitModel(50);
+    const output = createAudioOutput<FakeContext>({ createContext: webkit.create, visible: () => onScreen });
+    output.ensure();
+    webkit.tap(() => output.unlock(true));
+    await wait(200);
+    const context = webkit.contexts[0];
+    expect(context.state).toBe('running');
+    webkit.unregister(context);
+    context.interrupt();
+    context.setState('suspended');
+    await wait(300);
+    expect(context.state).toBe('suspended');    // hidden: left alone
+    onScreen = true;
+    output.foreground();                        // visibilitychange → visible
+    await wait(300);
+    expect(context.state).toBe('running');
+  }, 10_000);
+
+  it('never asks a context that has not run yet: it would only sit pending until a tap', async () => {
+    const webkit = new WebKitModel(20);
+    const output = createAudioOutput<FakeContext>({ createContext: webkit.create, visible: () => true });
+    output.ensure();
+    const context = webkit.contexts[0];
+    let resumes = 0;
+    const original = context.resume.bind(context);
+    context.resume = () => { resumes += 1; return original(); };
+    context.setState('interrupted' as AudioContextState);
+    context.setState('suspended');
+    await wait(200);
+    expect(resumes).toBe(0);
+    expect(output.status()).toBe('locked');
+  });
+
+  it('a context that stays suspended is asked once per change, not in a loop', async () => {
+    const webkit = new WebKitModel(20);
+    const output = createAudioOutput<FakeContext>({ createContext: webkit.create, visible: () => true });
+    output.ensure();
+    webkit.tap(() => output.unlock(true));
+    await wait(100);
+    const context = webkit.contexts[0];
+    webkit.unregister(context);
+    context.interrupt();
+    let resumes = 0;
+    context.resume = () => { resumes += 1; return new Promise<void>(() => {}); };   // the system keeps refusing
+    context.setState('suspended');
+    await wait(600);
+    expect(resumes).toBe(1);
+  });
+});

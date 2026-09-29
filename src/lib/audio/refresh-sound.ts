@@ -97,8 +97,12 @@ export function createRefreshSoundPlayer<C extends RefreshContext>(options: {
       try { await decode(); return true; } catch { return false; }
     },
 
-    /** Call synchronously inside the refresh gesture's touchend/pointerup/wheel task. */
-    playFromGesture(hasActivation = true) {
+    /**
+     * Call synchronously inside the refresh gesture's touchend/pointerup/wheel task.
+     * `maxStartDelayMs` widens the start window for a deliberate test (the sound settings),
+     * where a slow audio session is worth waiting for; a real refresh never plays late.
+     */
+    playFromGesture(hasActivation = true, startWindow: { maxStartDelayMs?: number } = {}) {
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
       if (now - lastGestureAt < 100) { trace('duplicate-gesture-ignored'); return; }
       lastGestureAt = now;
@@ -166,7 +170,7 @@ export function createRefreshSoundPlayer<C extends RefreshContext>(options: {
         if (!final) trace('clock-after-150ms', `${target.state} ${clock} clock=${target.currentTime.toFixed(3)}${outputDetail(target)}`);
       };
       timers.push(setTimeout(() => check(false), 150));
-      timers.push(setTimeout(() => check(true), maxStartDelayMs));
+      timers.push(setTimeout(() => check(true), startWindow.maxStartDelayMs ?? maxStartDelayMs));
       // onended never arriving means the clock stopped mid-sound.
       timers.push(setTimeout(() => {
         if (source !== next) return;

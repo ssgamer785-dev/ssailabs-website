@@ -21,7 +21,8 @@ local component state and are not wired to any of this yet (that's Phase 2B).
 | `likes` / `bookmarks` | Join tables keyed on `(post_id, user_id)`. Likes are visible to everyone (for counts); bookmarks are private to their owner. |
 | `conversations` | One row per student — their single thread with Admin ("direct member chat is off", so there's no student↔student messaging). |
 | `messages` | Belongs to a conversation; `kind` covers text/image/pdf/chart/voice. |
-| `notifications` | Per-user feed. Rows are only ever written by triggers (new official post, new message, new comment, new like) — there is no insert policy for regular users. |
+| `notifications` | Per-user feed. Rows are only ever written by triggers (a chat message of any kind, an official post, a comment or like on my post, an opt-in Students Community post, a moderator removing my content, and — for admins — a new membership request or an activation) — there is no insert policy for regular users. `category` says which setting governs it; `link` is an in-app path for events that are not a chat or a post. |
+| `notification_preferences` | One row per member: which categories notify them (direct messages, official announcements, comments and system notices on; Students Community posts and likes off). No row means the defaults. RLS: own row only. See [`docs/notifications.md`](../docs/notifications.md). |
 
 ## The "Unknown User" identity model
 

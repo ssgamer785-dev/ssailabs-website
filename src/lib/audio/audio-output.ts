@@ -43,6 +43,19 @@ const RETIRE_MAX_MS = 6_000;
 /** While running, how often the clock is checked, so a freeze is known before the next gesture. */
 const HEARTBEAT_MS = 250;
 
+/**
+ * What can honestly be told to the member about app sounds right now. Never
+ * "the sound was heard": the page cannot know that (silent switch, volume,
+ * Bluetooth); it only knows whether the browser is running the output.
+ */
+export type OutputStatus =
+  | 'none'         // no Web Audio in this browser, or the output is closed
+  | 'locked'       // never ran: the browser wants a tap before it starts
+  | 'running'      // running and its clock moves
+  | 'stalled'      // says running, but its clock is frozen: replaced at the next tap
+  | 'interrupted'  // paused by the system (call, another app, screen lock)
+  | 'suspended';   // stopped; resumes without a tap because it has run before
+
 export interface AudioOutput<C extends OutputLike> {
   /** The live context, created (suspended) if there is none. Never unlocks. */
   ensure(): C | null;
@@ -59,6 +72,10 @@ export interface AudioOutput<C extends OutputLike> {
   foreground(): void;
   /** Whether the current context has ever run: on iOS it cannot start without a tap's activation until then. */
   isUnlocked(): boolean;
+  /** For the sound settings screen: the output's state in terms a member can act on. */
+  status(): OutputStatus;
+  /** Called whenever `status()` may have changed. Returns the unsubscribe function. */
+  subscribe(listener: () => void): () => void;
   /** Page unload only. */
   close(): void;
 }
@@ -67,9 +84,12 @@ export function createAudioOutput<C extends OutputLike>(options: {
   createContext: () => C | null;
   trace?: (event: string, detail?: string) => void;
   now?: () => number;
+  /** Whether the page is on screen. Sound is only brought back while it is; defaults to the document's visibility. */
+  visible?: () => boolean;
 }): AudioOutput<C> {
   const trace = options.trace ?? (() => {});
   const now = options.now ?? (() => performance.now());
+  const visible = options.visible ?? (() => typeof document === 'undefined' || document.visibilityState === 'visible');
   let context: C | null = null;
   let stalled = false;
   /** The current context has reached "running" at least once (WebKit lifted its gesture restriction). */
@@ -79,6 +99,8 @@ export function createAudioOutput<C extends OutputLike>(options: {
   let foregroundTimer: ReturnType<typeof setTimeout> | undefined;
   /** One tap fires pointerup, touchend and click: one resume request covers them. */
   let lastResume: { target: C; at: number } | null = null;
+  const listeners = new Set<() => void>();
+  const notify = () => listeners.forEach(listener => listener());
 
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   const stopHeartbeat = () => { if (heartbeat) clearInterval(heartbeat); heartbeat = undefined; };
@@ -86,6 +108,7 @@ export function createAudioOutput<C extends OutputLike>(options: {
   const rebase = (target: C) => {
     if (target === context && target.state === 'running') unlocked = true;
     sample = target === context && target.state === 'running' ? { wall: now(), clock: target.currentTime } : null;
+    if (target === context) notify();
     if (!sample) { stopHeartbeat(); return; }
     if (heartbeat) return;
     heartbeat = setInterval(() => {
@@ -98,7 +121,15 @@ export function createAudioOutput<C extends OutputLike>(options: {
   const create = (): C | null => {
     const next = options.createContext();
     if (!next) return null;
-    next.addEventListener?.('statechange', () => { if (next === context) rebase(next); });
+    next.addEventListener?.('statechange', () => {
+      if (next !== context) return;
+      rebase(next);
+      // When an interruption ends without "may resume", WebKit moves the context to
+      // "suspended" and leaves it there (AudioContext::mayResumePlayback(false)):
+      // only a script resume() restarts it. One that has run before needs no gesture
+      // for that, so bring it back while the page is on screen.
+      if (unlocked && next.state === 'suspended' && visible()) requestResume(next, 'suspended');
+    });
     context = next;
     stalled = false;
     unlocked = false;
@@ -137,6 +168,18 @@ export function createAudioOutput<C extends OutputLike>(options: {
     if (target !== context || stalled) return;
     stalled = true;
     trace('output-stalled', `${target.state} ${reason}`);
+    notify();
+  };
+
+  /** One resume request per burst of events (a tap fires pointerup, touchend and click). */
+  const requestResume = (target: C, why?: string) => {
+    if (lastResume?.target === target && now() - lastResume.at < 50) return;
+    lastResume = { target, at: now() };
+    trace('resume-request', why ? `${target.state} ${why}` : target.state);
+    const startedAt = now();
+    void target.resume()
+      .then(() => trace('resume-resolved', `${target.state} ${Math.round(now() - startedAt)}ms`))
+      .catch(() => trace('resume-rejected', target.state));
   };
 
   return {
@@ -159,14 +202,7 @@ export function createAudioOutput<C extends OutputLike>(options: {
       }
       if (!target) target = create();
       if (!target) return null;
-      if (target.state !== 'running' && !(lastResume?.target === target && now() - lastResume.at < 50)) {
-        lastResume = { target, at: now() };
-        trace('resume-request', target.state);
-        const startedAt = now();
-        void target.resume()
-          .then(() => trace('resume-resolved', `${target!.state} ${Math.round(now() - startedAt)}ms`))
-          .catch(() => trace('resume-rejected', target!.state));
-      }
+      if (target.state !== 'running') requestResume(target);
       return target;
     },
 
@@ -174,10 +210,30 @@ export function createAudioOutput<C extends OutputLike>(options: {
     markStalled,
     isUnlocked: () => unlocked,
 
+    status() {
+      const target = context;
+      if (!target || target.state === 'closed') return 'none';
+      if (target.state === 'running') return stalled ? 'stalled' : 'running';
+      if (!unlocked) return 'locked';
+      return (target.state as string) === 'interrupted' ? 'interrupted' : 'suspended';
+    },
+
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+
     foreground() {
       const target = context;
       if (!target || target.state === 'closed') return;
       rebase(target);
+      // WebKit resumes an interrupted context by itself when the interruption
+      // ends, but that notification can be missed (a call, the screen lock,
+      // another app's audio). A context that has run before needs no gesture
+      // to resume, so ask again now rather than leave the next pull-to-refresh
+      // to find it stopped. One that never ran cannot start without a tap and
+      // is left alone.
+      if (unlocked && target.state !== 'running') requestResume(target, 'foreground');
       if (foregroundTimer) clearTimeout(foregroundTimer);
       // The case the old per-refresh contexts were built for: back from the
       // background, "running", but its clock no longer moves.
@@ -194,6 +250,7 @@ export function createAudioOutput<C extends OutputLike>(options: {
       context = null;
       sample = null;
       if (target && target.state !== 'closed') void target.close().catch(() => {});
+      notify();
     },
   };
 }

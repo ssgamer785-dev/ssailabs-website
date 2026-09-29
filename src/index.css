@@ -111,6 +111,10 @@
   --danger-soft-4: #FDE1E3;
   --danger-soft-5: #FDE7E9;
   --danger-border: #FBD5D9;
+  /* Text and solid fills that meet 4.5:1 on the surfaces they sit on (the -ink tokens above are for icons and large text). */
+  --danger-text: #B91C1C;
+  --danger-solid: #B91C1C;
+  --success-text: #166534;
   --success: #22C55E;
   --success-deep: #16A34A;
   --success-ink: #16A34A;
@@ -230,6 +234,9 @@
   --danger-soft-4: #351D20;
   --danger-soft-5: #341C1F;
   --danger-border: #4B2429;
+  --danger-text: #FF8080;
+  --danger-solid: #DC2626;
+  --success-text: #4ADE80;
   --success: #22C55E;
   --success-deep: #16A34A;
   --success-ink: #4ADE80;
@@ -349,6 +356,10 @@
   --danger-soft-4: #FDE1E3;
   --danger-soft-5: #FDE7E9;
   --danger-border: #FBD5D9;
+  /* Text and solid fills that meet 4.5:1 on the surfaces they sit on (the -ink tokens above are for icons and large text). */
+  --danger-text: #B91C1C;
+  --danger-solid: #B91C1C;
+  --success-text: #166534;
   --success: #22C55E;
   --success-deep: #16A34A;
   --success-ink: #16A34A;

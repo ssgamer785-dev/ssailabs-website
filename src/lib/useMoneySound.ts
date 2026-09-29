@@ -62,6 +62,12 @@ function play(): void {
   else sharedPlayer!.playFromGesture(hasUserActivation());
 }
 
+/** The sound settings' test button: call inside the tap. Plays whatever the preference says, and waits for a slow audio session. */
+export function playMoneyRefreshSoundForCheck(maxStartDelayMs: number): void {
+  if (legacyPlayer) { legacyPlayer.playFromGesture(); return; }
+  sharedPlayer!.playFromGesture(true, { maxStartDelayMs });
+}
+
 export function useMoneySound() {
   // PhoneShell calls this directly from its pull-to-refresh touch/pointer/wheel gesture.
   return useCallback(play, []);

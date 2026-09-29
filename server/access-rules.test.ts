@@ -540,22 +540,36 @@ describe('push delivery reliability', () => {
   const note = (id: string, user: string, createdAt = new Date(Date.now() - 5 * 60_000).toISOString()) =>
     ({ id, user_id: user, kind: 'chat', title: 'New message', body: 'Hi', related_post_id: null, related_conversation_id: CONV, created_at: createdAt });
 
-  test('a push the service refused for now (429/5xx) is sent again once', async () => {
+  test('a push the service refused for now (429/5xx) is sent again', async () => {
     fake.tables.push_subscriptions.push(device(u(401), STUDENT));
     fake.tables.notifications.push(note(u(411), STUDENT));
     pushFailures = [503];
-    expect((await dispatch(u(411))).body).toMatchObject({ ok: true, attempted: 1, uncertainFailures: 0 });
+    expect((await dispatch(u(411))).body).toMatchObject({ ok: true, attempted: 1, sent: 1, failed: 0 });
     expect(pushes).toEqual([`https://push.example.test/${u(401)}`]);
   });
 
-  test('a push that may have been delivered (no answer) is never sent twice', async () => {
+  test('a push that got no answer is tried again, and the device replaces (not repeats) a banner with the same tag', async () => {
     fake.tables.push_subscriptions.push(device(u(402), STUDENT));
     fake.tables.notifications.push(note(u(412), STUDENT));
     pushFailures = [0];
-    expect((await dispatch(u(412))).body).toMatchObject({ ok: true, attempted: 1, uncertainFailures: 1 });
-    expect(pushes).toEqual([]);
-    expect((await dispatch(u(412))).body).toMatchObject({ ok: true, attempted: 1 });
-    expect(pushes).toEqual([]);
+    expect((await dispatch(u(412))).body).toMatchObject({ ok: true, attempted: 1, sent: 1, failed: 0 });
+    expect(pushes).toEqual([`https://push.example.test/${u(402)}`]);
+  });
+
+  test('a notification the push service never accepts gives its claim back, so sending it again is possible', async () => {
+    fake.tables.push_subscriptions.push(device(u(405), STUDENT));
+    fake.tables.notifications.push(note(u(416), STUDENT));
+    pushFailures = [503, 503, 503];
+    const refused = await dispatch(u(416));
+    expect(refused.status).toBe(502);
+    expect(refused.body).toMatchObject({ ok: false, attempted: 1, sent: 0, failed: 1 });
+    expect(fake.tables.push_deliveries).toEqual([]);
+    expect((await dispatch(u(416))).body).toMatchObject({ ok: true, sent: 1, failed: 0 });
+    expect(pushes).toEqual([`https://push.example.test/${u(405)}`]);
+    expect(fake.tables.push_deliveries).toHaveLength(1);
+    // A third call finds it already delivered and sends nothing.
+    expect((await dispatch(u(416))).body).toMatchObject({ ok: true, sent: 0, duplicates: 1 });
+    expect(pushes).toHaveLength(1);
   });
 
   test('the delivery check is for the admin only', async () => {

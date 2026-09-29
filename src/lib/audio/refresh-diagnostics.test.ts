@@ -32,6 +32,20 @@ describe('refresh audio diagnostics', () => {
       + ' · ctx created/closed 2/1 · interrupted 1 · deadline 1 · stalled 1 · watchdog 1');
   });
 
+  it('adds the voice-message counts only when the trace has voice taps', () => {
+    const without = summarizeRefreshAudioDiagnostics([trace('refresh-fire', '#1 1 handler(s) activation=active')]);
+    expect(without).not.toContain('voice');
+    const withVoice = summarizeRefreshAudioDiagnostics([
+      trace('voice-tap', 'new'),
+      trace('voice-play-blocked'),
+      trace('voice-tap', 'resume'),
+      trace('voice-play-ok', 'resume 12ms'),
+      trace('voice-tap', 'new'),
+      trace('voice-address-failed'),
+    ]);
+    expect(withVoice).toContain('voice taps/blocked/failed 3/1/1');
+  });
+
   it('counts pulls whose release carried no activation, and the saved post-run marks', () => {
     expect(summarizeRefreshAudioDiagnostics([
       trace('touch-end', 'g1 pull=91 threshold=64 activation=active'),

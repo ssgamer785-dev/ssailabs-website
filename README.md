@@ -58,3 +58,4 @@ supabase/tests/run.sh [PGHOST] [PGPORT]
 | `supabase/migrations/` | The schema, RLS policies and maintenance functions |
 | `supabase/tests/` | SQL behaviour suites |
 | `supabase/README.md` | How the backend fits together |
+| `docs/notifications.md` | What notifies whom, and how push and the inbox work |

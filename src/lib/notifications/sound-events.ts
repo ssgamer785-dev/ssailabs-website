@@ -7,18 +7,6 @@ export function foregroundNotificationSoundId(row: ForegroundNotificationEvent, 
   return visible && row.id && !row.read_at ? row.id : null;
 }
 
-export interface CommunityPostSoundEvent {
-  id?: string | null;
-  /** Present on a realtime row; absent (or null) on another member's anonymous post. */
-  author_id?: string | null;
-  /** Present on a posts_feed row, and the only reliable "mine" for anonymous posts. */
-  is_mine?: boolean | null;
-  channel?: string | null;
-}
-
-export function incomingStudentPostSoundId(row: CommunityPostSoundEvent, currentUserId: string, visible: boolean): string | null {
-  const mine = row.is_mine === true || row.author_id === currentUserId;
-  return visible && row.id && row.channel === 'students' && !mine
-    ? `student-post:${row.id}`
-    : null;
-}
+// Students Community posts have no sound rule of their own any more: a member
+// who switched them on receives them as notification rows, which take the rule
+// above; a member who did not is never chimed at for a post they did not ask about.

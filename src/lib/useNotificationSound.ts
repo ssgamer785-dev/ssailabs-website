@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { audioPreferenceEnabled, setAudioPreference } from './audio/preferences';
 import { refreshAudioDiagnosticsEnabled, refreshAudioExperimentMode, traceRefreshAudio } from './audio/refresh-diagnostics';
 import { hasUserActivation, sharedAudioOutput } from './audio/shared-output';
+import { primeVoicePlayback } from './chat/voice-player';
 
 /** Original short, gently rising three-note in-app chime. */
 const PARTIALS = [
@@ -73,21 +74,26 @@ export function setNotificationSoundEnabled(enabled: boolean): void {
   setAudioPreference('notificationSound', enabled);
 }
 
-/** Plays at most once per event id and drops bursts rather than playing late. */
-export function playNotificationChime(id?: string): void {
-  if (id && !markNotificationSoundSeen(id)) return;
-  if (!notificationSoundEnabled()) { traceRefreshAudio('chime-skipped', 'pref off'); return; }
+/**
+ * Plays the chime once the output runs. `force` ignores the member's preference and
+ * `maxDelayMs` widens the "too late to play" limit: both only for the sound settings'
+ * test button. Resolves to whether a chime was actually scheduled.
+ */
+function chime(options: { id?: string; force?: boolean; maxDelayMs?: number } = {}): Promise<boolean> {
+  const { id, force = false, maxDelayMs = MAX_UNLOCK_DELAY_MS } = options;
+  if (id && !markNotificationSoundSeen(id)) return Promise.resolve(false);
+  if (!force && !notificationSoundEnabled()) { traceRefreshAudio('chime-skipped', 'pref off'); return Promise.resolve(false); }
   const audio = context();
-  if (!audio) { traceRefreshAudio('chime-skipped', 'no context'); return; }
+  if (!audio) { traceRefreshAudio('chime-skipped', 'no context'); return Promise.resolve(false); }
   traceRefreshAudio('chime-request', audio.state);
 
   const requestedAt = performance.now();
-  const schedule = () => {
+  const schedule = (): boolean => {
     try {
-      if (ctx !== audio || audio.state !== 'running') { traceRefreshAudio('chime-skipped', audio.state); return; }
-      if (performance.now() - requestedAt > MAX_UNLOCK_DELAY_MS) { traceRefreshAudio('chime-skipped', 'late'); return; }
+      if (ctx !== audio || audio.state !== 'running') { traceRefreshAudio('chime-skipped', audio.state); return false; }
+      if (performance.now() - requestedAt > maxDelayMs) { traceRefreshAudio('chime-skipped', 'late'); return false; }
       const now = audio.currentTime;
-      if (now < lastScheduledEnd) { traceRefreshAudio('chime-skipped', 'overlap'); return; }
+      if (now < lastScheduledEnd) { traceRefreshAudio('chime-skipped', 'overlap'); return false; }
       traceRefreshAudio('chime-scheduled', `clock=${now.toFixed(3)}`);
       const startAt = now + 0.005;
       lastScheduledEnd = startAt + SOUND_DURATION_SECONDS + 0.06;
@@ -119,14 +125,25 @@ export function playNotificationChime(id?: string): void {
         oscillator.start(start);
         oscillator.stop(start + partial.decay + 0.02);
       }
-    } catch { /* Notifications remain visible when audio is unsupported. */ }
+      return true;
+    } catch { /* Notifications remain visible when audio is unsupported. */ return false; }
   };
-  if (audio.state === 'running') { schedule(); return; }
+  if (audio.state === 'running') return Promise.resolve(schedule());
   try {
     // Browser audio policy may block this; the next genuine gesture unlocks the
     // context, but never replays this old event as a delayed chime.
-    void audio.resume().then(schedule).catch(() => {});
-  } catch { /* OS/browser audio policy */ }
+    return audio.resume().then(schedule).catch(() => false);
+  } catch { /* OS/browser audio policy */ return Promise.resolve(false); }
+}
+
+/** Plays at most once per event id and drops bursts rather than playing late. */
+export function playNotificationChime(id?: string): void {
+  void chime({ id });
+}
+
+/** The sound settings' test button: call inside the tap. Ignores the preference; waits longer for a slow audio session. */
+export function playNotificationChimeForCheck(maxDelayMs: number): Promise<boolean> {
+  return chime({ force: true, maxDelayMs });
 }
 
 /** Called directly from a real user gesture (also from the push Allow button). */
@@ -154,8 +171,13 @@ export function installNotificationAudioUnlock(): void {
     // (WebKit synthesises mousedown/click for it); a pull-to-refresh drag does
     // not, so the output must already be unlocked by an earlier tap for a pull
     // to sound. A touch pointerdown alone never carries one.
+    const onTap = () => {
+      // The same tap also readies the voice-message element (see voice-playback.ts).
+      primeVoicePlayback();
+      onGesture();
+    };
     for (const type of ['mousedown', 'pointerup', 'touchend', 'click', 'keydown'] as const) {
-      document.addEventListener(type, onGesture, { passive: true, capture: true });
+      document.addEventListener(type, onTap, { passive: true, capture: true });
     }
     return;
   }

@@ -4,6 +4,7 @@ import { getAudioPreferences, setAudioPreference, subscribeAudioPreferences, typ
 import { PhoneShell } from '../components/PhoneShell';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
+import { SoundCheckCard } from '../components/SoundCheckCard';
 
 function ToggleRow({ label, setting, checked }: { label: string; setting: AudioPreference; checked: boolean }) {
   return (
@@ -29,12 +30,13 @@ export function HapticsScreen() {
         <span aria-hidden="true" style={css('width:40px;flex:none')} />
       </header>
       <main style={css('flex:1;min-height:0;overflow-y:auto;padding:17px 20px 28px')}>
-        <p style={css('margin:0 0 18px;color:var(--text-muted);font-size:13px;line-height:1.55')}>Choose which app sounds you want to hear. Your choices are saved for this account.</p>
+        <p style={css('margin:0 0 18px;color:var(--text-muted);font-size:13px;line-height:1.55')}>Choose which app sounds you want to hear. Your choices are saved on this device for your account.</p>
         <div style={css('display:flex;flex-direction:column;gap:10px')}>
           <ToggleRow label="Refresh Sound" setting="refreshSound" checked={preferences.refreshSound} />
           <ToggleRow label="Notification Sound" setting="notificationSound" checked={preferences.notificationSound} />
         </div>
-        <p style={css('margin:14px 2px 0;color:var(--text-faint);font-size:11px;line-height:1.5')}>Sound playback follows your browser and device audio permissions.</p>
+        <p style={css('margin:14px 2px 0;color:var(--text-muted);font-size:11px;line-height:1.5')}>Sound playback follows your browser and device audio permissions.</p>
+        <SoundCheckCard />
       </main>
       <AuthenticatedBottomNav />
     </PhoneShell>

@@ -10,6 +10,8 @@ export type PostChannel = 'official' | 'students';
 export type AttachmentKind = 'none' | 'image' | 'video' | 'pdf' | 'file' | 'poll' | 'chart' | 'voice';
 export type MessageKind = 'text' | 'image' | 'pdf' | 'file' | 'chart' | 'voice' | 'video';
 export type NotificationKind = 'signal' | 'chat' | 'like' | 'comment' | 'target' | 'session';
+/** What a member can switch on or off (notification_preferences), and what a row is about (notifications.category). */
+export type NotificationCategoryName = 'direct_messages' | 'official_announcements' | 'community_posts' | 'comments' | 'likes' | 'system';
 /** Where a media row is in its upload: 'pending' until the bytes reach R2. */
 export type UploadStatus = 'pending' | 'ready';
 
@@ -291,12 +293,49 @@ export interface Database {
           related_conversation_id: string | null;
           related_message_id: string | null;
           related_comment_id: string | null;
+          /** NULL on rows made before the preferences release. */
+          category: NotificationCategoryName | null;
+          /** In-app path for events that are not a chat or a post; only ever set by database triggers. */
+          link: string | null;
+          /** Likes only. */
+          actor_id: string | null;
           read_at: string | null;
           created_at: string;
         };
         Insert: Record<string, never>;
         Update: {
           read_at?: string | null;
+        };
+        Relationships: [];
+      };
+      /** One row per member; no row means the defaults. Own row only (RLS). */
+      notification_preferences: {
+        Row: {
+          user_id: string;
+          direct_messages: boolean;
+          official_announcements: boolean;
+          community_posts: boolean;
+          comments: boolean;
+          likes: boolean;
+          system: boolean;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          direct_messages?: boolean;
+          official_announcements?: boolean;
+          community_posts?: boolean;
+          comments?: boolean;
+          likes?: boolean;
+          system?: boolean;
+        };
+        Update: {
+          direct_messages?: boolean;
+          official_announcements?: boolean;
+          community_posts?: boolean;
+          comments?: boolean;
+          likes?: boolean;
+          system?: boolean;
         };
         Relationships: [];
       };
@@ -466,6 +505,11 @@ export interface Database {
       };
       mark_all_notifications_read: {
         Args: Record<string, never>;
+        Returns: number;
+      };
+      /** Opening a chat or a post clears the caller's notifications about it. */
+      mark_related_notifications_read: {
+        Args: { p_conversation_id?: string | null; p_post_id?: string | null };
         Returns: number;
       };
     };

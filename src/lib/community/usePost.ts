@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabase';
 import { subscribeCommunityActivity } from './activity';
 import { useAuth } from '../auth-context';
 import { toPost, type FeedPost, type FeedRow } from './useFeed';
+import { announceNotificationsChanged } from '../notifications/events';
 
 /**
  * One post, by id, with everything the detail screen renders.
@@ -77,6 +78,18 @@ export function usePost(postId: string | null): UsePost {
     refresh().finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [refresh]);
+
+  // Opening a post clears the notifications about it (a comment, a like, its
+  // announcement), so the unread badge is true. Once per post per visit;
+  // ignored where the function does not exist yet.
+  const clearedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!post || !user || !postId || clearedFor.current === postId) return;
+    clearedFor.current = postId;
+    void supabase.rpc('mark_related_notifications_read', { p_post_id: postId }).then(({ data, error: clearError }) => {
+      if (!clearError && Number(data) > 0) announceNotificationsChanged(user.id);
+    });
+  }, [post, postId, user]);
 
   // Live, like the feed: a like or comment landing while the post is open
   // should move the number under it.

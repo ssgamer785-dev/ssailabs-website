@@ -3,7 +3,11 @@ import type { AppNotification } from './useNotifications';
 const KEY = 'tp-notification-destination';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** The shape the database accepts for notifications.link: an in-app path, never a URL. */
+const IN_APP_LINK = /^\/[A-Za-z0-9/_?=&%.-]{0,200}$/;
+
 export function notificationDestination(notification: AppNotification): string {
+  if (notification.link && IN_APP_LINK.test(notification.link) && !notification.link.startsWith('//')) return notification.link;
   if (notification.kind === 'chat' && notification.relatedConversationId && UUID.test(notification.relatedConversationId)) {
     const message = notification.relatedMessageId && UUID.test(notification.relatedMessageId)
       ? `&m=${encodeURIComponent(notification.relatedMessageId)}` : '';
