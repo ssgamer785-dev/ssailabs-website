@@ -39,3 +39,18 @@ describe('importing with retry', () => {
     expect(calls).toBe(1);
   });
 });
+
+describe('preloading a screen', () => {
+  it('shares one import between preload and render, and retries after a failure', async () => {
+    const { lazyWithRetry } = await import('./lazy-retry');
+    let calls = 0;
+    let fail = true;
+    const Screen = lazyWithRetry(async () => { calls++; if (fail) throw new Error('boom'); return { default: () => null }; });
+    await Screen.preload();          // a real bug: not retried, not remembered
+    expect(calls).toBe(1);
+    fail = false;
+    await Screen.preload();
+    await Screen.preload();
+    expect(calls).toBe(2);           // the successful import is reused
+  });
+});

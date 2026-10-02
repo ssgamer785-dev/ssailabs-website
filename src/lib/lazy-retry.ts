@@ -40,7 +40,28 @@ export async function importWithRetry<T>(
   throw lastError;
 }
 
-/** React.lazy that survives a brief network drop while a screen's code loads. */
-export function lazyWithRetry<T extends ComponentType<any>>(factory: () => Promise<{ default: T }>) {
-  return lazy(() => importWithRetry(factory));
+export type PreloadableComponent<T extends ComponentType<any>> = ReturnType<typeof lazy<T>> & {
+  /** Starts fetching the screen's code now; safe to call any number of times. */
+  preload: () => Promise<unknown>;
+};
+
+/**
+ * React.lazy that survives a brief network drop while a screen's code loads,
+ * and can be fetched ahead of time. The import is shared: a screen preloaded
+ * while the member is still on Home renders at once when they open it, instead
+ * of waiting for its chunk.
+ */
+export function lazyWithRetry<T extends ComponentType<any>>(factory: () => Promise<{ default: T }>): PreloadableComponent<T> {
+  let pending: Promise<{ default: T }> | null = null;
+  const load = () => {
+    if (!pending) {
+      pending = importWithRetry(factory);
+      // A failed fetch must not be remembered: the next attempt tries the network again.
+      pending.catch(() => { pending = null; });
+    }
+    return pending;
+  };
+  const component = lazy(load) as PreloadableComponent<T>;
+  component.preload = () => load().catch(() => undefined);
+  return component;
 }

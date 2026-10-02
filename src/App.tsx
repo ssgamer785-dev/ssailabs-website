@@ -17,7 +17,7 @@ import { ResetPasswordScreen } from './screens/ResetPasswordScreen';
 import { SignupScreen } from './screens/SignupScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 import { NameVisibilityScreen } from './screens/NameVisibilityScreen';
-import { AuthLoading } from './components/AuthLoading';
+import { NavigationProgress, RouteFallback, RoutePreloader } from './components/RouteRuntime';
 import { HelpSupportScreen } from './screens/HelpSupportScreen';
 import { PushNotifications } from './components/PushNotifications';
 import { AppBadgeSync } from './components/AppBadgeSync';
@@ -43,11 +43,16 @@ const PrivacyPolicyScreen = lazyWithRetry(() => import('./screens/PrivacyPolicyS
 const TermsScreen = lazyWithRetry(() => import('./screens/TermsScreen').then(module => ({ default: module.TermsScreen })));
 const HapticsScreen = lazyWithRetry(() => import('./screens/HapticsScreen').then(module => ({ default: module.HapticsScreen })));
 
-/** A fresh boundary per route, so leaving a failed screen clears the error. */
-function LocationKeyedBoundary({ children }: { children: ReactNode }) {
+/** Leaving a failed screen clears the error, without remounting the app. */
+function LocationResetBoundary({ children }: { children: ReactNode }) {
   const location = useLocation();
-  return <RouteErrorBoundary key={location.pathname}>{children}</RouteErrorBoundary>;
+  return <RouteErrorBoundary resetKey={location.pathname}>{children}</RouteErrorBoundary>;
 }
+
+/** Fetched ahead of time once a member is signed in (RoutePreloader). */
+const MEMBER_SCREENS = [HomeScreen, CommunityPage, ChatListScreen, NotificationsScreen, PostDetailScreen, AdminChatRoute,
+  CreatePostScreen, RiskCalculatorScreen, EconomicCalendarScreen, HapticsScreen, PersonalInformationScreen];
+const ADMIN_SCREENS = [AdminInboxScreen, AdminMembershipRequestsScreen, AdminActivationCodesScreen];
 
 export default function App() {
   return (
@@ -61,7 +66,9 @@ export default function App() {
           <PushNotifications />
           <AppBadgeSync />
           <PresenceRuntime />
-          <LocationKeyedBoundary><Suspense fallback={<AuthLoading />}><Routes>
+          <NavigationProgress />
+          <RoutePreloader member={MEMBER_SCREENS} admin={ADMIN_SCREENS} />
+          <LocationResetBoundary><Suspense fallback={<RouteFallback />}><Routes>
             <Route path="/" element={<SplashScreen />} />
             {/* The entry point for anyone signed out. */}
             <Route path="/welcome" element={<RedirectIfAuthed><WelcomeScreen /></RedirectIfAuthed>} />
@@ -101,7 +108,7 @@ export default function App() {
             <Route path="/haptics" element={<RequireActivated><HapticsScreen /></RequireActivated>} />
             <Route path="/admin-inbox" element={<RequireAdmin><AdminInboxScreen /></RequireAdmin>} />
             <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes></Suspense></LocationKeyedBoundary>
+          </Routes></Suspense></LocationResetBoundary>
         </BrowserRouter>
       </AppStateProvider>
       </AuthProvider>

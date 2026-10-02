@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
-import { supabase } from './supabase';
+import { rememberSession, supabase } from './supabase';
+import { clearCachedProfile, readCachedProfile, writeCachedProfile } from './profile-cache';
 import type { Database } from './database.types';
 import { unsubscribePush } from './notifications/push';
 import { profileActionFor, stableUser } from './auth-events';
@@ -29,6 +30,15 @@ interface AuthState {
    * user through the gate for a frame on each reload.
    */
   profileLoading: boolean;
+  /**
+   * true when the profile could not be read and none is held — offline at the
+   * first launch on this device, or the server unreachable. Guards show a
+   * retry state instead of guessing: an unknown profile is never treated as
+   * "not activated", which used to send activated members to the code screen.
+   */
+  profileError: boolean;
+  /** Tries the profile read again now (also retried automatically). */
+  retryProfile: () => void;
   session: Session | null;
   user: User | null;
   profile: Profile | null;
@@ -75,6 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState(false);
 
   /**
    * A cold load resolves the session twice — once from getSession(), once from
@@ -106,11 +117,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const pending = inFlightProfile.current;
     if (pending?.userId === userId) return pending.promise;
 
+    // A retry keeps the "can't reach" state on show until it succeeds, rather
+    // than flashing a loader on every attempt.
     if (!silent) setProfileLoading(true);
     const request = (async () => {
       const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-      if (!error) setProfile(data);
-      else if (!silent || profileRef.current?.id !== userId) setProfile(null);
+      if (!error && data) {
+        setProfile(data);
+        setProfileError(false);
+        writeCachedProfile(data, rememberSession());
+      } else if (!silent || profileRef.current?.id !== userId) {
+        console.warn('[auth] profile read failed:', error?.message ?? 'no row');
+        setProfile(null);
+        setProfileError(true);
+      }
     })().finally(() => {
       if (!silent) setProfileLoading(false);
       if (inFlightProfile.current?.userId === userId) inFlightProfile.current = null;
@@ -120,6 +140,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return request;
   }, []);
 
+  /**
+   * A launch with a profile saved on this device shows the app at once and
+   * re-reads the profile quietly; only a first launch here waits for it.
+   */
+  const startProfile = useCallback((userId: string) => {
+    const cached = readCachedProfile<Profile>(userId);
+    if (cached) {
+      profileRef.current = cached;
+      setProfile(cached);
+      setProfileError(false);
+      void loadProfile(userId, true);
+    } else {
+      setProfileError(false);
+      void loadProfile(userId);
+    }
+  }, [loadProfile]);
+
   useEffect(() => {
     let active = true;
 
@@ -127,7 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!active) return;
       setSession(data.session);
       setLoading(false);
-      if (data.session?.user) void loadProfile(data.session.user.id);
+      if (data.session?.user) startProfile(data.session.user.id);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
@@ -135,8 +172,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (event === 'PASSWORD_RECOVERY') markPasswordRecovery();
       setSession(newSession);
       const action = profileActionFor(event, newSession?.user?.id, profileRef.current?.id);
-      if (action === 'clear') { setProfile(null); setProfileLoading(false); }
-      else if (action === 'load') void loadProfile(newSession!.user.id);
+      if (action === 'clear') { setProfile(null); setProfileLoading(false); setProfileError(false); clearCachedProfile(); }
+      else if (action === 'load') startProfile(newSession!.user.id);
       else if (action === 'refresh-silently') void loadProfile(newSession!.user.id, true);
     });
 
@@ -144,7 +181,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       active = false;
       subscription.unsubscribe();
     };
+  }, [loadProfile, startProfile]);
+
+  const retryProfile = useCallback(() => {
+    const userId = sessionRef.current?.user?.id;
+    if (!userId) return;
+    inFlightProfile.current = null;
+    void loadProfile(userId);
   }, [loadProfile]);
+
+  // A failed read retries by itself: when the connection comes back, when the
+  // app is brought to the front, and on a slow back-off meanwhile.
+  const retryAttempt = useRef(0);
+  useEffect(() => {
+    if (!profileError) {
+      if (profile) retryAttempt.current = 0;
+      return;
+    }
+    let timer = 0;
+    const schedule = () => {
+      const delay = Math.min(30_000, 3_000 * 2 ** retryAttempt.current);
+      timer = window.setTimeout(() => { retryAttempt.current++; retryProfile(); }, delay);
+    };
+    const now = () => { if (document.visibilityState !== 'hidden') retryProfile(); };
+    schedule();
+    window.addEventListener('online', now);
+    document.addEventListener('visibilitychange', now);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('online', now);
+      document.removeEventListener('visibilitychange', now);
+    };
+  }, [profileError, profile, retryProfile]);
 
   const signIn = useCallback(async (email: string, password: string): Promise<SignResult> => {
     try {
@@ -199,6 +267,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     await unsubscribePush().catch(() => {});
+    clearCachedProfile();
     // The default is global and revokes this account's sessions on every device.
     await supabase.auth.signOut({ scope: 'local' });
   }, []);
@@ -223,6 +292,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         loading,
         profileLoading,
+        profileError,
+        retryProfile,
         session,
         user: userRef.current,
         profile: currentProfile,

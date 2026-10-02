@@ -649,3 +649,11 @@ textarea {
 :root { --nav-space: calc(73px + env(safe-area-inset-bottom, 12px)); }
 .nav-space { padding-bottom: var(--nav-space) !important; }
 .nav-space-scroll { scroll-padding-bottom: var(--nav-space); }
+
+/* Navigation waiting for the next screen's code: a slim sweeping bar (RouteRuntime). */
+.nav-progress-bar { animation: nav-progress 1.1s var(--ease-out) infinite; }
+@keyframes nav-progress {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(250%); }
+}
+@media (prefers-reduced-motion: reduce) { .nav-progress-bar { animation: none; width: 100%; opacity: .6; } }

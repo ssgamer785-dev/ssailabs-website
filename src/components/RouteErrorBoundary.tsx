@@ -13,11 +13,24 @@ const RELOAD_KEY = 'tp-chunk-reload-at';
  * it can never loop); the second by retrying when the connection returns.
  * The error itself is always logged, never hidden.
  */
-export class RouteErrorBoundary extends Component<{ children: ReactNode }, { error: unknown }> {
+export class RouteErrorBoundary extends Component<{ children: ReactNode; resetKey?: string }, { error: unknown }> {
   state: { error: unknown } = { error: null };
 
   static getDerivedStateFromError(error: unknown) {
     return { error };
+  }
+
+  /**
+   * Leaving a failed screen clears the error. This used to be done by keying
+   * the boundary on the path, which remounted the WHOLE app on every
+   * navigation and put a full-screen loader up while each screen's code was
+   * fetched; resetting in place keeps the current screen on show instead.
+   */
+  componentDidUpdate(previous: { resetKey?: string }) {
+    if (this.state.error && previous.resetKey !== this.props.resetKey) {
+      window.removeEventListener('online', this.retry);
+      this.setState({ error: null });
+    }
   }
 
   componentDidCatch(error: unknown) {
