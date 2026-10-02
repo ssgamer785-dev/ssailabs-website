@@ -17,7 +17,7 @@ import { ResetPasswordScreen } from './screens/ResetPasswordScreen';
 import { SignupScreen } from './screens/SignupScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 import { NameVisibilityScreen } from './screens/NameVisibilityScreen';
-import { NavigationProgress, RouteFallback, RoutePreloader } from './components/RouteRuntime';
+import { DataWarmup, NavigationProgress, RouteFallback, RoutePreloader } from './components/RouteRuntime';
 import { HelpSupportScreen } from './screens/HelpSupportScreen';
 import { PushNotifications } from './components/PushNotifications';
 import { AppBadgeSync } from './components/AppBadgeSync';
@@ -68,6 +68,7 @@ export default function App() {
           <PresenceRuntime />
           <NavigationProgress />
           <RoutePreloader member={MEMBER_SCREENS} admin={ADMIN_SCREENS} />
+          <DataWarmup />
           <LocationResetBoundary><Suspense fallback={<RouteFallback />}><Routes>
             <Route path="/" element={<SplashScreen />} />
             {/* The entry point for anyone signed out. */}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabase';
 import { withPostMedia, type PostMediaItem } from './multi-media';
+import { readView, warmView, writeView } from '../view-cache';
 import { useAuth } from '../auth-context';
 import type { AttachmentKind, PostChannel, UserRole } from '../database.types';
 import { deletePostMedia } from './media-api';
@@ -128,10 +129,21 @@ export interface UseFeed {
  * Counts and liked-by-me come back with the page from posts_feed(), so
  * rendering a feed is a single round trip rather than a query per post.
  */
+/** The first page of a channel, kept per account so a return visit renders at once. */
+const feedKey = (userId: string | undefined, channel: PostChannel) => `feed:${userId ?? '-'}:${channel}`;
+
+/** Fetches a channel's first page in the background (after sign-in) so the first visit is instant too. */
+export function warmFeed(userId: string, channel: PostChannel): Promise<unknown> {
+  return warmView(feedKey(userId, channel), () => fetchFeedPage(channel, null, PAGE_SIZE));
+}
+
 export function useFeed(channel: PostChannel): UseFeed {
   const { user } = useAuth();
-  const [posts, setPosts] = useState<FeedPost[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cacheKey = feedKey(user?.id, channel);
+  const cached = readView<FeedPost[]>(cacheKey);
+  const [posts, setPosts] = useState<FeedPost[]>(cached ?? []);
+  // With a copy on screen there is nothing to wait for: it refreshes behind.
+  const [loading, setLoading] = useState(!cached);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
@@ -148,19 +160,21 @@ export function useFeed(channel: PostChannel): UseFeed {
       setHasMore(rows.length === PAGE_SIZE);
       oldestRef.current = rows.length ? rows[rows.length - 1].createdAt : null;
       setPosts(rows);
+      writeView(cacheKey, rows);
       setError(null);
     } catch (e) {
       console.error('[community] feed load failed:', e);
       setError(friendlyError(e, 'Could not load the feed.'));
     }
-  }, [fetchPage]);
+  }, [fetchPage, cacheKey]);
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
+    const copy = readView<FeedPost[]>(cacheKey);
+    if (copy) { setPosts(copy); setLoading(false); } else setLoading(true);
     refresh().finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [refresh]);
+  }, [refresh, cacheKey]);
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || !oldestRef.current) return;

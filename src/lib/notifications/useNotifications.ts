@@ -4,6 +4,7 @@ import { useAuth } from '../auth-context';
 import type { NotificationKind } from '../database.types';
 import { friendlyError, withTimeout } from '../errors';
 import { mergeFirstPage } from '../community/comments-merge';
+import { readView, warmView, writeView } from '../view-cache';
 import { NOTIFICATIONS_CHANGED_EVENT, announceNotificationsChanged } from './events';
 import { categoryOfNotification, type NotificationCategory } from './categories';
 
@@ -92,6 +93,16 @@ export interface UseNotifications {
   loadMore: () => Promise<void>;
 }
 
+/** Fetches the first page in the background (after sign-in) so the first visit to the inbox is instant. */
+export function warmNotifications(userId: string): Promise<unknown> {
+  return warmView(`notes:${userId}`, async () => {
+    const { data, error } = await supabase.from('notifications').select('*').eq('user_id', userId)
+      .order('created_at', { ascending: false }).limit(PAGE_SIZE);
+    if (error) throw error;
+    return ((data ?? []) as NotificationRow[]).map(toNotification);
+  });
+}
+
 /** The signed-in user's notification feed, live via Realtime. */
 export function useNotifications(): UseNotifications {
   const { user } = useAuth();
@@ -132,16 +143,19 @@ export function useNotifications(): UseNotifications {
     }
     // Older pages the person already loaded stay loaded.
     setNotifications(prev => mergeFirstPage(prev, rows));
+    writeView(`notes:${userId}`, rows);
     setError(null);
   }, [userId]);
 
   useEffect(() => {
-    setNotifications([]);
+    // The last copy for this account (if any) shows at once; the list re-reads behind it.
+    const copy = userId ? readView<AppNotification[]>(`notes:${userId}`) : undefined;
+    setNotifications(copy ?? []);
     setError(null);
     setHasMore(false);
     oldestRef.current = null;
     if (!userId) { setLoading(false); return; }
-    setLoading(true);
+    setLoading(!copy);
     let active = true;
     refresh().finally(() => { if (active) setLoading(false); });
 

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import type { Session, User } from '@supabase/supabase-js';
 import { rememberSession, supabase } from './supabase';
 import { clearCachedProfile, readCachedProfile, writeCachedProfile } from './profile-cache';
+import { clearViews } from './view-cache';
 import type { Database } from './database.types';
 import { unsubscribePush } from './notifications/push';
 import { profileActionFor, stableUser } from './auth-events';
@@ -172,7 +173,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (event === 'PASSWORD_RECOVERY') markPasswordRecovery();
       setSession(newSession);
       const action = profileActionFor(event, newSession?.user?.id, profileRef.current?.id);
-      if (action === 'clear') { setProfile(null); setProfileLoading(false); setProfileError(false); clearCachedProfile(); }
+      if (action === 'clear') { setProfile(null); setProfileLoading(false); setProfileError(false); clearCachedProfile(); clearViews(); }
       else if (action === 'load') startProfile(newSession!.user.id);
       else if (action === 'refresh-silently') void loadProfile(newSession!.user.id, true);
     });
@@ -268,6 +269,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     await unsubscribePush().catch(() => {});
     clearCachedProfile();
+    clearViews();
     // The default is global and revokes this account's sessions on every device.
     await supabase.auth.signOut({ scope: 'local' });
   }, []);

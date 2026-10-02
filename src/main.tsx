@@ -38,6 +38,18 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', e => { traceRefreshAudio('pagehide', e.persisted ? 'to bfcache' : 'unload'); handleRefreshAudioLifecycle('pagehide', e.persisted); });
 window.addEventListener('pageshow', e => { traceRefreshAudio('pageshow', e.persisted ? 'from bfcache' : 'fresh load'); handleRefreshAudioLifecycle('pageshow', e.persisted); });
 
+// The first account request should not wait on a DNS lookup and a TLS handshake.
+try {
+  const api = new URL(import.meta.env.VITE_SUPABASE_URL as string).origin;
+  if (api !== location.origin && !document.querySelector(`link[rel=preconnect][href="${api}"]`)) {
+    const link = document.createElement('link');
+    link.rel = 'preconnect';
+    link.href = api;
+    link.crossOrigin = 'anonymous';
+    document.head.appendChild(link);
+  }
+} catch { /* no API address configured */ }
+
 // Tells the start-up watchdog in index.html that the app is running.
 (window as Window & { __tpBooted?: boolean }).__tpBooted = true;
 // The React splash normally takes over index.html's splash within a frame or

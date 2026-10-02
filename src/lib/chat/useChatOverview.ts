@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import { useAuth } from '../auth-context';
+import { readView, writeView } from '../view-cache';
 
 export interface ChatOverview {
   conversationId: string;
@@ -15,22 +16,26 @@ export interface ChatOverview {
  */
 export function useChatOverview(): { overview: ChatOverview | null; loading: boolean; refresh: () => Promise<void> } {
   const { user } = useAuth();
-  const [overview, setOverview] = useState<ChatOverview | null>(null);
-  const [loading, setLoading] = useState(true);
+  const key = `chat-overview:${user?.id ?? '-'}`;
+  const cached = readView<ChatOverview | null>(key);
+  const [overview, setOverview] = useState<ChatOverview | null>(cached ?? null);
+  const [loading, setLoading] = useState(cached === undefined);
 
   const refresh = useCallback(async () => {
-    const { data } = await supabase.rpc('my_chat_overview');
+    const { data, error } = await supabase.rpc('my_chat_overview');
+    if (error) return;
     const row = data?.[0];
-
-    setOverview(row
+    const next = row
       ? {
           conversationId: row.conversation_id,
           unreadCount: Number(row.unread_count) || 0,
           lastMessageAt: row.last_message_at,
           lastMessagePreview: row.last_message_preview,
         }
-      : null);
-  }, []);
+      : null;
+    setOverview(next);
+    writeView(key, next);
+  }, [key]);
 
   useEffect(() => {
     if (!user) return;

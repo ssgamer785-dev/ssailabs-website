@@ -112,3 +112,54 @@ export function RoutePreloader({ member, admin }: { member: Preloadable[]; admin
 
   return null;
 }
+
+/**
+ * After sign-in, while the app is idle, fetches what the member opens first:
+ * the first page of both community channels, the signed addresses of the
+ * first few pictures, and the bytes of the first two. Opening Community then
+ * shows posts and pictures at once. Never on Save-Data or a 2G link.
+ */
+export function DataWarmup() {
+  const { session, isActivated } = useAuth();
+  const userId = session && isActivated ? session.user.id : null;
+
+  useEffect(() => {
+    if (!userId) return;
+    const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+    if (connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType ?? '')) return;
+    let cancelled = false;
+    const idle = (fn: () => void) => {
+      const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number };
+      if (w.requestIdleCallback) w.requestIdleCallback(fn, { timeout: 4000 });
+      else window.setTimeout(fn, 1500);
+    };
+    idle(() => {
+      void (async () => {
+        const { warmFeed } = await import('../lib/community/useFeed');
+        const { getPostMediaUrl } = await import('../lib/community/media-api');
+        const pages: { attachment: string; storageKey: string | null; posterKey: string | null; mediaPurged: boolean }[][] = [];
+        for (const channel of ['official', 'students'] as const) {
+          if (cancelled) return;
+          try { pages.push(await warmFeed(userId, channel) as never); } catch { /* the screen will load it itself */ }
+        }
+        try {
+          const { warmNotifications } = await import('../lib/notifications/useNotifications');
+          if (!cancelled) await warmNotifications(userId);
+        } catch { /* the inbox will load it itself */ }
+        const keys = pages.flat().filter(p => !p.mediaPurged && (p.attachment === 'image' || p.attachment === 'video'))
+          .map(p => (p.attachment === 'image' ? p.storageKey : p.posterKey)).filter((k): k is string => !!k).slice(0, 4);
+        for (const [index, key] of keys.entries()) {
+          if (cancelled) return;
+          try {
+            const url = await getPostMediaUrl(key);
+            // The first two pictures are fetched and decoded too, so they paint at once.
+            if (index < 2) { const img = new Image(); img.decoding = 'async'; img.src = url; void img.decode?.().catch(() => {}); }
+          } catch { /* lazy loading will try again */ }
+        }
+      })();
+    });
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  return null;
+}
