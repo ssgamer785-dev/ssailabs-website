@@ -339,6 +339,28 @@ describe('recipients, authorization and idempotency', () => {
     expect(sent).toHaveLength(2);
   });
 
+  test('on Vercel the webhook is answered at once and the sending finishes after the response (RC5)', async () => {
+    const key = Symbol.for('@vercel/request-context');
+    const pending: Promise<unknown>[] = [];
+    (globalThis as Record<symbol, unknown>)[key] = { get: () => ({ waitUntil: (p: Promise<unknown>) => { pending.push(p); } }) };
+    try {
+      fake.tables.push_subscriptions.push(device(u(76), STUDENT), device(u(77), STUDENT));
+      fake.tables.notifications.push(note(u(86), STUDENT));
+      const answer = await dispatch(u(86));
+      expect(answer.status).toBe(202);
+      expect(answer.body).toMatchObject({ ok: true, accepted: true });
+      expect(pending).toHaveLength(1);
+      await Promise.all(pending);
+      expect(sent.map(s => s.endpoint).sort()).toEqual([`https://push.example.test/${u(76)}`, `https://push.example.test/${u(77)}`]);
+      // A repeated webhook event for the same notification sends nothing more.
+      await dispatch(u(86));
+      await Promise.all(pending);
+      expect(sent).toHaveLength(2);
+    } finally {
+      delete (globalThis as Record<symbol, unknown>)[key];
+    }
+  });
+
   test('a member with no device, or an unactivated one, is skipped without sending', async () => {
     fake.tables.notifications.push(note(u(84), STUDENT), note(u(85), NEWCOMER));
     expect((await dispatch(u(84))).body).toMatchObject({ attempted: 0, skipped: 'no-devices' });
@@ -446,5 +468,25 @@ describe('replies (RC5)', () => {
     const payload = buildPayload(reply as never, []);
     expect(JSON.stringify(payload)).not.toContain('secret reply text');
     expect(payload.body).toBe('Unknown User replied to your comment');
+  });
+});
+
+describe('dispatch latency (RC5)', () => {
+  test('created → first claim per notification, summarised as p50 / p95 / max', async () => {
+    const { dispatchLatencies, summarise } = await import('./push');
+    const notes = [
+      { id: 'a', created_at: '2026-10-02T10:00:00.000Z' },
+      { id: 'b', created_at: '2026-10-02T10:00:00.000Z' },
+      { id: 'c', created_at: '2026-10-02T10:00:00.000Z' },   // never claimed
+    ];
+    const claims = [
+      { notification_id: 'a', claimed_at: '2026-10-02T10:00:00.400Z' },
+      { notification_id: 'a', claimed_at: '2026-10-02T10:00:00.300Z' },   // the first claim counts
+      { notification_id: 'b', claimed_at: '2026-10-02T10:00:02.000Z' },
+    ];
+    const values = dispatchLatencies(notes, claims);
+    expect(values.sort((x, y) => x - y)).toEqual([300, 2000]);
+    expect(summarise(values)).toEqual({ samples: 2, p50: 300, p95: 2000, max: 2000 });
+    expect(summarise([])).toEqual({ samples: 0, p50: null, p95: null, max: null });
   });
 });

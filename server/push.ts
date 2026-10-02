@@ -135,6 +135,124 @@ export async function sendToDevice(
 const HEALTH_WINDOW_MS = 24 * 3600 * 1000;
 const HEALTH_SETTLE_MS = 60 * 1000;
 
+interface DispatchResult {
+  status: number; ok: boolean; notFound?: boolean;
+  attempted: number; sent: number; expired: number; failed: number; duplicates?: number;
+  skipped?: string; error?: string;
+  /** Milliseconds: notification row created → webhook received, and received → all devices answered. */
+  timings: { createdToReceived?: number; receivedToDone: number };
+}
+
+/**
+ * Sends one notification to every device of its recipient that belongs to
+ * this deployment. The row is read from the database here, never taken from
+ * the request. Idempotent per (notification, device) through push_deliveries.
+ */
+async function dispatchNotification(id: string, received: number): Promise<DispatchResult> {
+  const db = getAdmin()!;
+  const { data: row, error: rowError } = await db.from('notifications').select('*').eq('id', id).single();
+  if (rowError || !row) return { status: 404, notFound: true, ok: false, attempted: 0, sent: 0, expired: 0, failed: 0, timings: { receivedToDone: Date.now() - received } };
+  const notification = row as NotificationRow;
+
+  const devices = await devicesFor(db, notification.user_id, pushEnvironment());
+  const createdAt = Date.parse((row as { created_at?: string }).created_at ?? '');
+  const createdToReceived = Number.isFinite(createdAt) ? received - createdAt : undefined;
+  if (!devices.length) return { status: 200, ok: true, attempted: 0, sent: 0, expired: 0, failed: 0, skipped: 'no-devices', timings: { createdToReceived, receivedToDone: Date.now() - received } };
+
+  // Delivered only to accounts that could read this notification in the app.
+  const { data: recipient, error: recipientError } = await db.from('profiles')
+    .select('role, activated_at').eq('id', notification.user_id).maybeSingle();
+  if (recipientError) throw recipientError;
+  if (!recipient || (recipient.role !== 'admin' && !recipient.activated_at)) {
+    return { status: 200, ok: true, attempted: 0, sent: 0, expired: 0, failed: 0, skipped: 'recipient-not-activated', timings: { createdToReceived, receivedToDone: Date.now() - received } };
+  }
+
+  // One read gives both the badge number and the size of this banner's group.
+  const { data: unread, error: unreadError } = await db.from('notifications')
+    .select('kind,category,related_conversation_id,related_post_id')
+    .eq('user_id', notification.user_id).is('read_at', null)
+    .order('created_at', { ascending: false }).limit(UNREAD_SCAN_LIMIT);
+  if (unreadError) throw unreadError;
+
+  webpush.setVapidDetails(env('VAPID_SUBJECT')!, env('VAPID_PUBLIC_KEY')!, env('VAPID_PRIVATE_KEY')!);
+  const payload = JSON.stringify(buildPayload(notification, (unread ?? []) as UnreadRow[]));
+  const options = deliveryOptions(notification);
+
+  let sent = 0, expired = 0, failed = 0, duplicates = 0;
+  await Promise.all(devices.map(async device => {
+    try {
+      const { error: claimError } = await db.from('push_deliveries').insert({ notification_id: notification.id, subscription_id: device.id });
+      if (claimError?.code === '23505') { duplicates++; return; }   // already delivered to this device
+      if (claimError) throw claimError;
+      const result = await sendToDevice(device, payload, options);
+      if (result.outcome === 'sent') { sent++; return; }
+      if (result.outcome === 'expired') {
+        expired++;
+        await db.from('push_subscriptions').delete().eq('id', device.id);   // its claims go with it
+        return;
+      }
+      failed++;
+      console.error('[push] delivery failed:', result.status ?? 'no answer', result.reason ?? '', `after ${result.attempts} attempts`);
+      // Not delivered: give the claim back, so running this notification through
+      // /dispatch again sends it to this device instead of skipping it.
+      await db.from('push_deliveries').delete().eq('notification_id', notification.id).eq('subscription_id', device.id);
+    } catch (error) {
+      failed++;
+      console.error('[push] delivery failed:', (error as { code?: string }).code ?? 'unexpected error');
+    }
+  }));
+  // Every device failed: say so (the database webhook's log shows the status).
+  const timings = { createdToReceived, receivedToDone: Date.now() - received };
+  if (failed > 0 && sent === 0 && expired === 0) {
+    return { status: 502, ok: false, attempted: devices.length, sent, expired, failed, error: 'The push service did not accept the notification.', timings };
+  }
+  return { status: 200, ok: true, attempted: devices.length, sent, expired, failed, duplicates, timings };
+}
+
+/** One line per dispatch, for the deployment's logs: counts and timings, no member data. */
+function logDispatch(result: DispatchResult): void {
+  const { attempted, sent, expired, failed, duplicates, skipped, timings } = result;
+  console.info('[push] dispatch', JSON.stringify({ status: result.status, attempted, sent, expired, failed, duplicates, skipped, ...timings }));
+}
+
+/**
+ * Created → first device claimed, per notification: how long a notification
+ * waited before its push went out (the database records both times).
+ */
+export function dispatchLatencies(notes: { id: string; created_at: string }[], claims: { notification_id: string; claimed_at: string }[]): number[] {
+  const first = new Map<string, number>();
+  for (const claim of claims) {
+    const at = Date.parse(claim.claimed_at);
+    if (Number.isFinite(at) && (!first.has(claim.notification_id) || at < first.get(claim.notification_id)!)) first.set(claim.notification_id, at);
+  }
+  return notes.flatMap(note => {
+    const created = Date.parse(note.created_at);
+    const claimed = first.get(note.id);
+    return Number.isFinite(created) && claimed !== undefined ? [Math.max(0, claimed - created)] : [];
+  });
+}
+
+export function summarise(values: number[]): { samples: number; p50: number | null; p95: number | null; max: number | null } {
+  if (!values.length) return { samples: 0, p50: null, p95: null, max: null };
+  const sorted = [...values].sort((a, b) => a - b);
+  const at = (q: number) => sorted[Math.min(sorted.length - 1, Math.ceil(q * sorted.length) - 1)];
+  return { samples: sorted.length, p50: at(0.5), p95: at(0.95), max: sorted[sorted.length - 1] };
+}
+
+type KeepAlive = (promise: Promise<unknown>) => void;
+
+/**
+ * The platform's "keep running after the response" hook, if this function has
+ * one. Vercel provides it to every function through a global request context
+ * (it is what @vercel/functions' waitUntil reads); a local server and the
+ * tests have none, so they send before answering.
+ */
+export function backgroundTaskHook(): KeepAlive | null {
+  const context = (globalThis as Record<symbol, { get?: () => { waitUntil?: KeepAlive } | undefined } | undefined>)[Symbol.for('@vercel/request-context')];
+  const waitUntil = context?.get?.()?.waitUntil;
+  return typeof waitUntil === 'function' ? promise => waitUntil(promise) : null;
+}
+
 export function pushRouter(): Router {
   const router = Router();
 
@@ -258,61 +376,24 @@ export function pushRouter(): Router {
     if (req.body?.type !== 'INSERT' || req.body?.table !== 'notifications' || typeof id !== 'string' || !UUID.test(id)) {
       return res.status(400).json({ error: 'Invalid notification event.' });
     }
-    const db = getAdmin()!;
-    const { data: row, error: rowError } = await db.from('notifications').select('*').eq('id', id).single();
-    if (rowError || !row) return res.status(404).json({ error: 'Notification not found.' });
-    const notification = row as NotificationRow;
-
-    const devices = await devicesFor(db, notification.user_id, pushEnvironment());
-    if (!devices.length) return res.json({ ok: true, attempted: 0, sent: 0, expired: 0, failed: 0, skipped: 'no-devices' });
-
-    // Delivered only to accounts that could read this notification in the app.
-    const { data: recipient, error: recipientError } = await db.from('profiles')
-      .select('role, activated_at').eq('id', notification.user_id).maybeSingle();
-    if (recipientError) throw recipientError;
-    if (!recipient || (recipient.role !== 'admin' && !recipient.activated_at)) {
-      return res.json({ ok: true, attempted: 0, sent: 0, expired: 0, failed: 0, skipped: 'recipient-not-activated' });
+    const received = Date.now();
+    const keepAlive = backgroundTaskHook();
+    if (keepAlive) {
+      // Answer the database webhook at once (it gives up after its timeout,
+      // 1 s by default) and send after the response. The platform keeps the
+      // function alive until the sending finishes; per-device claims make a
+      // repeated event harmless.
+      keepAlive(dispatchNotification(id, received).then(logDispatch, error => {
+        console.error('[push] background dispatch failed:', (error as { code?: string }).code ?? (error as Error)?.message ?? 'unexpected error');
+      }));
+      return res.status(202).json({ ok: true, accepted: true });
     }
-
-    // One read gives both the badge number and the size of this banner's group.
-    const { data: unread, error: unreadError } = await db.from('notifications')
-      .select('kind,category,related_conversation_id,related_post_id')
-      .eq('user_id', notification.user_id).is('read_at', null)
-      .order('created_at', { ascending: false }).limit(UNREAD_SCAN_LIMIT);
-    if (unreadError) throw unreadError;
-
-    webpush.setVapidDetails(env('VAPID_SUBJECT')!, env('VAPID_PUBLIC_KEY')!, env('VAPID_PRIVATE_KEY')!);
-    const payload = JSON.stringify(buildPayload(notification, (unread ?? []) as UnreadRow[]));
-    const options = deliveryOptions(notification);
-
-    let sent = 0, expired = 0, failed = 0, duplicates = 0;
-    await Promise.all(devices.map(async device => {
-      try {
-        const { error: claimError } = await db.from('push_deliveries').insert({ notification_id: notification.id, subscription_id: device.id });
-        if (claimError?.code === '23505') { duplicates++; return; }   // already delivered to this device
-        if (claimError) throw claimError;
-        const result = await sendToDevice(device, payload, options);
-        if (result.outcome === 'sent') { sent++; return; }
-        if (result.outcome === 'expired') {
-          expired++;
-          await db.from('push_subscriptions').delete().eq('id', device.id);   // its claims go with it
-          return;
-        }
-        failed++;
-        console.error('[push] delivery failed:', result.status ?? 'no answer', result.reason ?? '', `after ${result.attempts} attempts`);
-        // Not delivered: give the claim back, so running this notification through
-        // /dispatch again sends it to this device instead of skipping it.
-        await db.from('push_deliveries').delete().eq('notification_id', notification.id).eq('subscription_id', device.id);
-      } catch (error) {
-        failed++;
-        console.error('[push] delivery failed:', (error as { code?: string }).code ?? 'unexpected error');
-      }
-    }));
-    // Every device failed: say so (the database webhook's log shows the status).
-    if (failed > 0 && sent === 0 && expired === 0) {
-      return res.status(502).json({ ok: false, attempted: devices.length, sent, expired, failed, error: 'The push service did not accept the notification.' });
-    }
-    res.json({ ok: true, attempted: devices.length, sent, expired, failed, duplicates });
+    // No background hook (local server, tests): send first, then answer.
+    const result = await dispatchNotification(id, received);
+    logDispatch(result);
+    if (result.notFound) return res.status(404).json({ error: 'Notification not found.' });
+    const { status, notFound: _notFound, timings: _timings, ...summary } = result;
+    return res.status(status).json(summary);
   }, 'Notifications are temporarily unavailable. Please try again.'));
 
   /**
@@ -334,9 +415,10 @@ export function pushRouter(): Router {
     const members = [...new Set((devices ?? []).map(d => d.user_id as string))];
     let recent = 0;
     let delivered = 0;
+    let latencies: number[] = [];
     if (members.length) {
       const now = Date.now();
-      const { data: notes, error: noteError } = await db.from('notifications').select('id')
+      const { data: notes, error: noteError } = await db.from('notifications').select('id,created_at')
         .in('user_id', members.slice(0, 500))
         .gt('created_at', new Date(now - HEALTH_WINDOW_MS).toISOString())
         .lt('created_at', new Date(now - HEALTH_SETTLE_MS).toISOString())
@@ -345,9 +427,10 @@ export function pushRouter(): Router {
       const ids = (notes ?? []).map(n => n.id as string);
       recent = ids.length;
       if (ids.length) {
-        const { data: claims, error: claimError } = await db.from('push_deliveries').select('notification_id').in('notification_id', ids);
+        const { data: claims, error: claimError } = await db.from('push_deliveries').select('notification_id,claimed_at').in('notification_id', ids);
         if (claimError) throw claimError;
         delivered = new Set((claims ?? []).map(c => c.notification_id)).size;
+        latencies = dispatchLatencies(notes ?? [], claims ?? []);
       }
     }
     const verdict = vapid || !webhookSecret ? 'server-not-configured'
@@ -355,7 +438,11 @@ export function pushRouter(): Router {
       : !recent ? 'no-recent-notifications'
       : delivered === 0 ? 'webhook-not-delivering'
       : 'delivering';
-    res.json({ verdict, vapidConfigured: !vapid, webhookSecretConfigured: webhookSecret, devices: (devices ?? []).length, recentNotifications: recent, recentDispatched: delivered });
+    res.json({
+      verdict, vapidConfigured: !vapid, webhookSecretConfigured: webhookSecret, devices: (devices ?? []).length,
+      recentNotifications: recent, recentDispatched: delivered,
+      dispatchLatencyMs: summarise(latencies),
+    });
   }, 'Notifications are temporarily unavailable. Please try again.'));
 
   return router;
