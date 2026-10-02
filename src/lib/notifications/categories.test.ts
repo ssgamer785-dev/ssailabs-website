@@ -4,15 +4,14 @@ import { DEFAULT_PREFERENCES, INBOX_FILTERS, NOTIFICATION_SETTINGS, categoryOfNo
 describe('notification categories', () => {
   it('start with messages, announcements, comments and system on, and the busy ones off', () => {
     expect(DEFAULT_PREFERENCES).toEqual({
-      direct_messages: true, official_announcements: true, comments: true, system: true, community_posts: false, likes: false,
+      direct_messages: true, official_announcements: true, comments: true, replies: true, system: true, community_posts: false, likes: false,
     });
   });
 
-  it('list exactly the choices the app can honour: no mentions, no reply threads', () => {
+  it('list exactly the choices the app can honour: replies (RC5), no mentions', () => {
     expect(NOTIFICATION_SETTINGS.map(setting => setting.key).sort())
-      .toEqual(['comments', 'community_posts', 'direct_messages', 'likes', 'official_announcements', 'system']);
+      .toEqual(['comments', 'community_posts', 'direct_messages', 'likes', 'official_announcements', 'replies', 'system']);
     expect(JSON.stringify(NOTIFICATION_SETTINGS).toLowerCase()).not.toContain('mention');
-    expect(JSON.stringify(NOTIFICATION_SETTINGS).toLowerCase()).not.toContain('repl');
   });
 
   it('every choice has a label, a description and a default that matches the database', () => {

@@ -11,7 +11,7 @@ export type AttachmentKind = 'none' | 'image' | 'video' | 'pdf' | 'file' | 'poll
 export type MessageKind = 'text' | 'image' | 'pdf' | 'file' | 'chart' | 'voice' | 'video';
 export type NotificationKind = 'signal' | 'chat' | 'like' | 'comment' | 'target' | 'session';
 /** What a member can switch on or off (notification_preferences), and what a row is about (notifications.category). */
-export type NotificationCategoryName = 'direct_messages' | 'official_announcements' | 'community_posts' | 'comments' | 'likes' | 'system';
+export type NotificationCategoryName = 'direct_messages' | 'official_announcements' | 'community_posts' | 'comments' | 'replies' | 'likes' | 'system';
 /** Where a media row is in its upload: 'pending' until the bytes reach R2. */
 export type UploadStatus = 'pending' | 'ready';
 
@@ -318,6 +318,8 @@ export interface Database {
           official_announcements: boolean;
           community_posts: boolean;
           comments: boolean;
+          /** RC5; absent until the RC5 migration. */
+          replies?: boolean;
           likes: boolean;
           system: boolean;
           updated_at: string;
@@ -328,6 +330,7 @@ export interface Database {
           official_announcements?: boolean;
           community_posts?: boolean;
           comments?: boolean;
+          replies?: boolean;
           likes?: boolean;
           system?: boolean;
         };
@@ -336,6 +339,7 @@ export interface Database {
           official_announcements?: boolean;
           community_posts?: boolean;
           comments?: boolean;
+          replies?: boolean;
           likes?: boolean;
           system?: boolean;
         };

@@ -276,7 +276,7 @@ export function pushRouter(): Router {
 
     // One read gives both the badge number and the size of this banner's group.
     const { data: unread, error: unreadError } = await db.from('notifications')
-      .select('kind,related_conversation_id,related_post_id')
+      .select('kind,category,related_conversation_id,related_post_id')
       .eq('user_id', notification.user_id).is('read_at', null)
       .order('created_at', { ascending: false }).limit(UNREAD_SCAN_LIMIT);
     if (unreadError) throw unreadError;

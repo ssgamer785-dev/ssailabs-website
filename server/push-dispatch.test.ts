@@ -424,3 +424,27 @@ describe('server and client agree on where a notification leads', () => {
     }
   });
 });
+
+describe('replies (RC5)', () => {
+  const post = '11111111-2222-4333-8444-555555555555';
+  const reply = { id: 'r1', user_id: 'u1', kind: 'comment', category: 'replies', title: 'Unknown User replied to your comment',
+    body: 'secret reply text', related_post_id: post, related_conversation_id: null, related_comment_id: '66666666-7777-4888-8999-000000000000' };
+  test('are their own category and their own banner group, apart from comments on the post', () => {
+    expect(categoryOf(reply)).toBe('replies');
+    expect(groupOf(reply as never).tag).toBe(`tp-replies-${post}`);
+    const unread = [
+      { kind: 'comment', category: 'replies', related_post_id: post, related_conversation_id: null },
+      { kind: 'comment', category: 'replies', related_post_id: post, related_conversation_id: null },
+      { kind: 'comment', category: 'comments', related_post_id: post, related_conversation_id: null },
+    ];
+    const payload = buildPayload(reply as never, unread);
+    expect(payload.count).toBe(2);
+    expect(payload.body).toBe('2 new replies to your comments');
+    expect(payload.url).toBe(`/post?post=${post}&comment=66666666-7777-4888-8999-000000000000`);
+  });
+  test('never put the reply text on the lock screen', () => {
+    const payload = buildPayload(reply as never, []);
+    expect(JSON.stringify(payload)).not.toContain('secret reply text');
+    expect(payload.body).toBe('Unknown User replied to your comment');
+  });
+});

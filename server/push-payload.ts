@@ -13,10 +13,10 @@ import { env } from './r2.js';
  */
 
 export type NotificationCategory =
-  | 'direct_messages' | 'official_announcements' | 'community_posts' | 'comments' | 'likes' | 'system';
+  | 'direct_messages' | 'official_announcements' | 'community_posts' | 'comments' | 'replies' | 'likes' | 'system';
 
 const CATEGORIES: readonly NotificationCategory[] = [
-  'direct_messages', 'official_announcements', 'community_posts', 'comments', 'likes', 'system',
+  'direct_messages', 'official_announcements', 'community_posts', 'comments', 'replies', 'likes', 'system',
 ];
 
 export interface NotificationRow {
@@ -36,6 +36,8 @@ export interface NotificationRow {
 /** The unread rows of the recipient (kind and target only), newest first, at most UNREAD_SCAN_LIMIT. */
 export interface UnreadRow {
   kind: string;
+  /** Present from RC5 (selected with the row); tells replies apart from comments. */
+  category?: string | null;
   related_conversation_id: string | null;
   related_post_id: string | null;
 }
@@ -83,6 +85,9 @@ export function groupOf(row: NotificationRow): { tag: string; grouped: boolean }
   if (row.kind === 'chat' && row.related_conversation_id && UUID.test(row.related_conversation_id)) {
     return { tag: `tp-chat-${row.related_conversation_id}`, grouped: true };
   }
+  if (row.kind === 'comment' && row.category === 'replies' && row.related_post_id && UUID.test(row.related_post_id)) {
+    return { tag: `tp-replies-${row.related_post_id}`, grouped: true };
+  }
   if ((row.kind === 'comment' || row.kind === 'like') && row.related_post_id && UUID.test(row.related_post_id)) {
     return { tag: `tp-${row.kind}s-${row.related_post_id}`, grouped: true };
   }
@@ -92,7 +97,11 @@ export function groupOf(row: NotificationRow): { tag: string; grouped: boolean }
 /** How many of the recipient's unread notifications belong to this row's group, this one included. */
 export function unreadInGroup(row: NotificationRow, unread: readonly UnreadRow[]): number {
   if (row.kind === 'chat') return unread.filter(u => u.kind === 'chat' && u.related_conversation_id === row.related_conversation_id).length;
-  if (row.kind === 'comment' || row.kind === 'like') return unread.filter(u => u.kind === row.kind && u.related_post_id === row.related_post_id).length;
+  if (row.kind === 'comment') {
+    const replies = row.category === 'replies';
+    return unread.filter(u => u.kind === 'comment' && u.related_post_id === row.related_post_id && (u.category === 'replies') === replies).length;
+  }
+  if (row.kind === 'like') return unread.filter(u => u.kind === 'like' && u.related_post_id === row.related_post_id).length;
   return 1;
 }
 
@@ -109,6 +118,7 @@ export function bannerText(row: NotificationRow, count: number): string {
       const sender = /^(.{1,60}?) sent you /.exec(title)?.[1];
       return sender ? `${sender} sent you ${count} new messages` : `You have ${count} new messages`;
     }
+    if (row.kind === 'comment' && row.category === 'replies') return `${count} new replies to your comments`;
     if (row.kind === 'comment') return `${count} new comments on your post`;
     if (row.kind === 'like') return `${count} people liked your post`;
   }

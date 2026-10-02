@@ -17,6 +17,7 @@ const ICONS: Record<NotificationCategory, [string, string, string]> = {
   official_announcements: ['var(--accent-soft)', 'var(--accent-ink)', 'M4 10.2v3.6h3.1L13 18.2V5.8L7.1 10.2H4zM16.4 9.4a4.1 4.1 0 0 1 0 5.2M18.7 7a7.4 7.4 0 0 1 0 10'],
   community_posts: ['var(--success-soft)', 'var(--success-ink)', 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3.4 19.2c0-3 2.5-5.2 5.6-5.2s5.6 2.2 5.6 5.2M16.2 5.3a3 3 0 0 1 0 5.6M17 14.2c2.2.5 3.8 2.3 3.8 5'],
   comments: ['var(--violet-soft)', 'var(--violet-ink)', 'M20.4 11.8c0 3.8-3.8 6.9-8.4 6.9-1 0-2-.1-2.9-.4L4.4 20.2l1.5-3.5c-1.6-1.3-2.5-3-2.5-4.9 0-3.8 3.8-6.9 8.4-6.9s8.6 3.1 8.6 6.9z'],
+  replies: ['var(--violet-soft)', 'var(--violet-ink)', 'M9.5 7 4.5 12l5 5M4.8 12h9.4c3.2 0 5.3 2 5.3 5.2'],
   likes: ['var(--danger-soft)', 'var(--danger-ink)', 'M12 20.4S4.3 15.2 4.3 10a4.3 4.3 0 0 1 7.7-2.6A4.3 4.3 0 0 1 19.7 10c0 5.2-7.7 10.4-7.7 10.4z'],
   system: ['var(--warning-soft-3)', 'var(--warning-ink)', 'M12 3.5l7 2.6v5.4c0 4.4-3 7.7-7 9-4-1.3-7-4.6-7-9V6.1zM9 12l2.2 2.2L15.2 10'],
 };
@@ -26,6 +27,7 @@ const SOURCE: Record<NotificationCategory, string> = {
   official_announcements: 'Official announcement',
   community_posts: 'Students Community',
   comments: 'Your post',
+  replies: 'Your comment',
   likes: 'Your post',
   system: 'System',
 };

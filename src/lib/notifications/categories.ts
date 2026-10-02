@@ -5,8 +5,8 @@ export type NotificationCategory = NotificationCategoryName;
 /**
  * The choices a member has, in the order the settings list shows them, with
  * their defaults (mirrors public.notification_wanted in the database).
- * Mentions and replies to comments are not here because the app has neither:
- * comments are flat and there is no @-mention.
+ * Replies to a member's comment are their own choice (RC5); there is no
+ * @-mention in the app.
  */
 export const NOTIFICATION_SETTINGS: readonly {
   key: NotificationCategory; label: string; description: string; defaultOn: boolean;
@@ -14,6 +14,7 @@ export const NOTIFICATION_SETTINGS: readonly {
   { key: 'direct_messages', label: 'Direct messages', description: 'A message, photo, voice message, video, PDF or file in your chat.', defaultOn: true },
   { key: 'official_announcements', label: 'Official announcements', description: 'New official posts, PDFs, images and videos from The Traders Planet.', defaultOn: true },
   { key: 'comments', label: 'Comments on my posts', description: 'When someone comments on a post you made.', defaultOn: true },
+  { key: 'replies', label: 'Replies to my comments', description: 'When someone replies to a comment you wrote.', defaultOn: true },
   { key: 'system', label: 'System and account', description: 'Moderation of your content, and for admins, new membership requests.', defaultOn: true },
   { key: 'community_posts', label: 'Students Community posts', description: 'Every new post in the Students Community. Can be frequent.', defaultOn: false },
   { key: 'likes', label: 'Likes', description: 'When someone likes a post you made. Can be frequent.', defaultOn: false },
@@ -42,7 +43,7 @@ export const INBOX_FILTERS = [
   { key: 'all', label: 'All', categories: null },
   { key: 'messages', label: 'Messages', categories: ['direct_messages'] },
   { key: 'announcements', label: 'Announcements', categories: ['official_announcements'] },
-  { key: 'community', label: 'Community', categories: ['community_posts', 'comments', 'likes'] },
+  { key: 'community', label: 'Community', categories: ['community_posts', 'comments', 'replies', 'likes'] },
   { key: 'system', label: 'System', categories: ['system'] },
 ] as const;
 

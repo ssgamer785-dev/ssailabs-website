@@ -74,7 +74,11 @@ export function useNotificationPreferences() {
     setSaving(null);
     if (saveError) {
       setPreferences(current => ({ ...current, [key]: previous }));
-      setError('That setting could not be saved. Please try again.');
+      // A setting the database does not know yet (its update has not reached
+      // it): say so rather than suggest the connection is at fault.
+      setError(saveError.code === 'PGRST204' || /column/i.test(saveError.message ?? '')
+        ? 'This setting will be available after the next update.'
+        : 'That setting could not be saved. Please try again.');
     }
   }, [preferences, state, userId]);
 

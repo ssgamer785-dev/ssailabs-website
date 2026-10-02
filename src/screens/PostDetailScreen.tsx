@@ -5,7 +5,8 @@ import { Hoverable } from '../lib/Hoverable';
 import { useAuth } from '../lib/auth-context';
 import { useAppState } from '../lib/app-state';
 import { usePost } from '../lib/community/usePost';
-import { useComments } from '../lib/community/useComments';
+import { useComments, type PostComment, type ReplyTarget } from '../lib/community/useComments';
+import { threadComments } from '../lib/community/comment-threads';
 import { PhoneShell } from '../components/PhoneShell';
 import { PostMedia, PdfRow } from '../components/community/PostMedia';
 import { formatDateTime } from '../lib/format-date-time';
@@ -79,6 +80,8 @@ export function PostDetailScreen() {
   }, [targetCommentId, loading, comments.loading, comments.comments, comments.hasMore, comments.loadingMore, comments.loadMore]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
+  const composerRef = useRef<HTMLInputElement>(null);
   const [confirmCommentId, setConfirmCommentId] = useState<string | null>(null);
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
 
@@ -89,9 +92,69 @@ export function PostDetailScreen() {
     setDraft('');
     // Anonymity follows the same switch the feed and composer use, so a comment
     // cannot reveal a name the person has chosen to keep hidden.
-    await comments.addComment(text, !reveal);
+    const target = replyTo;
+    setReplyTo(null);
+    await comments.addComment(text, !reveal, target);
     setSending(false);
-  }, [draft, sending, comments, reveal]);
+  }, [draft, sending, comments, reveal, replyTo]);
+
+  const startReply = useCallback((c: PostComment) => {
+    setReplyTo({ id: c.id, rootId: c.parentId ?? c.id, name: c.authorName });
+    window.setTimeout(() => composerRef.current?.focus(), 0);
+  }, []);
+
+  const renderComment = (c: PostComment, isReply: boolean) => (
+    <div
+      id={`comment-${c.id}`}
+      onContextMenu={e => { if (c.isMine || isAdmin) { e.preventDefault(); setConfirmCommentId(c.id); } }}
+      style={{
+        ...css(`flex:none;margin-top:${isReply ? 6 : 8}px;background:var(--surface-inset);border-radius:12px;padding:${isReply ? '9px 11px' : '11px 12px'};display:flex;align-items:flex-start;gap:10px`),
+        opacity: c.pending ? 0.6 : 1,
+        outline: c.id === targetCommentId ? '2px solid var(--accent)' : undefined,
+      }}
+    >
+      <Avatar name={c.authorName} avatarKey={null} avatarUserId={c.isAnonymous && !isAdmin ? null : c.authorId} size={isReply ? 26 : 30} fontSize={isReply ? 11 : 12} />
+      <div style={css('flex:1;display:flex;flex-direction:column;gap:3px;min-width:0')}>
+        <div style={css('font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
+          {c.authorName}
+          {isAdmin && c.isAnonymous && <span style={css('font-weight:500;color:var(--text-faint)')}> · posted anonymously</span>}
+        </div>
+        {isReply && c.replyToName && (
+          <div style={css('font-size:11px;color:var(--text-faint);line-height:1.35;overflow-wrap:anywhere')}>
+            Replying to <span style={css('font-weight:600;color:var(--text-muted)')}>{c.replyToName}</span>
+          </div>
+        )}
+        <div style={css('font-size:12.5px;color:var(--text-muted);line-height:1.5;white-space:pre-wrap;word-break:break-word')}>
+          {c.body}
+        </div>
+        {c.failed && (
+          <div style={css('font-size:11px;color:var(--danger-ink)')}>Couldn&rsquo;t send.</div>
+        )}
+        {comments.canReply && !c.pending && !c.failed && (
+          <button type="button" onClick={() => startReply(c)} aria-label={`Reply to ${c.authorName}`}
+            style={css('align-self:flex-start;margin-top:2px;padding:2px 0;font-size:11.5px;font-weight:700;color:var(--accent-ink);background:none;cursor:pointer')}>
+            Reply
+          </button>
+        )}
+      </div>
+      <div style={css('font-size:10.5px;color:var(--text-faint);flex:none;white-space:nowrap')}>
+        {c.pending ? 'sending…' : <time dateTime={c.createdAt}>{formatDateTime(c.createdAt)}</time>}
+      </div>
+      {(c.isMine || isAdmin) && !c.pending && <div style={css('display:flex;flex-direction:column;align-items:flex-end;gap:5px')}>
+        <button type="button" aria-label="Comment options" onClick={() => setConfirmCommentId(c.id)} style={css('color:var(--text-muted);font-size:18px;line-height:1')}>⋯</button>
+        {confirmCommentId === c.id && <div style={css('display:flex;gap:8px;font-size:11px')}>
+          <button type="button" disabled={deletingCommentId === c.id} onClick={() => {
+            setDeletingCommentId(c.id);
+            void comments.deleteComment(c.id)
+              .then(() => setConfirmCommentId(null))
+              .catch(() => {})
+              .finally(() => setDeletingCommentId(null));
+          }} style={css('color:var(--danger-ink);font-weight:700')}>{deletingCommentId === c.id ? 'Deleting…' : 'Delete'}</button>
+          <button type="button" onClick={() => setConfirmCommentId(null)} style={css('color:var(--text-muted)')}>Cancel</button>
+        </div>}
+      </div>}
+    </div>
+  );
 
   if (loading) {
     return (
@@ -330,45 +393,14 @@ export function PostDetailScreen() {
           <div style={css('flex:none;margin-top:10px;font-size:12.5px;color:var(--text-faint)')}>
             No comments yet — be the first to reply.
           </div>
-        ) : comments.comments.map(c => (
-          <div
-            key={c.id}
-            id={`comment-${c.id}`}
-            onContextMenu={e => { if (c.isMine || isAdmin) { e.preventDefault(); setConfirmCommentId(c.id); } }}
-            style={{
-              ...css('flex:none;margin-top:8px;background:var(--surface-inset);border-radius:12px;padding:11px 12px;display:flex;align-items:flex-start;gap:10px'),
-              opacity: c.pending ? 0.6 : 1,
-              outline: c.id === targetCommentId ? '2px solid var(--accent)' : undefined,
-            }}
-          >
-            <Avatar name={c.authorName} avatarKey={null} avatarUserId={c.isAnonymous && !isAdmin ? null : c.authorId} size={30} fontSize={12} />
-            <div style={css('flex:1;display:flex;flex-direction:column;gap:3px;min-width:0')}>
-              <div style={css('font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
-                {c.authorName}
+        ) : threadComments(comments.comments).map(({ root, replies }) => (
+          <div key={root.id} style={css('flex:none;display:flex;flex-direction:column')}>
+            {renderComment(root, false)}
+            {replies.length > 0 && (
+              <div role="list" aria-label={`Replies to ${root.authorName}`} style={css('margin:6px 0 0 18px;padding-left:12px;border-left:2px solid var(--surface-divider);display:flex;flex-direction:column')}>
+                {replies.map(r => <div role="listitem" key={r.id}>{renderComment(r, true)}</div>)}
               </div>
-              <div style={css('font-size:12.5px;color:var(--text-muted);line-height:1.5;white-space:pre-wrap;word-break:break-word')}>
-                {c.body}
-              </div>
-              {c.failed && (
-                <div style={css('font-size:11px;color:var(--danger-ink)')}>Couldn&rsquo;t send.</div>
-              )}
-            </div>
-            <div style={css('font-size:10.5px;color:var(--text-faint);flex:none;white-space:nowrap')}>
-              {c.pending ? 'sending…' : <time dateTime={c.createdAt}>{formatDateTime(c.createdAt)}</time>}
-            </div>
-            {(c.isMine || isAdmin) && !c.pending && <div style={css('display:flex;flex-direction:column;align-items:flex-end;gap:5px')}>
-              <button type="button" aria-label="Comment options" onClick={() => setConfirmCommentId(c.id)} style={css('color:var(--text-muted);font-size:18px;line-height:1')}>⋯</button>
-              {confirmCommentId === c.id && <div style={css('display:flex;gap:8px;font-size:11px')}>
-                <button type="button" disabled={deletingCommentId === c.id} onClick={() => {
-                  setDeletingCommentId(c.id);
-                  void comments.deleteComment(c.id)
-                    .then(() => setConfirmCommentId(null))
-                    .catch(() => {})
-                    .finally(() => setDeletingCommentId(null));
-                }} style={css('color:var(--danger-ink);font-weight:700')}>{deletingCommentId === c.id ? 'Deleting…' : 'Delete'}</button>
-                <button type="button" onClick={() => setConfirmCommentId(null)} style={css('color:var(--text-muted)')}>Cancel</button>
-              </div>}
-            </div>}
+            )}
           </div>
         ))}
 
@@ -389,10 +421,20 @@ export function PostDetailScreen() {
       </div>
 
       {/* ---- composer ---- */}
+      {replyTo && (
+        <div role="status" style={css('flex:none;margin:0 18px;padding:7px 12px;border-radius:10px;background:var(--surface-secondary);display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)')}>
+          <span style={css('flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>
+            Replying to <strong style={css('color:var(--text-primary)')}>{replyTo.name}</strong>
+          </span>
+          <button type="button" aria-label="Cancel reply" onClick={() => setReplyTo(null)} style={css('flex:none;font-size:16px;line-height:1;color:var(--text-muted);background:none;cursor:pointer;padding:2px 4px')}>✕</button>
+        </div>
+      )}
       <div style={{ ...css('flex:none;padding:10px 18px;display:flex;align-items:center;gap:9px'), paddingBottom: 'calc(10px + var(--nav-space))' }}>
         <div style={css('flex:1;min-width:0;height:42px;border-radius:999px;background:var(--surface-secondary);display:flex;align-items:center;padding:0 16px')}>
           <input
-            placeholder={reveal ? (userName ? `Comment as ${userName}…` : 'Write a comment…') : 'Comment as Unknown User…'}
+            ref={composerRef}
+            onKeyUp={e => { if (e.key === 'Escape') setReplyTo(null); }}
+            placeholder={replyTo ? (reveal ? 'Write your reply…' : 'Reply as Unknown User…') : reveal ? (userName ? `Comment as ${userName}…` : 'Write a comment…') : 'Comment as Unknown User…'}
             aria-label="Write a comment"
             value={draft}
             onChange={e => setDraft(e.target.value)}
