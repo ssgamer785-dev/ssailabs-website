@@ -104,8 +104,10 @@ select pg_temp.must_fail(format($$insert into public.post_media (post_id, positi
   'Attachments can only be added by the person who uploaded them', 'another member cannot add items to someone else''s post');
 select pg_temp.check((select count(*) = 0 from public.post_media where post_id = (select post_id from t82)),
   'another member cannot read an anonymous post''s item rows directly');
-select pg_temp.check((select count(*) = 2 from public.post_media_for(array[(select post_id from t82)])),
-  'another member gets the anonymous post''s items through post_media_for');
+select pg_temp.check((select count(*) filter (where position >= 1) = 2
+                             and count(*) filter (where position = 0 and storage_key is null and width = 1080) = 1
+                        from public.post_media_for(array[(select post_id from t82)])),
+  'another member gets the anonymous post''s items through post_media_for (plus the first item''s size, no key)');
 select pg_temp.check((select bool_and(file_name is null or file_name like 'Attachment%') from public.post_media_for(array[(select post_id from t82)])),
   'another member never gets the original file name on an anonymous post');
 select pg_temp.check(not exists (select 1 from public.post_media_for(array[(select post_id from t82)]) r
