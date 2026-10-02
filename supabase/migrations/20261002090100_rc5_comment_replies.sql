@@ -149,8 +149,13 @@ begin
   -- no-op when it is the same person.
   if new.reply_to_comment_id is not null then
     select author_id into v_target_author from public.comments where id = new.reply_to_comment_id;
+    -- private.feature_flags 'rc5_reply_notifications' = false holds these back
+    -- while a server that prints notification bodies on lock screens is still
+    -- live (the release package sets it, and releases it after promotion).
+    -- No flag row means on.
     if v_target_author is not null
        and v_target_author is distinct from new.author_id
+       and coalesce((select f.enabled from private.feature_flags f where f.name = 'rc5_reply_notifications'), true)
        and public.notification_wanted(v_target_author, 'replies') then
       insert into public.notifications
         (user_id, kind, category, title, body, related_post_id, related_comment_id)

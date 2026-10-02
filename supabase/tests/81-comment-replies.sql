@@ -132,3 +132,24 @@ select set_config('app.current_user_id', '81b00000-0000-4000-8000-000000000002',
 select pg_temp.check((select count(*) = 3 from public.post_comments('81c00000-0000-4000-8000-000000000001')),
   'the RC3/RC4 comment reader still returns every comment');
 reset role;
+
+-- The interim guard: with the flag off, a reply makes no "replied" notification (the post author's comment notice is unchanged).
+insert into private.feature_flags (name, enabled) values ('rc5_reply_notifications', false)
+on conflict (name) do update set enabled = false;
+delete from public.notification_preferences where user_id = '81b00000-0000-4000-8000-000000000003';
+set role authenticated;
+select set_config('app.current_user_id', '81b00000-0000-4000-8000-000000000001', false);
+insert into public.comments (post_id, author_id, body, parent_comment_id)
+values ('81c00000-0000-4000-8000-000000000001', '81b00000-0000-4000-8000-000000000001', 'guarded reply', '81e00000-0000-4000-8000-000000000002');
+reset role;
+select pg_temp.check(pg_temp.notes('81b00000-0000-4000-8000-000000000003', 'replies') = 1,
+  'interim guard: while the flag is off, no new "replied" notification is made');
+update private.feature_flags set enabled = true where name = 'rc5_reply_notifications';
+set role authenticated;
+select set_config('app.current_user_id', '81b00000-0000-4000-8000-000000000001', false);
+insert into public.comments (post_id, author_id, body, parent_comment_id)
+values ('81c00000-0000-4000-8000-000000000001', '81b00000-0000-4000-8000-000000000001', 'released reply', '81e00000-0000-4000-8000-000000000002');
+reset role;
+select pg_temp.check(pg_temp.notes('81b00000-0000-4000-8000-000000000003', 'replies') = 2,
+  'interim guard released: replies notify again');
+delete from private.feature_flags where name = 'rc5_reply_notifications';
