@@ -37,6 +37,8 @@ const KEY_COLUMNS: readonly [table: string, column: string][] = [
   ['posts', 'storage_key'], ['posts', 'poster_key'],
   ['profiles', 'avatar_key'],
   ['media_upload_grants', 'storage_key'], ['media_upload_grants', 'poster_key'],
+  // Items 2..n of a post (RC5).
+  ['post_media', 'storage_key'], ['post_media', 'poster_key'],
 ];
 
 /** Older link columns. An object whose key appears anywhere inside one is kept. */
@@ -45,7 +47,7 @@ const LINK_COLUMNS: readonly [table: string, column: string][] = [
 ];
 
 /** The grants table arrives with the R1 migration; before it, there are no grants to honour. */
-const OPTIONAL_TABLES = new Set(['media_upload_grants']);
+const OPTIONAL_TABLES = new Set(['media_upload_grants', 'post_media']);
 const MISSING_TABLE_CODES = new Set(['PGRST205', '42P01']);
 
 /**

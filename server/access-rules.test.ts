@@ -46,6 +46,7 @@ let server: Server;
 let purgeVictims: Row[] = [];
 let staleUploads: Row[] = [];
 let expiredPosts: Row[] = [];
+let expiredItems: Row[] = [];
 
 const envKeys = ['SUPABASE_URL', 'VITE_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID',
   'R2_SECRET_ACCESS_KEY', 'R2_BUCKET', 'VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT', 'PUSH_WEBHOOK_SECRET'] as const;
@@ -114,6 +115,7 @@ beforeEach(async () => {
   purgeVictims = [];
   staleUploads = [];
   expiredPosts = [];
+  expiredItems = [];
   for (const table of Object.keys(failWrites)) delete failWrites[table];
   fake = await startFakeSupabase({
     tokens: TOKENS,
@@ -134,6 +136,12 @@ beforeEach(async () => {
         const before = tables.messages.length;
         tables.messages = tables.messages.filter(row => !(p_message_ids as string[]).includes(row.id as string));
         return before - tables.messages.length;
+      },
+      select_expired_post_media_items: () => expiredItems,
+      mark_post_media_items_purged: ({ p_item_ids }, tables) => {
+        for (const row of tables.post_media ?? []) {
+          if ((p_item_ids as string[]).includes(row.id as string)) Object.assign(row, { media_purged: true });
+        }
       },
       mark_post_media_purged: ({ p_post_ids }, tables) => {
         for (const row of tables.posts) {
@@ -676,5 +684,58 @@ describe('anonymous authors: download names', () => {
     Object.assign(fake.tables.posts[1], { attachment: 'file', mime_type: 'text/csv', file_name: 'Priya Sharma P&L.CSV', is_anonymous: false });
     const other = await call(`/api/posts/media-url?key=${encodeURIComponent(STUDENT_POST_KEY)}`, 'other-token', undefined, 'GET');
     expect(disposition(other.body.url)).toBe('attachment; filename="Priya Sharma P_L.CSV"');
+  });
+});
+
+describe('several attachments per post (RC5 post_media)', () => {
+  const grants = () => (fake.tables.media_upload_grants ??= []) as Row[];
+  const items = () => (fake.tables.post_media ??= []) as Row[];
+  const neutral = (n: number, ext = 'bin') => `posts/${u(700 + n)}/17900000000${String(n).padStart(2, '0')}-${u(750 + n)}.${ext}`;
+  const grant = (key: string, owner: string, over: Row = {}) => grants().push({ storage_key: key, owner_id: owner, scope: 'post', conversation_id: null,
+    kind: 'image', mime_type: 'image/png', size_bytes: 1_000, poster_key: null, poster_size_bytes: null, used_at: '2026-10-02T00:00:00Z', created_at: '2026-10-02T00:00:00Z', ...over });
+  const item = (id: number, post: string, key: string, over: Row = {}) => items().push({ id: u(id), post_id: post, position: 1, kind: 'image',
+    storage_key: key, poster_key: null, mime_type: 'image/png', file_name: 'Rahul_chart.png', media_purged: false, ...over });
+
+  test('deleting a post\'s media removes every item\'s object and marks them purged', async () => {
+    fake.tables.posts.push({ id: u(720), author_id: STUDENT, storage_key: neutral(1), poster_key: null, media_purged: false });
+    grant(neutral(1), STUDENT); grant(neutral(2), STUDENT); grant(neutral(3), STUDENT, { poster_key: neutral(4, 'jpg') });
+    item(721, u(720), neutral(2));
+    item(722, u(720), neutral(3), { kind: 'video', poster_key: neutral(4, 'jpg'), position: 2 });
+    expect((await call('/api/posts/delete-media', 'student-token', { postId: u(720) })).status).toBe(200);
+    expect(deletedKeys.flat().sort()).toEqual([neutral(1), neutral(2), neutral(3), neutral(4, 'jpg')].sort());
+    expect(items().every(i => i.media_purged)).toBe(true);
+  });
+
+  test('an item granted to someone else blocks the whole removal, and nothing is deleted', async () => {
+    fake.tables.posts.push({ id: u(730), author_id: STUDENT, storage_key: neutral(5), poster_key: null, media_purged: false });
+    grant(neutral(5), STUDENT); grant(neutral(6), ADMIN);
+    item(731, u(730), neutral(6));
+    expect((await call('/api/posts/delete-media', 'student-token', { postId: u(730) })).status).toBe(409);
+    expect(deletedKeys).toEqual([]);
+  });
+
+  test('another member gets a signed URL for an item; on an anonymous post the download name is neutral', async () => {
+    fake.tables.posts.push({ id: u(740), author_id: STUDENT, storage_key: neutral(7), poster_key: null, media_purged: false, is_anonymous: true,
+      attachment: 'image', mime_type: 'image/png', file_name: null });
+    item(741, u(740), neutral(8, 'pdf'), { kind: 'file', mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', file_name: 'Rahul_notes.docx' });
+    const res = await call(`/api/posts/media-url?key=${encodeURIComponent(neutral(8, 'pdf'))}`, 'other-token', undefined, 'GET');
+    expect(res.status).toBe(200);
+    expect(signedKey(res.body.url)).toBe(neutral(8, 'pdf'));
+    const disposition = new URL(String(res.body.url)).searchParams.get('response-content-disposition') ?? '';
+    expect(disposition).not.toContain('Rahul');
+    const missing = await call(`/api/posts/media-url?key=${encodeURIComponent(neutral(9))}`, 'other-token', undefined, 'GET');
+    expect(missing.status).toBe(404);
+  });
+
+  test('retention removes expired posts\' items, owned objects only', async () => {
+    fake.tables.posts.push({ id: u(750), author_id: STUDENT, storage_key: null, poster_key: null, media_purged: false });
+    grant(neutral(10), STUDENT);
+    expiredItems = [
+      { id: u(751), post_id: u(750), storage_key: neutral(10), poster_key: null },
+      { id: u(752), post_id: u(750), storage_key: neutral(11), poster_key: null },   // no grant: left in place
+    ];
+    const res = await call('/api/posts/run-retention', 'admin-token', {});
+    expect(res.status).toBe(200);
+    expect(deletedKeys.flat()).toEqual([neutral(10)]);
   });
 });

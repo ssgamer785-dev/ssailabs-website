@@ -228,6 +228,47 @@ function signPut(key: string, mimeType: string, sizeBytes: number): Promise<stri
   return signedPutUrl(key, mimeType, sizeBytes, PUT_URL_TTL_SECONDS);
 }
 
+/** PostgREST / Postgres answers for a table or function the database does not have yet (RC5 migration not applied). */
+function isMissingDatabaseObject(error: { code?: string; message?: string }): boolean {
+  return ['PGRST202', 'PGRST205', '42P01', '42883'].includes(error.code ?? '') || /does not exist|Could not find/i.test(error.message ?? '');
+}
+
+interface PostMediaItem {
+  id: string; post_id: string; kind: string; storage_key: string | null; poster_key: string | null;
+  mime_type: string | null; file_name: string | null;
+}
+
+/** Items 2..n of these posts that still hold objects; none before the RC5 migration. */
+async function postMediaItems(db: SupabaseClient, postIds: string[]): Promise<PostMediaItem[]> {
+  const { data, error } = await db.from('post_media')
+    .select('id, post_id, kind, storage_key, poster_key, mime_type, file_name')
+    .in('post_id', postIds).eq('media_purged', false);
+  if (error) {
+    if (isMissingDatabaseObject(error)) return [];
+    throw error;
+  }
+  return (data ?? []) as PostMediaItem[];
+}
+
+/** The post_media item (and its post's author and anonymity) that holds this key as object or poster. */
+async function postMediaItem(db: SupabaseClient, key: string): Promise<(PostMediaItem & { isPoster: boolean; author_id: string; is_anonymous: boolean }) | null> {
+  for (const column of ['storage_key', 'poster_key'] as const) {
+    const { data, error } = await db.from('post_media')
+      .select('id, post_id, kind, storage_key, poster_key, mime_type, file_name')
+      .eq(column, key).eq('media_purged', false).maybeSingle();
+    if (error) {
+      if (isMissingDatabaseObject(error)) return null;
+      throw error;
+    }
+    if (!data) continue;
+    const { data: post, error: postError } = await db.from('posts').select('author_id, is_anonymous').eq('id', data.post_id).maybeSingle();
+    if (postError) throw postError;
+    if (!post) return null;
+    return { ...(data as PostMediaItem), isPoster: column === 'poster_key', author_id: post.author_id as string, is_anonymous: !!post.is_anonymous };
+  }
+  return null;
+}
+
 export function postMediaRouter(): Router {
   const router = Router();
 
@@ -338,9 +379,20 @@ export function postMediaRouter(): Router {
     if (objectError) throw objectError;
     const { data: poster, error: posterError } = object ? { data: object, error: null } : await base().eq('poster_key', storageKey).maybeSingle();
     if (posterError) throw posterError;
-    if (!object && !poster) return res.status(404).json({ error: 'Attachment unavailable.' });
+    // Items 2..n of a post (RC5) live in post_media, under the same rules.
+    const item = object || poster ? null : await postMediaItem(db, storageKey);
+    if (!object && !poster && !item) return res.status(404).json({ error: 'Attachment unavailable.' });
 
-    const served = object
+    const served = item
+      ? (item.isPoster
+          ? servedAs({ mimeType: POSTER_MIME, allowed: true, download: false })
+          : servedAs({
+              mimeType: item.mime_type,
+              allowed: isAllowedAttachment(item.kind, item.mime_type),
+              download: item.kind === 'file',
+              fileName: downloadName({ file_name: item.file_name, author_id: item.author_id, is_anonymous: item.is_anonymous }, caller),
+            }))
+      : object
       ? servedAs({
           mimeType: object.mime_type,
           allowed: isAllowedAttachment(object.attachment, object.mime_type),
@@ -376,19 +428,27 @@ export function postMediaRouter(): Router {
     }
 
     // Keys come from a client-written row: only the author's own objects are deleted here.
+    const items = await postMediaItems(db, [post.id as string]);
+    const itemNames = items.flatMap(i => [i.storage_key, i.poster_key]).filter((k): k is string => !!k);
     const names = [post.storage_key, post.poster_key].filter((k): k is string => !!k);
-    const owned = await ownedPostKeys(db, post.author_id, names);
-    if (names.some(key => !owned.has(key))) {
+    const owned = await ownedPostKeys(db, post.author_id, [...names, ...itemNames]);
+    if ([...names, ...itemNames].some(key => !owned.has(key))) {
       return res.status(409).json({ error: 'This attachment cannot be removed.' });
     }
-    const keys = names.map(Key => ({ Key }));
+    const keys = [...names, ...itemNames].map(Key => ({ Key }));
 
     if (keys.length) {
-      // R2 first: a failure throws, so the row is never marked purged while
+      // R2 first: a failure throws, so a row is never marked purged while
       // its object is still in the bucket.
       await deleteObjects(getS3()!, bucket()!, keys);
-      const { error: purgeError } = await db.rpc('mark_post_media_purged', { p_post_ids: [post.id] });
-      if (purgeError) throw purgeError;
+      if (names.length) {
+        const { error: purgeError } = await db.rpc('mark_post_media_purged', { p_post_ids: [post.id] });
+        if (purgeError) throw purgeError;
+      }
+      if (items.length) {
+        const { error: itemError } = await db.rpc('mark_post_media_items_purged', { p_item_ids: items.map(i => i.id) });
+        if (itemError) throw itemError;
+      }
     }
     res.json({ ok: true });
   }));
@@ -422,6 +482,27 @@ export function postMediaRouter(): Router {
         if (!key) continue;
         if (owned.has(key)) keys.push({ Key: key });
         else console.error('[media] retention left an object in place: it is not owned by its post', victim.id);
+      }
+    }
+
+    // Items 2..n of the expired posts (RC5), under the same ownership rule.
+    const { data: expiredItems, error: itemsError } = await db.rpc('select_expired_post_media_items');
+    if (itemsError && !isMissingDatabaseObject(itemsError)) throw itemsError;
+    const items = (expiredItems ?? []) as { id: string; post_id: string; storage_key: string | null; poster_key: string | null }[];
+    if (items.length) {
+      const missing = [...new Set(items.map(i => i.post_id))].filter(id => !authorOf.has(id));
+      if (missing.length) {
+        const { data: owners, error: ownersError } = await db.from('posts').select('id, author_id').in('id', missing);
+        if (ownersError) throw ownersError;
+        for (const row of owners ?? []) authorOf.set(row.id as string, row.author_id as string);
+      }
+      for (const item of items) {
+        const owned = await ownedPostKeys(db, authorOf.get(item.post_id), [item.storage_key, item.poster_key]);
+        for (const key of [item.storage_key, item.poster_key]) {
+          if (!key) continue;
+          if (owned.has(key)) keys.push({ Key: key });
+          else console.error('[media] retention left an object in place: it is not owned by its post', item.post_id);
+        }
       }
     }
 
