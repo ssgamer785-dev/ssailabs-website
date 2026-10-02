@@ -25,6 +25,8 @@ export interface Database {
           phone: string | null;
           role: UserRole;
           reveal_identity: boolean;
+          /** When the member last set the real-name switch themselves; NULL = never (RC5). Trigger-maintained. */
+          reveal_identity_chosen_at?: string | null;
           avatar_url: string | null;
           /** R2 key under avatars/<uid>/. Private — read through a signed GET. */
           avatar_key: string | null;

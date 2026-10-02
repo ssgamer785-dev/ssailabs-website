@@ -392,7 +392,7 @@ export function PostDetailScreen() {
       <div style={{ ...css('flex:none;padding:10px 18px;display:flex;align-items:center;gap:9px'), paddingBottom: 'calc(10px + var(--nav-space))' }}>
         <div style={css('flex:1;min-width:0;height:42px;border-radius:999px;background:var(--surface-secondary);display:flex;align-items:center;padding:0 16px')}>
           <input
-            placeholder={reveal ? 'Write a comment…' : 'Comment as Unknown User…'}
+            placeholder={reveal ? (userName ? `Comment as ${userName}…` : 'Write a comment…') : 'Comment as Unknown User…'}
             aria-label="Write a comment"
             value={draft}
             onChange={e => setDraft(e.target.value)}

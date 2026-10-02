@@ -40,7 +40,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<{ userId: string; value: boolean } | null>(null);
 
   const userName = profile?.full_name?.trim() ?? '';
-  const saved = profile?.reveal_identity ?? false;
+  // ON is the default for every account that has not chosen (RC5).
+  const saved = profile?.reveal_identity ?? true;
   const reveal = pending && user && pending.userId === user.id ? pending.value : saved;
 
   const setRevealPreference = useCallback(async (value: boolean): Promise<string | null> => {
