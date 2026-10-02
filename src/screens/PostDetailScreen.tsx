@@ -307,7 +307,7 @@ export function PostDetailScreen() {
           <div style={css('flex:none;margin-top:14px')}>
             <PollCard postId={post.id} />
           </div>
-        ) : post.attachment === 'pdf' || post.attachment === 'file' ? (
+        ) : (post.attachment === 'pdf' || post.attachment === 'file') && !post.extraMedia?.length ? (
           <div style={css('flex:none;margin-top:12px')}>
             <PdfRow post={post} />
           </div>

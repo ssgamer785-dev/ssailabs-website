@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabase';
+import { withPostMedia } from './multi-media';
 import { subscribeCommunityActivity } from './activity';
 import { useAuth } from '../auth-context';
 import { toPost, type FeedPost, type FeedRow } from './useFeed';
@@ -62,8 +63,9 @@ export function usePost(postId: string | null): UsePost {
       setPost(null);
       return;
     }
+    const [withMedia] = await withPostMedia([toPost(row)]);
     setPost({
-      ...toPost(row),
+      ...withMedia,
       bookmarkedByMe: row.bookmarked_by_me,
       authorAvatarKey: row.author_avatar_key,
     });

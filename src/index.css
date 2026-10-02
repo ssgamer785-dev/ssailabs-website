@@ -657,3 +657,5 @@ textarea {
   to   { transform: translateX(250%); }
 }
 @media (prefers-reduced-motion: reduce) { .nav-progress-bar { animation: none; width: 100%; opacity: .6; } }
+
+@keyframes spin { to { transform: rotate(360deg); } }

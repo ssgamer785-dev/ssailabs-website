@@ -12,6 +12,8 @@ import { VideoViewer } from '../media/VideoViewer';
 import { clampVideoPosition, snapshotVideoPlayback, type VideoPlaybackSnapshot } from '../../lib/media/video-playback-state';
 import { isWithheldForAnonymity } from '../../lib/community/media-visibility';
 import { claimPlayback, releasePlayback } from '../../lib/media/exclusive-playback';
+import { PostGallery, hasGallery } from './PostGallery';
+import { feedAspectRatio } from '../../lib/media/dimensions';
 
 function bytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -291,6 +293,12 @@ function NoMedia({ height, purged, withheld = false }: { height: number; purged:
  * real document — never a stand-in for one that is not there.
  */
 export function PostMedia({ post, height }: { post: FeedPost; height: number }) {
+  // Several attachments: the album mosaic and its swipe viewer (RC5).
+  if (hasGallery(post)) return <PostGallery post={post} />;
+  return <SingleMedia post={post} height={height} />;
+}
+
+function SingleMedia({ post, height }: { post: FeedPost; height: number }) {
   const [viewerOpen, setViewerOpen] = useState(false);
   const isImage = post.attachment === 'image';
   const isVideo = post.attachment === 'video';
@@ -321,7 +329,13 @@ export function PostMedia({ post, height }: { post: FeedPost; height: number }) 
 
   if (isImage && post.storageKey && !post.mediaPurged) {
     return (
-      <div ref={image.ref} onClick={e => e.stopPropagation()} style={{ position: 'relative', minHeight: image.url && !image.failed ? undefined : height, borderRadius: 12, overflow: 'hidden', background: 'var(--surface-sunken-2)' }}>
+      <div ref={image.ref} onClick={e => e.stopPropagation()} style={{
+        position: 'relative', borderRadius: 12, overflow: 'hidden', background: 'var(--surface-sunken-2)',
+        // With the picture's own size known, its space is reserved exactly, so the feed does not jump when it arrives.
+        ...(post.firstMediaSize && !(image.url && !image.failed)
+          ? { aspectRatio: String(feedAspectRatio(post.firstMediaSize)) }
+          : { minHeight: image.url && !image.failed ? undefined : height }),
+      }}>
         {image.failed || !image.url ? (
           <div style={{ ...css('width:100%;display:flex;flex-direction:column;gap:8px;align-items:center;justify-content:center;font-size:11.5px;color:var(--text-faint);text-align:center;padding:16px'), minHeight: height }}>
             {image.failed ? <><span role="alert">{image.error ?? 'Could not load attachment'}</span><button type="button" onClick={image.forceRetry} disabled={image.loading} style={css('color:var(--accent-ink);font-weight:700;padding:8px')}>Try again</button></> : 'Loading…'}

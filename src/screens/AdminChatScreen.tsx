@@ -11,6 +11,8 @@ import { useVoiceRecorder, type VoiceRecording } from '../lib/chat/useVoiceRecor
 import { formatDuration, type MediaKind } from '../lib/chat/types';
 import { PhoneShell } from '../components/PhoneShell';
 import { MessageBubble } from '../components/chat/MessageBubble';
+import { AlbumBubble } from '../components/chat/AlbumBubble';
+import { groupAlbums } from '../lib/chat/albums';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import logo from '../assets/traders-planet-mark.png';
 import { Avatar } from '../components/ui/Avatar';
@@ -46,6 +48,9 @@ function TypingBubble({ incomingIsAdmin, peerName, peerAvatarKey }: { incomingIs
 }
 
 /** Maps a picked file to the attachment kind the backend expects. */
+/** Files in one chat send (the database holds albums of up to 50). */
+const MAX_ALBUM = 30;
+
 function kindForFile(file: File): MediaKind | null {
   if (file.type.startsWith('image/')) return 'image';
   if (file.type.startsWith('video/')) return 'video';
@@ -99,6 +104,8 @@ export function AdminChatScreen() {
   const [sendingVoice, setSendingVoice] = useState(false);
   useEffect(() => () => { if (voicePreview) URL.revokeObjectURL(voicePreview.url); }, [voicePreview]);
   const fileInput = useRef<HTMLInputElement>(null);
+  /** Several picked files wait here to be checked before they are sent, as in a chat app. */
+  const [picked, setPicked] = useState<{ id: string; file: File; kind: MediaKind; previewUrl: string | null }[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -170,25 +177,62 @@ export function AdminChatScreen() {
   }
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const picked = e.target.files?.[0];
+    const chosen = Array.from(e.target.files ?? []);
     e.target.value = '';
-    if (!picked) return;
-    if (!chatReady) return;
-    let file = normalizePickedFile(picked);
-    try { file = await toPortableImage(file); }
-    catch (error) {
-      if (error instanceof PortableImageError) { setNotice(error.message); return; }
-      throw error;
+    if (!chosen.length || !chatReady) return;
+    const ready: { id: string; file: File; kind: MediaKind; previewUrl: string | null }[] = [];
+    const problems: string[] = [];
+    for (const raw of chosen.slice(0, MAX_ALBUM - picked.length)) {
+      let file = normalizePickedFile(raw);
+      try { file = await toPortableImage(file); }
+      catch (error) {
+        if (error instanceof PortableImageError) { problems.push(`${raw.name}: ${error.message}`); continue; }
+        throw error;
+      }
+      const kind = kindForFile(file);
+      if (!kind) { problems.push(`${raw.name}: that file type cannot be attached.`); continue; }
+      ready.push({ id: crypto.randomUUID(), file, kind, previewUrl: kind === 'image' ? URL.createObjectURL(file) : null });
     }
-
-    const kind = kindForFile(file);
-    if (!kind) {
-      setNotice('That file type cannot be attached.');
+    if (chosen.length > MAX_ALBUM - picked.length) problems.push(`Up to ${MAX_ALBUM} at a time; the rest were not added.`);
+    setNotice(problems.length ? problems.join(' ') : null);
+    if (!ready.length) return;
+    // One file goes straight out, as it always did; several are shown first.
+    if (!picked.length && ready.length === 1) {
+      const [only] = ready;
+      if (only.previewUrl) URL.revokeObjectURL(only.previewUrl);
+      atBottom.current = true;
+      await chat.sendMedia(only.file, only.kind, only.file.name);
       return;
     }
-    setNotice(null);
+    setPicked(prev => [...prev, ...ready]);
+  }
+
+  function discardPicked(id?: string) {
+    setPicked(prev => {
+      for (const item of prev) if ((!id || item.id === id) && item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      return id ? prev.filter(item => item.id !== id) : [];
+    });
+  }
+
+  function movePicked(id: string, by: number) {
+    setPicked(prev => {
+      const from = prev.findIndex(item => item.id === id);
+      const to = from + by;
+      if (from < 0 || to < 0 || to >= prev.length) return prev;
+      const next = [...prev];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      return next;
+    });
+  }
+
+  async function sendPicked() {
+    if (!picked.length || !chatReady) return;
+    const batch = picked.map(item => ({ file: item.file as Blob, kind: item.kind, fileName: item.file.name }));
+    // The previews are not needed once the bubbles (with their own previews) exist.
+    discardPicked();
     atBottom.current = true;
-    await chat.sendMedia(file, kind, file.name);
+    await chat.sendMediaBatch(batch);
   }
 
   async function handleMic() {
@@ -271,17 +315,29 @@ export function AdminChatScreen() {
             {isAdmin ? 'No messages yet. Start a conversation with this member.' : 'No messages yet. Say hello to the Admin — they usually reply within a few hours.'}
           </div>
         ) : (
-          messages.map(m => (
-            <MessageBubble
-              key={m.clientId}
-              message={m}
-              highlighted={m.id === targetMessageId}
-              out={m.senderId === user?.id}
+          groupAlbums(messages).map(entry => entry.type === 'album' ? (
+            <AlbumBubble
+              key={entry.key}
+              messages={entry.messages}
+              out={entry.messages[0].senderId === user?.id}
               incomingIsAdmin={!isAdmin}
               incomingName={peer?.name ?? 'Member'}
               incomingAvatarKey={peer?.avatarKey ?? null}
-              onRetry={() => chat.retry(m.clientId)}
-              onDelete={() => chat.deleteMessage(m)}
+              onRetry={clientId => { void chat.retry(clientId); }}
+              onCancel={clientId => { void chat.cancelUpload(clientId); }}
+              onDeleteAll={async () => { for (const m of entry.messages) await chat.deleteMessage(m); }}
+            />
+          ) : (
+            <MessageBubble
+              key={entry.key}
+              message={entry.message}
+              highlighted={entry.message.id === targetMessageId}
+              out={entry.message.senderId === user?.id}
+              incomingIsAdmin={!isAdmin}
+              incomingName={peer?.name ?? 'Member'}
+              incomingAvatarKey={peer?.avatarKey ?? null}
+              onRetry={() => chat.retry(entry.message.clientId)}
+              onDelete={() => chat.deleteMessage(entry.message)}
             />
           ))
         )}
@@ -314,9 +370,43 @@ export function AdminChatScreen() {
         type="file"
         disabled={!chatReady}
         accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.zip,.txt,.csv"
+        multiple
         onChange={handleFile}
         style={{ display: 'none' }}
       />
+
+      {picked.length > 0 && (
+        <div role="region" aria-label="Attachments to send" style={css('flex:none;padding:10px 14px 4px;background:var(--surface);border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px')}>
+          <div style={css('display:flex;gap:8px;overflow-x:auto;padding-bottom:4px')}>
+            {picked.map((item, index) => (
+              <div key={item.id} style={css('flex:none;width:76px;display:flex;flex-direction:column;gap:4px')}>
+                <div style={css('position:relative;width:76px;height:76px;border-radius:10px;overflow:hidden;background:var(--surface-sunken-2)')}>
+                  {item.previewUrl
+                    ? <img src={item.previewUrl} alt="" style={css('width:100%;height:100%;object-fit:cover')} />
+                    : <div style={css('width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:6px;font-size:9.5px;color:var(--text-faint);text-align:center;word-break:break-word')}>{item.kind === 'video' ? '🎬 ' : ''}{item.file.name}</div>}
+                  <button type="button" onClick={() => discardPicked(item.id)} aria-label={`Remove ${item.file.name}`}
+                    style={css('position:absolute;top:4px;right:4px;width:22px;height:22px;border-radius:50%;background:var(--ink-chip);display:flex;align-items:center;justify-content:center;cursor:pointer')}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--on-accent)" strokeWidth={2.8} strokeLinecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
+                  </button>
+                </div>
+                {picked.length > 1 && <div style={css('display:flex;justify-content:space-between')}>
+                  <button type="button" disabled={index === 0} onClick={() => movePicked(item.id, -1)} aria-label={`Move ${item.file.name} earlier`} style={{ ...css('min-width:28px;min-height:22px;border-radius:6px;background:var(--surface-secondary)'), opacity: index === 0 ? 0.35 : 1 }}>‹</button>
+                  <button type="button" disabled={index === picked.length - 1} onClick={() => movePicked(item.id, 1)} aria-label={`Move ${item.file.name} later`} style={{ ...css('min-width:28px;min-height:22px;border-radius:6px;background:var(--surface-secondary)'), opacity: index === picked.length - 1 ? 0.35 : 1 }}>›</button>
+                </div>}
+              </div>
+            ))}
+          </div>
+          <div style={css('display:flex;align-items:center;gap:10px')}>
+            <button type="button" onClick={() => fileInput.current?.click()} style={css('font-size:12px;font-weight:700;color:var(--accent-ink)')}>+ Add more</button>
+            <div style={css('flex:1')} />
+            <button type="button" onClick={() => discardPicked()} style={css('font-size:12px;font-weight:700;color:var(--danger-ink)')}>Cancel</button>
+            <button type="button" onClick={() => void sendPicked()} disabled={!chatReady}
+              style={css('padding:9px 14px;border-radius:10px;background:var(--accent);color:var(--on-accent);font-size:12.5px;font-weight:700;cursor:pointer')}>
+              Send {picked.length}
+            </button>
+          </div>
+        </div>
+      )}
 
       {voicePreview ? (
         <div style={{ ...css('flex:none;display:flex;align-items:center;gap:8px;padding:12px 18px;background:var(--surface)'), paddingBottom: `calc(24px + env(safe-area-inset-bottom, 0px) + ${keyboardInset}px)` }}>

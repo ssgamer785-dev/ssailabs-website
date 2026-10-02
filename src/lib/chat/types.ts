@@ -32,6 +32,14 @@ export interface ChatMessage {
   mediaPurged: boolean;
   /** 'pending' while the bytes are still on their way to R2. */
   uploadStatus: UploadStatus;
+  /** Messages sent together share an album (RC5); null for a single message. */
+  albumId?: string | null;
+  albumIndex?: number | null;
+  albumSize?: number | null;
+  albumKind?: 'photos' | 'videos' | 'media' | 'files' | null;
+  /** The picture's own size, so its space is reserved before it loads. */
+  mediaWidth?: number | null;
+  mediaHeight?: number | null;
 
   status: SendStatus;
   /** 0..1 while the attachment uploads. */

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabase';
+import { withPostMedia, type PostMediaItem } from './multi-media';
 import { useAuth } from '../auth-context';
 import type { AttachmentKind, PostChannel, UserRole } from '../database.types';
 import { deletePostMedia } from './media-api';
@@ -37,6 +38,10 @@ export interface FeedPost {
   likeCount: number;
   commentCount: number;
   likedByMe: boolean;
+  /** Attachments 2..n (RC5); absent for a post with one attachment or before the migration. */
+  extraMedia?: PostMediaItem[];
+  /** The first attachment's own size, to reserve its space before it loads. */
+  firstMediaSize?: { width: number; height: number } | null;
 }
 
 export type FeedRow = {
@@ -100,7 +105,7 @@ export async function fetchFeedPage(
     p_limit: limit,
   });
   if (error) throw error;
-  return ((data ?? []) as FeedRow[]).map(toPost);
+  return withPostMedia(((data ?? []) as FeedRow[]).map(toPost));
 }
 
 export interface UseFeed {

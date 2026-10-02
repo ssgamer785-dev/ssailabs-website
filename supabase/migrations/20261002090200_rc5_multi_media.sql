@@ -292,7 +292,9 @@ grant execute on function public.create_post_with_media(jsonb, jsonb) to authent
 -- Items 2..n of the given posts, for every member who can see the post, with
 -- the same withholding rules the feed applies to the first item: on an
 -- anonymous post, a key that contains the author's id and the original file
--- name never reach other members.
+-- name never reach other members. A row at position 0 carries only the first
+-- item's dimensions (its keys come from the feed, which already applies the
+-- rules), so the app can size every picture before it loads.
 create or replace function public.post_media_for(p_post_ids uuid[])
 returns table(
   id uuid, post_id uuid, "position" smallint, kind public.attachment_kind,
@@ -323,7 +325,13 @@ as $$
   join public.post_media m on v.activated
   join public.posts p on p.id = m.post_id
   where m.post_id = any (p_post_ids)
-  order by m.post_id, m.position
+  union all
+  select null::uuid, p.id, 0::smallint, p.attachment, null, null, null, null, null, p.media_width, p.media_height, p.media_purged
+  from viewer v
+  join public.posts p on v.activated
+  where p.id = any (p_post_ids)
+    and p.media_width is not null and p.media_height is not null
+  order by 2, 3
   limit 2500;
 $$;
 

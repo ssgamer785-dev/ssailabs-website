@@ -56,9 +56,13 @@ export function uploadPostMedia(
   blob: Blob,
   mimeType: string,
   onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new DOMException('Upload cancelled.', 'AbortError')); return; }
     const xhr = new XMLHttpRequest();
+    // Cancelling an item stops its transfer at once instead of letting it finish unseen.
+    signal?.addEventListener('abort', () => { xhr.abort(); reject(new DOMException('Upload cancelled.', 'AbortError')); }, { once: true });
     xhr.open('PUT', uploadUrl, true);
     xhr.setRequestHeader('Content-Type', mimeType);
     xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded / e.total); };

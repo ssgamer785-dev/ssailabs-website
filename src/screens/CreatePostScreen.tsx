@@ -5,7 +5,11 @@ import { supabase } from '../lib/supabase';
 import { useAppState } from '../lib/app-state';
 import { officialHeadline } from '../lib/community/display-body';
 import { useAuth } from '../lib/auth-context';
-import { requestPostUploadUrl, resumePostUploadUrl, uploadPostMedia, type PostMediaKind, type PostUploadTicket } from '../lib/community/media-api';
+import type { PostMediaKind } from '../lib/community/media-api';
+import { multiMediaSupported, publishPostWithMedia, uploadDraftAttachment, type DraftAttachment, type UploadedAttachment } from '../lib/community/multi-media';
+import { UploadQueue, type UploadItem } from '../lib/media/upload-queue';
+import { measureImage } from '../lib/media/dimensions';
+import { AttachmentTray } from '../components/community/AttachmentTray';
 import { createPollPost } from '../lib/community/polls';
 import { probeVideo } from '../lib/media/video-poster';
 import type { AttachmentKind, PostChannel } from '../lib/database.types';
@@ -66,6 +70,12 @@ const ACCEPT: Record<'image' | 'video' | 'pdf' | 'file', string> = {
 };
 
 const MAX_POLL_OPTIONS = 10;
+/** Attachments in one post (the database allows 50; a post is not an album dump). */
+const MAX_ATTACHMENTS = 30;
+
+/** One picked attachment, with what its tile shows. */
+interface Attachment extends DraftAttachment { previewUrl: string | null }
+type AttachmentItem = UploadItem<Attachment, UploadedAttachment>;
 const MIN_POLL_OPTIONS = 2;
 
 export function CreatePostScreen() {
@@ -86,17 +96,28 @@ export function CreatePostScreen() {
   const editId = params.get('edit');
 
   const [postText, setPostText] = useState('');
-  const [file, setFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [poster, setPoster] = useState<Blob | null>(null);
-  const [progress, setProgress] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Held after a failed upload so a retry re-sends to the same key rather than
-  // stranding the first attempt's bytes in the bucket.
-  const [ticket, setTicket] = useState<PostUploadTicket | null>(null);
-  const [canRetry, setCanRetry] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // Attachments upload through one queue: a few at a time, each with its own
+  // progress, retry and cancel. A finished item keeps its upload, so posting
+  // again after a failure never uploads (or publishes) it twice; a retried
+  // item re-sends to its own key, so nothing is left behind in storage.
+  const [items, setItems] = useState<AttachmentItem[]>([]);
+  const queueRef = useRef<UploadQueue<Attachment, UploadedAttachment> | null>(null);
+  queueRef.current ??= new UploadQueue<Attachment, UploadedAttachment>({
+    concurrency: 3,
+    run: (item, signal, onProgress) => uploadDraftAttachment(item.payload, signal, onProgress),
+    onChange: next => setItems([...next]),
+  });
+  const queue = queueRef.current;
+  const [multi, setMulti] = useState(false);
+  useEffect(() => { void multiMediaSupported().then(setMulti); }, []);
+  const overall = queue.overall();
+  const failedCount = items.filter(i => i.state === 'failed').length;
+  const hasVoice = items.some(i => i.payload.kind === 'voice');
+  const canRetry = failedCount > 0;
   /** What the next picker press should accept. Set by whichever button opened it. */
   const [accept, setAccept] = useState<string>(ACCEPT.image);
 
@@ -119,7 +140,24 @@ export function CreatePostScreen() {
     return () => { active = false; };
   }, [editId]);
 
-  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
+  // Leaving the screen stops every transfer and frees every preview.
+  useEffect(() => () => {
+    queue.cancelAll();
+    for (const item of queue.list()) if (item.payload.previewUrl) URL.revokeObjectURL(item.payload.previewUrl);
+  }, [queue]);
+
+  function clearAttachments() {
+    for (const item of queue.list()) {
+      if (item.payload.previewUrl) URL.revokeObjectURL(item.payload.previewUrl);
+      queue.remove(item.id);
+    }
+  }
+
+  function removeAttachment(id: string) {
+    const item = queue.list().find(i => i.id === id);
+    if (item?.payload.previewUrl) URL.revokeObjectURL(item.payload.previewUrl);
+    queue.remove(id);
+  }
 
   /** Opens the file dialog restricted to one kind. */
   function openPicker(kind: keyof typeof ACCEPT) {
@@ -134,35 +172,43 @@ export function CreatePostScreen() {
   }
 
   async function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const raw = e.target.files?.[0];
+    const picked = Array.from(e.target.files ?? []);
     e.target.value = '';
-    if (!raw) return;
-    let picked = normalizePickedFile(raw);
-    try { picked = await toPortableImage(picked); }
-    catch (error) {
-      if (error instanceof PortableImageError) { setError(error.message); return; }
-      throw error;
-    }
-    if (!kindForFile(picked)) {
-      setError('That file type cannot be attached.');
-      return;
-    }
-    setError(null);
-    setCanRetry(false);
-    setTicket(null);
-    setFile(picked);
-    setPoster(null);
-    setPreviewUrl(picked.type.startsWith('image/') ? URL.createObjectURL(picked) : null);
-
-    // A video gets a poster frame lifted off the file itself, so the feed can
-    // show the post without anyone downloading the video first.
-    if (picked.type.startsWith('video/')) {
-      const probe = await probeVideo(picked);
-      if (probe.poster) {
-        setPoster(probe.poster.blob);
-        setPreviewUrl(URL.createObjectURL(probe.poster.blob));
+    if (!picked.length) return;
+    // Before the database can hold several attachments, a post keeps one: a
+    // new pick replaces the old, as it always did.
+    if (!multi || hasVoice) clearAttachments();
+    const room = multi ? MAX_ATTACHMENTS - (hasVoice ? 0 : queue.list().length) : 1;
+    const chosen = picked.slice(0, Math.max(0, room));
+    const ready: Attachment[] = [];
+    const problems: string[] = [];
+    for (const raw of chosen) {
+      let file = normalizePickedFile(raw);
+      try { file = await toPortableImage(file); }
+      catch (error) {
+        if (error instanceof PortableImageError) { problems.push(`${raw.name}: ${error.message}`); continue; }
+        throw error;
       }
+      const kind = kindForFile(file);
+      if (!kind || kind === 'voice') { problems.push(`${raw.name}: this file type cannot be attached.`); continue; }
+      let poster: Blob | null = null;
+      let previewUrl: string | null = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
+      let size = kind === 'image' ? await measureImage(file) : null;
+      // A video gets a poster frame lifted off the file itself, so the feed can
+      // show the post without anyone downloading the video first.
+      if (kind === 'video') {
+        const probe = await probeVideo(file);
+        if (probe.poster) {
+          poster = probe.poster.blob;
+          previewUrl = URL.createObjectURL(poster);
+          size = { width: probe.poster.width, height: probe.poster.height };
+        }
+      }
+      ready.push({ file, kind, poster, size, previewUrl });
     }
+    if (picked.length > chosen.length) problems.push(`A post holds up to ${MAX_ATTACHMENTS} attachments; the rest were not added.`);
+    setError(problems.length ? problems.join(' ') : null);
+    if (ready.length) queue.add(ready, false);
   }
 
   async function stopVoice() {
@@ -171,18 +217,16 @@ export function CreatePostScreen() {
     const extension = clip.mimeType.includes('mp4') ? 'm4a' : clip.mimeType.includes('aac') ? 'aac' : clip.mimeType.includes('ogg') ? 'ogg' : 'webm';
     const voiceFile = new File([clip.blob], `Voice message.${extension}`, { type: clip.mimeType });
     setPollMode(false);
-    setFile(voiceFile);
-    setPoster(null);
-    setTicket(null);
-    setCanRetry(false);
-    setPreviewUrl(URL.createObjectURL(voiceFile));
+    // A voice post is a voice note on its own.
+    clearAttachments();
+    queue.add([{ file: voiceFile, kind: 'voice', poster: null, size: null, previewUrl: URL.createObjectURL(voiceFile) }], false);
     setError(null);
   }
 
   async function submit() {
     if (busy || submitRef.current || !user) return;
 
-    if (editId && file) {
+    if (editId && items.length) {
       setError('Attachments cannot be changed while editing a post.');
       return;
     }
@@ -209,45 +253,27 @@ export function CreatePostScreen() {
       return;
     }
 
-    if (!postText.trim() && !file) {
+    if (!postText.trim() && !items.length) {
       setError('Write something or attach a file first.');
       return;
     }
     submitRef.current = true;
     setBusy(true);
     setError(null);
-    setCanRetry(false);
 
     try {
-      let storageKey: string | null = null;
-      let posterKey: string | null = null;
-      let attachment: AttachmentKind = 'none';
-
-      if (file) {
-        const kind = kindForFile(file)!;
-        attachment = kind;
-        setProgress(0);
-        // Reuse the ticket from a failed attempt while its signature is still
-        // good; otherwise ask for a fresh one.
-        const uploadArgs = {
-          kind,
-          mimeType: file.type,
-          sizeBytes: file.size,
-          posterBytes: poster?.size,
-        };
-        const active = ticket
-          ? await resumePostUploadUrl(ticket, uploadArgs)
-          : await requestPostUploadUrl(uploadArgs);
-        setTicket(active);
-
-        await uploadPostMedia(active.uploadUrl, file, file.type, setProgress);
-        if (active.posterUploadUrl && poster) {
-          await uploadPostMedia(active.posterUploadUrl, poster, 'image/jpeg', () => {});
-          posterKey = active.posterKey ?? null;
-        }
-        storageKey = active.storageKey;
-        setProgress(null);
+      // Upload whatever is not uploaded yet (a cancelled item is sent again on
+      // Post); finished items keep their upload.
+      for (const item of queue.list()) if (item.state === 'cancelled') queue.retry(item.id);
+      queue.start();
+      await queue.whenSettled();
+      const all = queue.list();
+      const failed = all.filter(i => i.state === 'failed');
+      if (failed.length) {
+        setError(`${failed.length} of ${all.length} attachment${all.length === 1 ? '' : 's'} did not upload. Retry ${failed.length === 1 ? 'it' : 'them'}, or remove ${failed.length === 1 ? 'it' : 'them'} to post the rest.`);
+        return;
       }
+      const uploads = all.filter(i => i.state === 'done' && i.result).map(i => i.result!);
 
       if (editId) {
         // An Official headline is the first line, as when the post was made;
@@ -257,19 +283,30 @@ export function CreatePostScreen() {
           .update(editChannel === 'official' ? { body: postText.trim() || null, title: headline } : { body: postText.trim() || null })
           .eq('id', editId);
         if (upError) throw new Error(upError.message);
+      } else if (multi && !uploads.some(u => u.kind === 'voice')) {
+        // The post and all its attachments in one transaction: nobody ever sees half a post.
+        await publishPostWithMedia({
+          authorId: user.id,
+          channel,
+          title: channel === 'official' ? officialHeadline(postText) : null,
+          body: postText.trim() || null,
+          isAnonymous: channel === 'students' ? !reveal : false,
+        }, uploads);
       } else {
+        const first = uploads[0];
+        const attachment: AttachmentKind = first?.kind ?? 'none';
         const { error: insError } = await supabase.from('posts').insert({
           author_id: user.id,
           channel,
           title: channel === 'official' ? officialHeadline(postText) : null,
           body: postText.trim() || null,
           attachment,
-          storage_key: storageKey,
-          poster_key: posterKey,
-          poster_size_bytes: poster?.size ?? null,
-          mime_type: file?.type ?? null,
-          size_bytes: file?.size ?? null,
-          file_name: file?.name ?? null,
+          storage_key: first?.storageKey ?? null,
+          poster_key: first?.posterKey ?? null,
+          poster_size_bytes: first?.posterSizeBytes ?? null,
+          mime_type: first?.mimeType ?? null,
+          size_bytes: first?.sizeBytes ?? null,
+          file_name: first?.fileName ?? null,
           is_anonymous: channel === 'students' ? !reveal : false,
         });
         if (insError) throw new Error(insError.message);
@@ -278,8 +315,6 @@ export function CreatePostScreen() {
       navigate('/community', { replace: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not publish the post.');
-      setProgress(null);
-      setCanRetry(!!file);
     } finally {
       submitRef.current = false;
       setBusy(false);
@@ -299,7 +334,7 @@ export function CreatePostScreen() {
         <textarea placeholder={pollMode ? 'Ask your question…' : "What's on your mind?"} value={postText} onChange={e => setPostText(e.target.value)} style={css('width:100%;height:196px;font-size:15px;line-height:1.55')} />
       </div>
 
-      <input ref={fileInput} type="file" accept={accept} onChange={pickFile} style={{ display: 'none' }} />
+      <input ref={fileInput} type="file" accept={accept} multiple={multi} onChange={pickFile} style={{ display: 'none' }} />
 
       {!editId && <div style={css(isAdmin
         ? 'flex:none;padding:6px 20px 0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));justify-items:center;row-gap:14px'
@@ -326,7 +361,7 @@ export function CreatePostScreen() {
             // Entering poll mode drops any picked file for the same reason
             // openPicker drops the poll: one post, one attachment.
             setPollMode(v => !v);
-            setFile(null); setPreviewUrl(null); setPoster(null); setTicket(null); setCanRetry(false);
+            clearAttachments();
             setError(null);
           }}
           aria-pressed={pollMode}
@@ -421,7 +456,7 @@ export function CreatePostScreen() {
         <div style={css('flex:none;padding:12px 20px 0;display:flex;align-items:center;gap:10px')}>
           <div style={css('flex:1;font-size:12px;color:var(--danger-ink);line-height:1.4')}>{error}</div>
           {canRetry && !busy && (
-            <div onClick={submit} style={css('flex:none;font-size:12px;font-weight:700;color:var(--accent-ink);cursor:pointer;white-space:nowrap')}>Retry</div>
+            <div onClick={() => { queue.retryFailed(); void submit(); }} style={css('flex:none;font-size:12px;font-weight:700;color:var(--accent-ink);cursor:pointer;white-space:nowrap')}>Retry</div>
           )}
         </div>
       )}
@@ -434,33 +469,16 @@ export function CreatePostScreen() {
           PDF (or a video mid-poster-probe) still has no image to preview, so
           that case now shows the real filename instead of invented imagery,
           rather than the tile disappearing and losing its cancel button. */}
-      {file && (
-      <div style={{ ...css('flex:none;padding:22px 20px 0'), display: pollMode ? 'none' : 'block' }}>
-        <div style={css('position:relative;width:122px;height:156px;border-radius:14px;overflow:hidden;box-shadow:0 6px 18px rgba(var(--shadow-rgb),.14)')}>
-          {previewUrl && file.type.startsWith('audio/') ? (
-            <div style={css('width:100%;height:100%;background:var(--surface-secondary);display:flex;align-items:center;justify-content:center;padding:8px')}>
-              <audio src={previewUrl} controls preload="metadata" style={css('width:100%')} />
-            </div>
-          ) : previewUrl ? (
-            <img src={previewUrl} alt="Attachment preview" style={css('width:100%;height:100%;object-fit:contain;display:block;background:var(--surface-sunken-2)')} />
-          ) : (
-            <div style={css('width:100%;height:100%;background:var(--surface-sunken-2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:0 12px')}>
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--text-faint)" strokeWidth={1.7} strokeLinejoin="round"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg>
-              <div style={css('font-size:10.5px;color:var(--text-faint);text-align:center;line-height:1.4;word-break:break-word')}>{file.name}</div>
-            </div>
-          )}
-          {progress !== null && (
-            <div style={css('position:absolute;inset:0;background:rgba(var(--shadow-rgb),.4);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--on-accent)')}>
-              {Math.round(progress * 100)}%
-            </div>
-          )}
-          {file && progress === null && (
-            <div onClick={() => { setFile(null); setPreviewUrl(null); setPoster(null); setTicket(null); setCanRetry(false); }} style={css('position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:50%;background:var(--ink-chip);display:flex;align-items:center;justify-content:center;cursor:pointer')}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--on-accent)" strokeWidth={2.6} strokeLinecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
-            </div>
-          )}
-        </div>
-      </div>
+      {items.length > 0 && !pollMode && (
+        <AttachmentTray
+          items={items}
+          busy={busy}
+          overall={overall}
+          onRemove={removeAttachment}
+          onRetry={id => queue.retry(id)}
+          onMove={(id, to) => queue.move(id, to)}
+          onCancelAll={() => queue.cancelAll()}
+        />
       )}
       <div style={css('flex:1')} />
     </PhoneShell>

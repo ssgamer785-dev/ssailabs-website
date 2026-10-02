@@ -19,6 +19,7 @@ import {
   uploadToR2,
 } from './media-api';
 import { friendlyError } from '../errors';
+import { measureImage } from '../media/dimensions';
 import { announceNotificationsChanged } from '../notifications/events';
 
 const PAGE_SIZE = 30;
@@ -43,10 +44,22 @@ type MessageRow = {
   deleted_at: string | null;
   media_purged: boolean | null;
   upload_status: UploadStatus | null;
+  album_id?: string | null; album_index?: number | null; album_size?: number | null;
+  album_kind?: ChatMessage['albumKind']; media_width?: number | null; media_height?: number | null;
 };
 
 const SELECT_COLUMNS =
   'id, conversation_id, sender_id, kind, body, storage_key, poster_key, poster_size_bytes, mime_type, size_bytes, file_name, voice_duration_seconds, read_at, created_at, client_id, deleted_at, media_purged, upload_status';
+/** RC5 adds albums and picture sizes; read only once the database has them. */
+const RC5_COLUMNS = `${SELECT_COLUMNS}, album_id, album_index, album_size, album_kind, media_width, media_height`;
+/** Learned from the first page load: does the database have the RC5 columns? */
+let albumSchema: boolean | undefined;
+// Typed as the legacy list: the query builder's column parser does not need to know the extras.
+const columns = () => (albumSchema === false ? SELECT_COLUMNS : RC5_COLUMNS) as typeof SELECT_COLUMNS;
+const isMissingColumn = (error: { code?: string; message?: string } | null) =>
+  !!error && (error.code === '42703' || error.code === 'PGRST204' || /column .* does not exist|Could not find .* column/i.test(error.message ?? ''));
+/** Items of an album uploading at the same time. */
+const ALBUM_CONCURRENCY = 3;
 
 function toMessage(row: MessageRow): ChatMessage {
   const uploadStatus: UploadStatus = row.upload_status ?? 'ready';
@@ -75,6 +88,12 @@ function toMessage(row: MessageRow): ChatMessage {
     deletedAt: row.deleted_at,
     mediaPurged: !!row.media_purged,
     uploadStatus,
+    albumId: row.album_id ?? null,
+    albumIndex: row.album_index ?? null,
+    albumSize: row.album_size ?? null,
+    albumKind: row.album_kind ?? null,
+    mediaWidth: row.media_width ?? null,
+    mediaHeight: row.media_height ?? null,
     status: abandoned ? 'failed' : 'sent',
     error: abandoned ? "This upload didn't finish." : undefined,
   };
@@ -95,6 +114,10 @@ export interface UseConversation {
   loadOlder: () => Promise<void>;
   sendText: (body: string) => Promise<void>;
   sendMedia: (file: Blob, kind: MediaKind, fileName: string, durationSeconds?: number) => Promise<void>;
+  /** Several attachments as one album (RC5). */
+  sendMediaBatch: (files: { file: Blob; kind: MediaKind; fileName: string }[]) => Promise<void>;
+  /** Stops one item mid-upload and removes it. */
+  cancelUpload: (clientId: string) => Promise<void>;
   retryOpen: () => void;
   retry: (clientId: string) => Promise<void>;
   deleteMessage: (message: ChatMessage) => Promise<void>;
@@ -132,6 +155,10 @@ export function useConversation(explicitConversationId?: string): UseConversatio
   const newestAt = useRef<string | null>(null);
   /** Every object URL this thread minted, so unmount can revoke all of them. */
   const objectUrls = useRef<string[]>([]);
+
+  /** The latest list, for callbacks that must not re-create on every change. */
+  const messagesRef = useRef<ChatMessage[]>([]);
+  messagesRef.current = messages;
 
   const trackObjectUrl = useCallback((url: string) => {
     objectUrls.current.push(url);
@@ -174,16 +201,22 @@ export function useConversation(explicitConversationId?: string): UseConversatio
   const loadLatest = useCallback(async (id: string) => {
     const { data, error: qErr } = await supabase
       .from('messages')
-      .select(SELECT_COLUMNS)
+      .select(columns())
       .eq('conversation_id', id)
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
       .limit(PAGE_SIZE);
 
+    if (qErr && albumSchema !== false && isMissingColumn(qErr)) {
+      // A database the RC5 migration has not reached: read what it has.
+      albumSchema = false;
+      return loadLatest(id);
+    }
     if (qErr) {
       setError(friendlyError(qErr, 'Could not load messages.'));
       return;
     }
+    if (albumSchema === undefined) albumSchema = true;
     const rows = ((data ?? []) as MessageRow[]).map(toMessage);
     setHasMore(rows.length === PAGE_SIZE);
     const ordered = sortByTime(rows);
@@ -211,7 +244,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     setLoadingOlder(true);
     const { data, error: qErr } = await supabase
       .from('messages')
-      .select(SELECT_COLUMNS)
+      .select(columns())
       .eq('conversation_id', conversationId)
       .lt('created_at', oldest.createdAt)
       .order('created_at', { ascending: false })
@@ -239,7 +272,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     }
     const { data } = await supabase
       .from('messages')
-      .select(SELECT_COLUMNS)
+      .select(columns())
       .eq('conversation_id', id)
       .gt('created_at', since)
       .order('created_at', { ascending: true });
@@ -342,8 +375,12 @@ export function useConversation(explicitConversationId?: string): UseConversatio
         file_name: draft.fileName,
         voice_duration_seconds: draft.durationSeconds,
         upload_status: uploadStatus,
-      })
-      .select(SELECT_COLUMNS)
+        ...(albumSchema && draft.albumId ? {
+          album_id: draft.albumId, album_index: draft.albumIndex, album_size: draft.albumSize, album_kind: draft.albumKind,
+        } : {}),
+        ...(albumSchema && draft.mediaWidth && draft.mediaHeight ? { media_width: draft.mediaWidth, media_height: draft.mediaHeight } : {}),
+      } as never)
+      .select(columns())
       .single();
 
     if (insErr) throw new Error(insErr.message);
@@ -377,9 +414,16 @@ export function useConversation(explicitConversationId?: string): UseConversatio
    * A failure at any point leaves a pending row holding the key. Retrying
    * resumes that same row rather than starting a second one.
    */
+  /** One controller per uploading message, so a single item can be cancelled. */
+  const uploads = useRef(new Map<string, AbortController>());
+
   const sendMediaRow = useCallback(async (draft: ChatMessage) => {
     const file = draft.pendingFile;
     if (!file) return;
+    const controller = new AbortController();
+    uploads.current.set(draft.clientId, controller);
+    /** The pending row this attempt created, if any (removed again on cancel). */
+    let createdRow: string | null = null;
 
     try {
       patch(draft.clientId, { status: 'uploading', progress: 0, error: undefined });
@@ -406,27 +450,35 @@ export function useConversation(explicitConversationId?: string): UseConversatio
         posterUploadUrl = ticket.posterUploadUrl;
 
         if (ticket.purged > 0) setStorageNotice(purgeNotice(ticket.purged));
+        if (controller.signal.aborted) return;
 
         draft = { ...draft, storageKey: ticket.storageKey, posterKey: ticket.posterKey ?? null };
         const row = await insertRow(draft, 'pending');
         rowId = row.id;
+        createdRow = row.id;
+        if (controller.signal.aborted) {
+          // Cancelled while its row was being written: take the row away again.
+          await deleteRemoteMedia(row.id).catch(() => {});
+          return;
+        }
         draft = { ...draft, id: row.id, createdAt: row.createdAt, uploadStatus: 'pending' };
         setMessages(prev => upsert(prev, { ...draft, status: 'uploading', progress: 0 }));
       }
 
       await uploadToR2(uploadUrl, file, mimeType, fraction =>
-        patch(draft.clientId, { progress: fraction }));
+        patch(draft.clientId, { progress: fraction }), controller.signal);
 
       if (posterUploadUrl && draft.pendingPoster) {
-        await uploadToR2(posterUploadUrl, draft.pendingPoster, 'image/jpeg', () => {});
+        await uploadToR2(posterUploadUrl, draft.pendingPoster, 'image/jpeg', () => {}, controller.signal);
       }
+      if (controller.signal.aborted) return;
 
       patch(draft.clientId, { status: 'sending' });
       const { data, error: upErr } = await supabase
         .from('messages')
         .update({ upload_status: 'ready' })
         .eq('id', rowId)
-        .select(SELECT_COLUMNS)
+        .select(columns())
         .single();
       if (upErr) throw new Error(upErr.message);
 
@@ -443,10 +495,17 @@ export function useConversation(explicitConversationId?: string): UseConversatio
         .then(state => { if (state.purged > 0) setStorageNotice(purgeNotice(state.purged)); })
         .catch(() => {});
     } catch (e) {
+      // A cancelled item: its bubble is gone; make sure its half-made row is too.
+      if (controller.signal.aborted) {
+        if (createdRow) await deleteRemoteMedia(createdRow).catch(() => {});
+        return;
+      }
       patch(draft.clientId, {
         status: 'failed',
         error: friendlyError(e, 'Could not send. Tap to retry.'),
       });
+    } finally {
+      if (uploads.current.get(draft.clientId) === controller) uploads.current.delete(draft.clientId);
     }
   }, [insertRow, patch]);
 
@@ -480,6 +539,118 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     setMessages(prev => sortByTime([...prev, draft]));
     await sendTextRow(draft);
   }, [conversationId, userId, blankDraft, sendTextRow]);
+
+  /** A media bubble, on screen at once; the video poster and sizes follow. */
+  const prepareDraft = useCallback(async (
+    conversation: string,
+    sender: string,
+    file: Blob,
+    kind: MediaKind,
+    fileName: string,
+    durationSeconds: number | undefined,
+    album: Pick<ChatMessage, 'albumId' | 'albumIndex' | 'albumSize' | 'albumKind'> | null,
+    createdAt?: string,
+  ): Promise<ChatMessage> => {
+    let draft: ChatMessage = {
+      ...blankDraft(conversation, sender),
+      ...(album ?? {}),
+      ...(createdAt ? { createdAt } : {}),
+      kind,
+      mimeType: file.type || 'application/octet-stream',
+      sizeBytes: file.size,
+      fileName,
+      durationSeconds: durationSeconds ?? null,
+      status: 'uploading',
+      progress: 0,
+      localPreviewUrl: kind === 'image' || kind === 'voice'
+        ? trackObjectUrl(URL.createObjectURL(file))
+        : undefined,
+      pendingFile: file,
+    };
+    setMessages(prev => sortByTime([...prev, draft]));
+    if (kind === 'image') {
+      const size = await measureImage(file);
+      if (size) {
+        draft = { ...draft, mediaWidth: size.width, mediaHeight: size.height };
+        patch(draft.clientId, { mediaWidth: size.width, mediaHeight: size.height });
+      }
+    }
+    if (kind === 'video') {
+      const probe = await probeVideo(file);
+      const poster = probe.poster?.blob;
+      const posterUrl = poster ? trackObjectUrl(URL.createObjectURL(poster)) : undefined;
+      draft = {
+        ...draft,
+        durationSeconds: draft.durationSeconds ?? probe.durationSeconds,
+        posterSizeBytes: poster?.size ?? null,
+        localPosterUrl: posterUrl,
+        pendingPoster: poster,
+        mediaWidth: probe.poster?.width ?? null,
+        mediaHeight: probe.poster?.height ?? null,
+      };
+      patch(draft.clientId, {
+        durationSeconds: draft.durationSeconds,
+        posterSizeBytes: draft.posterSizeBytes,
+        localPosterUrl: posterUrl,
+        pendingPoster: poster,
+        mediaWidth: draft.mediaWidth,
+        mediaHeight: draft.mediaHeight,
+      });
+    }
+    return draft;
+  }, [blankDraft, patch, trackObjectUrl]);
+
+  /**
+   * Several photos, videos or files sent together, like a chat app's album:
+   * every bubble appears at once, a few upload at a time, each with its own
+   * progress, retry and cancel, and the other side gets one notification for
+   * the whole album. Before the RC5 migration they are sent one by one.
+   */
+  const sendMediaBatch = useCallback(async (files: { file: Blob; kind: MediaKind; fileName: string }[]) => {
+    if (!conversationId || !userId || !files.length) return;
+    if (files.length === 1) {
+      const [only] = files;
+      const draft = await prepareDraft(conversationId, userId, only.file, only.kind, only.fileName, undefined, null);
+      await sendMediaRow(draft);
+      return;
+    }
+    const visual = files.every(f => f.kind === 'image' || f.kind === 'video');
+    const albumKind: ChatMessage['albumKind'] = visual
+      ? (files.every(f => f.kind === 'image') ? 'photos' : files.every(f => f.kind === 'video') ? 'videos' : 'media')
+      : 'files';
+    const albumId = albumSchema !== false ? crypto.randomUUID() : null;
+    const base = Date.now();
+    const drafts = await Promise.all(files.map((f, index) => prepareDraft(
+      conversationId, userId, f.file, f.kind, f.fileName, undefined,
+      albumId ? { albumId, albumIndex: index, albumSize: files.length, albumKind } : null,
+      new Date(base + index).toISOString(),
+    )));
+    let next = 0;
+    const worker = async () => {
+      while (next < drafts.length) {
+        const draft = drafts[next++];
+        await sendMediaRow(draft);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(ALBUM_CONCURRENCY, drafts.length) }, worker));
+  }, [conversationId, userId, prepareDraft, sendMediaRow]);
+
+  /**
+   * Stops one item mid-upload and takes it away, removing its half-made row
+   * and anything already stored. The rest of an album carries on.
+   */
+  const cancelUpload = useCallback(async (clientId: string) => {
+    uploads.current.get(clientId)?.abort();
+    uploads.current.delete(clientId);
+    const target = messagesRef.current.find(m => m.clientId === clientId);
+    setMessages(prev => prev.filter(m => m.clientId !== clientId));
+    // A row exists once the item is 'pending' with its key; before that there is nothing to remove.
+    if (target && target.uploadStatus === 'pending' && target.storageKey) {
+      await deleteRemoteMedia(target.id).catch(() => {
+        // Left as a pending row: the stale-upload sweep removes it later.
+      });
+    }
+  }, []);
 
   const sendMedia = useCallback(async (
     file: Blob,
@@ -665,6 +836,8 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     loadOlder,
     sendText,
     sendMedia,
+    sendMediaBatch,
+    cancelUpload,
     retryOpen,
     retry,
     deleteMessage,
