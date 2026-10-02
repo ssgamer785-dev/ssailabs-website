@@ -1,3 +1,4 @@
+import { currentPlaybackOwner } from './media/exclusive-playback';
 import { useCallback } from 'react';
 import { audioPreferenceEnabled, setAudioPreference } from './audio/preferences';
 import { refreshAudioDiagnosticsEnabled, refreshAudioExperimentMode, traceRefreshAudio } from './audio/refresh-diagnostics';
@@ -83,6 +84,8 @@ function chime(options: { id?: string; force?: boolean; maxDelayMs?: number } = 
   const { id, force = false, maxDelayMs = MAX_UNLOCK_DELAY_MS } = options;
   if (id && !markNotificationSoundSeen(id)) return Promise.resolve(false);
   if (!force && !notificationSoundEnabled()) { traceRefreshAudio('chime-skipped', 'pref off'); return Promise.resolve(false); }
+  // A voice message or video is playing: the notification stays visible, the chime does not talk over it.
+  if (!force && currentPlaybackOwner()) { traceRefreshAudio('chime-skipped', 'media playing'); return Promise.resolve(false); }
   const audio = context();
   if (!audio) { traceRefreshAudio('chime-skipped', 'no context'); return Promise.resolve(false); }
   traceRefreshAudio('chime-request', audio.state);

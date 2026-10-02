@@ -69,3 +69,17 @@ describe('describing the output', () => {
     expect(describeOutput('locked').detail).toMatch(/tap/i);
   });
 });
+
+describe('the five names for the sound output (RC5)', () => {
+  it('maps every state to Ready, Needs one tap, Suspended, Unsupported or Failed', async () => {
+    const { outputLabel, describeOutput: describe2 } = await import('./sound-check');
+    expect(outputLabel('running')).toBe('Ready');
+    expect(outputLabel('locked')).toBe('Needs one tap');
+    expect(outputLabel('none')).toBe('Needs one tap');
+    expect(outputLabel('suspended')).toBe('Suspended');
+    expect(outputLabel('interrupted')).toBe('Suspended');
+    expect(outputLabel('unsupported')).toBe('Unsupported');
+    expect(outputLabel('stalled')).toBe('Failed');
+    expect(describe2('stalled').title).toBe('Failed');
+  });
+});

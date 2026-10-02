@@ -46,21 +46,42 @@ export interface OutputDescription {
   detail: string;
 }
 
+/**
+ * The output's state under one of five names, the same everywhere (sound
+ * settings, device diagnostics): what the member can act on, never a claim
+ * that a sound was heard.
+ */
+export type OutputLabel = 'Ready' | 'Needs one tap' | 'Suspended' | 'Unsupported' | 'Failed';
+
+export function outputLabel(status: OutputStatus | 'unsupported'): OutputLabel {
+  switch (status) {
+    case 'running': return 'Ready';
+    case 'interrupted':
+    case 'suspended': return 'Suspended';
+    case 'stalled': return 'Failed';
+    case 'unsupported': return 'Unsupported';
+    case 'locked':
+    case 'none':
+    default: return 'Needs one tap';
+  }
+}
+
 /** Plain-language state of the output for the sound settings. */
 export function describeOutput(status: OutputStatus | 'unsupported'): OutputDescription {
+  const title = outputLabel(status);
   switch (status) {
     case 'running':
-      return { tone: 'good', title: 'Sound is ready', detail: 'This device is running the app’s audio. Use a test below to hear it.' };
+      return { tone: 'good', title, detail: 'This device is running the app’s audio. Use a test below to hear it.' };
     case 'interrupted':
     case 'suspended':
-      return { tone: 'wait', title: 'Sound is paused', detail: 'A call, another app or the screen lock paused it. Tap a test below to start it again.' };
+      return { tone: 'wait', title, detail: 'A call, another app or the screen lock paused it. Tap a test below to start it again.' };
     case 'stalled':
-      return { tone: 'wait', title: 'Sound needs a restart', detail: 'The audio stopped moving. Tap a test below to restart it.' };
+      return { tone: 'wait', title, detail: 'The audio stopped moving. Tap a test below to restart it.' };
     case 'unsupported':
-      return { tone: 'bad', title: 'Not supported', detail: 'This browser cannot play the app’s sounds.' };
+      return { tone: 'bad', title, detail: 'This browser cannot play the app’s sounds.' };
     case 'locked':
     case 'none':
     default:
-      return { tone: 'wait', title: 'Waiting for a tap', detail: 'Your device lets an app start sound only after you tap the screen. Tap a test below, or anywhere in the app.' };
+      return { tone: 'wait', title, detail: 'Your device lets an app start sound only after you tap the screen. Tap a test below, or anywhere in the app.' };
   }
 }

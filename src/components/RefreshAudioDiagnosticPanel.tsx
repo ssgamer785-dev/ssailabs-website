@@ -12,6 +12,9 @@ import {
   type RefreshAudioDiagnostic,
 } from '../lib/audio/refresh-diagnostics';
 import { audioPreferenceEnabled } from '../lib/audio/preferences';
+import { outputLabel } from '../lib/audio/sound-check';
+import { sharedAudioOutput } from '../lib/audio/shared-output';
+import { currentPlaybackOwner } from '../lib/media/exclusive-playback';
 import { pushAvailability, sendTestPush } from '../lib/notifications/push';
 import { useRefreshHandler } from './PhoneShell';
 
@@ -31,6 +34,7 @@ function logHeader(events: readonly RefreshAudioDiagnostic[]): string[] {
     `ua: ${nav.userAgent}`,
     `build: ${typeof __BUILD_COMMIT__ === 'string' ? __BUILD_COMMIT__ : 'dev'} · origin: ${location.host} · push: ${pushAvailability()}/${typeof Notification === 'undefined' ? 'n/a' : Notification.permission}`,
     `standalone: ${standalone ? 'yes' : 'no'} · audioSession: ${nav.audioSession?.type ?? 'n/a'} · audio mode: ${refreshAudioExperimentMode()} · refresh/notification sound: ${audioPreferenceEnabled('refreshSound') ? 'on' : 'off'}/${audioPreferenceEnabled('notificationSound') ? 'on' : 'off'} · activation api: ${userActivationSnapshot() === 'n/a' ? 'no' : 'yes'}`,
+    `sound output: ${outputLabel(typeof window !== 'undefined' && (window.AudioContext ?? (window as unknown as { webkitAudioContext?: unknown }).webkitAudioContext) ? sharedAudioOutput.status() : 'unsupported')} · media playing: ${currentPlaybackOwner() ? 'yes' : 'no'}`,
     `captured: ${new Date().toISOString()}`,
     `summary: ${summarizeRefreshAudioDiagnostics(events)}`,
     '---',

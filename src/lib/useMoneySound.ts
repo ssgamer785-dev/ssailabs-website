@@ -1,3 +1,4 @@
+import { currentPlaybackOwner } from './media/exclusive-playback';
 import { useCallback } from 'react';
 import moneySound from '../assets/money-sound-for-trader.m4a';
 import { createOneShotAudioPlayer } from './audio/one-shot-audio';
@@ -58,6 +59,8 @@ export function handleMoneySoundSessionReady(): void {
 
 function play(): void {
   if (!audioPreferenceEnabled('refreshSound')) { traceRefreshAudio('refresh-sound-off'); return; }
+  // A voice message or video is playing: the refresh sound would talk over it.
+  if (currentPlaybackOwner()) { traceRefreshAudio('refresh-sound-skipped', 'media playing'); return; }
   if (legacyPlayer) legacyPlayer.playFromGesture();
   else sharedPlayer!.playFromGesture(hasUserActivation());
 }
