@@ -56,6 +56,22 @@ export function bucket(): string | undefined {
   return env('R2_BUCKET');
 }
 
+/** The most keys one batch of signed GETs may ask for: a screen's worth of pictures, never a whole history. */
+export const MAX_BATCH_KEYS = 40;
+
+/**
+ * The keys a batch request asks to sign: 1 to MAX_BATCH_KEYS strings, each
+ * the length a real key can be, with repeats dropped. Null when the request
+ * is not that shape, so the caller answers 400 instead of guessing.
+ * Every key is still checked one by one, exactly as the single-key route
+ * checks it; this only bounds how much one request can ask for.
+ */
+export function batchKeys(raw: unknown): string[] | null {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > MAX_BATCH_KEYS) return null;
+  if (!raw.every(key => typeof key === 'string' && key.length >= 1 && key.length <= 1024)) return null;
+  return [...new Set(raw as string[])];
+}
+
 /** Null when R2 isn't configured — callers then 503 instead of throwing. */
 export function getS3(): S3Client | null {
   if (s3) return s3;
@@ -173,17 +189,51 @@ export interface Caller {
   isActivated: boolean;
 }
 
-/** Verifies the bearer token with Supabase and resolves the caller's role. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The user id a bearer token claims, NOT verified: only ever used to start
+ * reading that profile while Supabase verifies the token, and thrown away
+ * unless Supabase confirms the same id.
+ */
+export function claimedUserId(token: string): string | null {
+  const payload = token.split('.')[1];
+  if (!payload) return null;
+  try {
+    const sub = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))?.sub;
+    return typeof sub === 'string' && UUID.test(sub) ? sub : null;
+  } catch {
+    return null;
+  }
+}
+
+type ProfileRead = { data: { role?: string | null; activated_at?: string | null } | null; error: { code?: string } | null };
+
+/**
+ * Verifies the bearer token with Supabase and resolves the caller's role.
+ *
+ * Identity comes only from Supabase's verification. The profile row is read at
+ * the same time, for the id the token claims, so the two cost one round trip
+ * to the database instead of two (each is a trip across the Pacific); that
+ * early read is used only when Supabase confirms the same id, and is otherwise
+ * read again for the confirmed one.
+ */
 export async function authenticate(req: Request): Promise<Caller | null> {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) return null;
   const db = getAdmin();
   if (!db) return null;
 
-  const { data, error } = await db.auth.getUser(header.slice(7));
+  const token = header.slice(7);
+  const readProfile = (id: string): Promise<ProfileRead> =>
+    Promise.resolve(db.from('profiles').select('role, activated_at').eq('id', id).single())
+      .then(r => r as ProfileRead, (e: unknown) => ({ data: null, error: { code: (e as { code?: string })?.code ?? 'FETCH' } }));
+  const claimed = claimedUserId(token);
+  const [{ data, error }, early] = await Promise.all([db.auth.getUser(token), claimed ? readProfile(claimed) : Promise.resolve(null)]);
   if (error || !data.user) return null;
 
-  const { data: profile, error: profileError } = await db.from('profiles').select('role, activated_at').eq('id', data.user.id).single();
+  const { data: profile, error: profileError } = early && claimed === data.user.id && early.error?.code !== 'FETCH'
+    ? early : await readProfile(data.user.id);
   if (profileError && profileError.code !== 'PGRST116') throw profileError;
   return { userId: data.user.id, isAdmin: profile?.role === 'admin', isActivated: profile?.role === 'admin' || !!profile?.activated_at };
 }

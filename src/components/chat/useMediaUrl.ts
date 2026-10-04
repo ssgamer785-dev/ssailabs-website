@@ -1,5 +1,6 @@
 import { getMediaUrl } from '../../lib/chat/media-api';
 import { useLazyMediaUrl } from '../../lib/media/useLazyMediaUrl';
+import { useMediaImage } from '../../lib/media/useMediaImage';
 import type { ChatMessage } from '../../lib/chat/types';
 
 /**
@@ -15,11 +16,7 @@ export function useMediaUrl(message: ChatMessage, armed = true) {
   );
 }
 
-/** The video's poster frame — cheap, so it loads as soon as the bubble is near. */
+/** The video's poster frame — a picture like any other: prepared ahead, shown at once. */
 export function usePosterUrl(message: ChatMessage) {
-  return useLazyMediaUrl(
-    message.mediaPurged ? null : message.posterKey,
-    getMediaUrl,
-    { localUrl: message.localPosterUrl ?? null },
-  );
+  return useMediaImage('chat', message.mediaPurged ? null : message.posterKey, { localUrl: message.localPosterUrl ?? null, bytes: message.posterSizeBytes });
 }

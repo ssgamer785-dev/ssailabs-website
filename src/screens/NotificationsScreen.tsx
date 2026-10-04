@@ -9,6 +9,7 @@ import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav'
 import { PushSettingsCard } from '../components/notifications/PushSettingsCard';
 import { PreferencesCard } from '../components/notifications/PreferencesCard';
 import { notificationDestination } from '../lib/notifications/destination';
+import { intentForPath } from '../lib/media/intent';
 import { relativeTime } from '../lib/notifications/relative-time';
 
 /** Icon plate and stroke per category: [background, stroke, path]. */
@@ -118,7 +119,7 @@ export function NotificationsScreen() {
           const unread = isUnread(n);
           return (
             <div key={n.id} data-testid="notification-row" data-unread={unread ? 'true' : 'false'} style={{ display: 'flex', alignItems: 'stretch', gap: 2, padding: '4px 12px 4px 0', background: unread ? 'var(--accent-tint-2)' : 'transparent', borderLeft: unread ? '3px solid var(--accent)' : '3px solid transparent' }}>
-              <button type="button" aria-label={`Open notification: ${n.title}`} onClick={() => { void markRead(n.id); navigate(notificationDestination(n)); }} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start', gap: 12, padding: '8px 4px 8px 17px', color: 'inherit', textAlign: 'left', border: 0, background: 'transparent', cursor: 'pointer', font: 'inherit' }}>
+              <button type="button" aria-label={`Open notification: ${n.title}`} data-prefetch={intentForPath(notificationDestination(n))} onClick={() => { void markRead(n.id); navigate(notificationDestination(n)); }} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start', gap: 12, padding: '8px 4px 8px 17px', color: 'inherit', textAlign: 'left', border: 0, background: 'transparent', cursor: 'pointer', font: 'inherit' }}>
                 <NotifIcon category={n.category} />
                 <div style={css('flex:1;display:flex;flex-direction:column;gap:3px;min-width:0')}>
                   <div style={{ fontSize: 13.5, fontWeight: unread ? 700 : 600, letterSpacing: '-.2px', lineHeight: 1.35 }}>{n.title}</div>

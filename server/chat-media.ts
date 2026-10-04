@@ -13,10 +13,11 @@
  */
 
 import { Router, type Response } from 'express';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
-import { asyncRoute, authenticate, bucket, deleteObjects, getAdmin, getS3, servedAs, signedPutUrl, type Caller } from './r2.js';
+import { asyncRoute, authenticate, batchKeys, bucket, deleteObjects, getAdmin, getS3, MAX_BATCH_KEYS, servedAs, signedPutUrl, type Caller } from './r2.js';
 import { recordUploadGrant } from './upload-grants.js';
 
 /** Hard cap on stored chat media per user, enforced oldest-first. */
@@ -62,6 +63,72 @@ async function canAccessConversation(caller: Caller, conversationId: string): Pr
   if (!db) return false;
   const { data } = await db.from('conversations').select('student_id').eq('id', conversationId).single();
   return data?.student_id === caller.userId;
+}
+
+/**
+ * Of these conversations (lower-cased), the ones the caller may read: the
+ * same rule as canAccessConversation() — an activated caller's own thread, or
+ * any thread for an admin — answered with one read for a whole batch.
+ */
+async function readableConversations(caller: Caller, conversationIds: string[]): Promise<Set<string>> {
+  const ids = [...new Set(conversationIds.map(id => id.toLowerCase()))];
+  const readable = new Set<string>();
+  if (!caller.isActivated || !ids.length) return readable;
+  if (caller.isAdmin) return new Set(ids);
+  const db = getAdmin();
+  if (!db) return readable;
+  const { data, error } = await db.from('conversations').select('id, student_id').in('id', ids);
+  if (error) throw error;
+  for (const row of (data ?? []) as { id: string; student_id: string }[]) {
+    if (row.student_id === caller.userId) readable.add(String(row.id).toLowerCase());
+  }
+  return readable;
+}
+
+interface ChatObjectRow { id: string; kind: string; mime_type: string | null; file_name: string | null; conversation_id: string; storage_key: string | null; poster_key: string | null }
+
+/**
+ * Each key's live message in the key's own conversation: the message that
+ * holds it as its object, else the one that holds it as its video poster.
+ * Deleted messages and purged media are never found, and a row in another
+ * conversation never vouches for a key (the key's own conversation is what
+ * the caller was checked against). All reads run together.
+ */
+export async function findChatObjects(db: SupabaseClient, keys: { key: string; conversationId: string }[]): Promise<Map<string, { from: 'object' | 'poster'; row: ChatObjectRow }>> {
+  const found = new Map<string, { from: 'object' | 'poster'; row: ChatObjectRow }>();
+  if (!keys.length) return found;
+  const list = [...new Set(keys.map(k => k.key))];
+  const columns = 'id, kind, mime_type, file_name, conversation_id, storage_key, poster_key';
+  const [objects, posters] = await Promise.all([
+    db.from('messages').select(columns).is('deleted_at', null).eq('media_purged', false).in('storage_key', list),
+    db.from('messages').select(columns).is('deleted_at', null).eq('media_purged', false).in('poster_key', list),
+  ]);
+  if (objects.error) throw objects.error;
+  if (posters.error) throw posters.error;
+  const sameConversation = (row: ChatObjectRow, conversationId: string) => String(row.conversation_id).toLowerCase() === conversationId.toLowerCase();
+  for (const { key, conversationId } of keys) {
+    const object = ((objects.data ?? []) as ChatObjectRow[]).find(row => row.storage_key === key && sameConversation(row, conversationId));
+    if (object) { found.set(key, { from: 'object', row: object }); continue; }
+    const poster = ((posters.data ?? []) as ChatObjectRow[]).find(row => row.poster_key === key && sameConversation(row, conversationId));
+    if (poster) found.set(key, { from: 'poster', row: poster });
+  }
+  return found;
+}
+
+/** How a found chat object is served: its recorded type when allowed for its kind (else a plain download); a poster is a JPEG. */
+function servedForChatObject(found: { from: 'object' | 'poster'; row: ChatObjectRow }): ReturnType<typeof servedAs> {
+  if (found.from === 'poster') return servedAs({ mimeType: POSTER_MIME, allowed: true, download: false });
+  const { row } = found;
+  return servedAs({
+    mimeType: row.mime_type,
+    allowed: !!ALLOWED_MIME[row.kind]?.test(row.mime_type ?? ''),
+    download: row.kind === 'file',
+    fileName: row.file_name,
+  });
+}
+
+function signChatGet(key: string, served: ReturnType<typeof servedAs>): Promise<string> {
+  return getSignedUrl(getS3()!, new GetObjectCommand({ Bucket: bucket()!, Key: key, ...served }), { expiresIn: GET_URL_TTL_SECONDS });
 }
 
 export interface PurgeVictim {
@@ -505,29 +572,48 @@ export function chatMediaRouter(): Router {
       return res.status(403).json({ error: 'You do not have access to this media.' });
     }
 
-    const db = getAdmin()!;
-    const base = () => db.from('messages').select('id, kind, mime_type, file_name')
-      .eq('conversation_id', conversationId).is('deleted_at', null).eq('media_purged', false);
-    const { data: object, error: objectError } = await base().eq('storage_key', storageKey).maybeSingle();
-    if (objectError) throw objectError;
-    const { data: poster, error: posterError } = object ? { data: object, error: null } : await base().eq('poster_key', storageKey).maybeSingle();
-    if (posterError) throw posterError;
-    if (!object && !poster) return res.status(404).json({ error: 'Attachment unavailable.' });
-
-    const served = object
-      ? servedAs({
-          mimeType: object.mime_type,
-          allowed: !!ALLOWED_MIME[object.kind]?.test(object.mime_type ?? ''),
-          download: object.kind === 'file',
-          fileName: object.file_name,
-        })
-      : servedAs({ mimeType: POSTER_MIME, allowed: true, download: false });
-    const url = await getSignedUrl(
-      getS3()!,
-      new GetObjectCommand({ Bucket: bucket()!, Key: storageKey, ...served }),
-      { expiresIn: GET_URL_TTL_SECONDS },
-    );
+    const found = (await findChatObjects(getAdmin()!, [{ key: storageKey, conversationId }])).get(storageKey);
+    if (!found) return res.status(404).json({ error: 'Attachment unavailable.' });
+    const url = await signChatGet(storageKey, servedForChatObject(found));
     res.json({ url, expiresIn: GET_URL_TTL_SECONDS });
+  }));
+
+  /**
+   * Signed GETs for a screen's worth of keys (up to MAX_BATCH_KEYS) in one
+   * request. Every key passes the checks /media-url makes: shaped like a key
+   * this server mints, in a conversation the caller may read, and named by a
+   * live message of that same conversation. A key that /media-url would
+   * refuse is listed under `failed` with the status it would have answered
+   * (400 / 403 / 404); private media is never signed for anyone else.
+   */
+  router.post('/media-urls', asyncRoute(async (req, res) => {
+    if (!requireConfigured(res)) return;
+    const caller = await authenticate(req);
+    if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
+    const keys = batchKeys(req.body?.keys);
+    if (!keys) return res.status(400).json({ error: `Send 1 to ${MAX_BATCH_KEYS} media keys.` });
+
+    const urls: Record<string, { url: string; expiresIn: number }> = {};
+    const failed: Record<string, number> = {};
+    const wanted: { key: string; conversationId: string }[] = [];
+    for (const key of keys) {
+      // The conversation segment of the key is what authorizes the read.
+      const conversationId = conversationFromKey(key);
+      if (conversationId) wanted.push({ key, conversationId }); else failed[key] = 400;
+    }
+    const readable = await readableConversations(caller, wanted.map(w => w.conversationId));
+    const allowed = wanted.filter(w => {
+      if (readable.has(w.conversationId.toLowerCase())) return true;
+      failed[w.key] = 403;
+      return false;
+    });
+    const found = await findChatObjects(getAdmin()!, allowed);
+    await Promise.all(allowed.map(async ({ key }) => {
+      const hit = found.get(key);
+      if (!hit) { failed[key] = 404; return; }
+      urls[key] = { url: await signChatGet(key, servedForChatObject(hit)), expiresIn: GET_URL_TTL_SECONDS };
+    }));
+    res.json({ urls, failed });
   }));
 
   /**

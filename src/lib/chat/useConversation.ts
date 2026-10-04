@@ -21,6 +21,8 @@ import {
 import { friendlyError } from '../errors';
 import { measureImage } from '../media/dimensions';
 import { announceNotificationsChanged } from '../notifications/events';
+import { readView, warmView, writeView } from '../view-cache';
+import type { ChatOverview } from './useChatOverview';
 
 const PAGE_SIZE = 30;
 const TYPING_TIMEOUT_MS = 3500;
@@ -60,6 +62,41 @@ const isMissingColumn = (error: { code?: string; message?: string } | null) =>
   !!error && (error.code === '42703' || error.code === 'PGRST204' || /column .* does not exist|Could not find .* column/i.test(error.message ?? ''));
 /** Items of an album uploading at the same time. */
 const ALBUM_CONCURRENCY = 3;
+
+/** A thread's latest page as last read, per account (memory only), so opening it renders at once. */
+export const threadViewKey = (userId: string, conversationId: string) => `chat:${userId}:${conversationId}`;
+
+/** The newest page of a thread, oldest first. Falls back to the pre-RC5 columns on a database without them. */
+async function queryLatest(conversationId: string): Promise<{ rows: ChatMessage[]; error: { code?: string; message?: string } | null }> {
+  // Which columns this read asks for. Several threads can be read at the same moment (an admin's recent threads,
+  // or a thread being prepared while another is opened): each read that asked for the RC5 columns and found them
+  // missing tries again without them — even when another read has just found that out.
+  const askedForRc5 = albumSchema !== false;
+  const { data, error } = await supabase
+    .from('messages')
+    .select(columns())
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(PAGE_SIZE);
+  if (error && askedForRc5 && isMissingColumn(error)) {
+    // A database the RC5 migration has not reached: read what it has.
+    albumSchema = false;
+    return queryLatest(conversationId);
+  }
+  if (error) return { rows: [], error };
+  if (albumSchema === undefined) albumSchema = true;
+  return { rows: sortByTime(((data ?? []) as MessageRow[]).map(toMessage)), error: null };
+}
+
+/** Reads a thread's latest page in the background (after sign-in, or when a member is about to open it). */
+export function warmConversation(userId: string, conversationId: string): Promise<ChatMessage[]> {
+  return warmView(threadViewKey(userId, conversationId), async () => {
+    const { rows, error } = await queryLatest(conversationId);
+    if (error) throw error;
+    return rows;
+  });
+}
 
 function toMessage(row: MessageRow): ChatMessage {
   const uploadStatus: UploadStatus = row.upload_status ?? 'ready';
@@ -138,10 +175,14 @@ export function useConversation(explicitConversationId?: string): UseConversatio
   const { user } = useAuth();
   const userId = user?.id ?? null;
 
-  const [conversationId, setConversationId] = useState<string | null>(explicitConversationId ?? null);
+  // A student's own thread is already known from the chat overview, and its latest page may have been read
+  // ahead: then the thread is on screen in the first frame and refreshes behind.
+  const knownId = explicitConversationId ?? (userId ? readView<ChatOverview | null>(`chat-overview:${userId}`)?.conversationId ?? null : null);
+  const cachedThread = userId && knownId ? readView<ChatMessage[]>(threadViewKey(userId, knownId)) : undefined;
+  const [conversationId, setConversationId] = useState<string | null>(knownId);
   const [openAttempt, setOpenAttempt] = useState(0);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [messages, setMessages] = useState<ChatMessage[]>(cachedThread ?? []);
+  const [loading, setLoading] = useState(!cachedThread);
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -152,13 +193,15 @@ export function useConversation(explicitConversationId?: string): UseConversatio
   const typingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastTypingSent = useRef(0);
   /** Newest server timestamp we hold — the gap-fill anchor after a reconnect. */
-  const newestAt = useRef<string | null>(null);
+  const newestAt = useRef<string | null>(cachedThread?.length ? cachedThread[cachedThread.length - 1].createdAt : null);
   /** Every object URL this thread minted, so unmount can revoke all of them. */
   const objectUrls = useRef<string[]>([]);
 
   /** The latest list, for callbacks that must not re-create on every change. */
   const messagesRef = useRef<ChatMessage[]>([]);
   messagesRef.current = messages;
+  const conversationIdRef = useRef(conversationId);
+  conversationIdRef.current = conversationId;
 
   const trackObjectUrl = useCallback((url: string) => {
     objectUrls.current.push(url);
@@ -174,16 +217,19 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     }
     if (!userId) return;
     let active = true;
-    setLoading(true);
+    // With the thread already known (and on screen), this only confirms it, quietly.
+    const quiet = !!conversationIdRef.current;
+    if (!quiet) setLoading(true);
     setError(null);
     Promise.resolve(supabase.rpc('get_or_create_my_conversation')).then(({ data, error: rpcError }) => {
       if (!active) return;
       if (rpcError || !data) {
+        if (quiet) return;
         setError(friendlyError(rpcError, 'Could not open this conversation.'));
         setLoading(false);
       } else setConversationId(data as unknown as string);
     }).catch(() => {
-      if (!active) return;
+      if (!active || quiet) return;
       setError('Could not open this conversation.');
       setLoading(false);
     });
@@ -199,42 +245,31 @@ export function useConversation(explicitConversationId?: string): UseConversatio
   // ---- initial page -------------------------------------------------------
 
   const loadLatest = useCallback(async (id: string) => {
-    const { data, error: qErr } = await supabase
-      .from('messages')
-      .select(columns())
-      .eq('conversation_id', id)
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false })
-      .limit(PAGE_SIZE);
-
-    if (qErr && albumSchema !== false && isMissingColumn(qErr)) {
-      // A database the RC5 migration has not reached: read what it has.
-      albumSchema = false;
-      return loadLatest(id);
-    }
+    const { rows: ordered, error: qErr } = await queryLatest(id);
     if (qErr) {
       setError(friendlyError(qErr, 'Could not load messages.'));
       return;
     }
-    if (albumSchema === undefined) albumSchema = true;
-    const rows = ((data ?? []) as MessageRow[]).map(toMessage);
-    setHasMore(rows.length === PAGE_SIZE);
-    const ordered = sortByTime(rows);
+    setHasMore(ordered.length === PAGE_SIZE);
     newestAt.current = ordered.length ? ordered[ordered.length - 1].createdAt : null;
+    if (userId) writeView(threadViewKey(userId, id), ordered);
     // Preserve any in-flight optimistic messages across a refetch.
     setMessages(prev => {
       const pending = prev.filter(m => m.status !== 'sent');
       return ordered.reduce(upsert, pending);
     });
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     if (!conversationId) return;
     let active = true;
-    setLoading(true);
+    // A copy already on screen stays there while the latest page is read behind it.
+    const copy = userId ? readView<ChatMessage[]>(threadViewKey(userId, conversationId)) : undefined;
+    if (copy) setMessages(prev => (prev.length ? prev : copy));
+    setLoading(!copy);
     loadLatest(conversationId).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [conversationId, loadLatest]);
+  }, [conversationId, loadLatest, userId]);
 
   const loadOlder = useCallback(async () => {
     if (!conversationId || loadingOlder || !hasMore) return;

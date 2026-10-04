@@ -3,7 +3,8 @@ import { supabase } from '../supabase';
 import { withPostMedia } from './multi-media';
 import { subscribeCommunityActivity } from './activity';
 import { useAuth } from '../auth-context';
-import { toPost, type FeedPost, type FeedRow } from './useFeed';
+import { feedKey, toPost, type FeedPost, type FeedRow } from './useFeed';
+import { readView } from '../view-cache';
 import { announceNotificationsChanged } from '../notifications/events';
 
 /**
@@ -35,6 +36,8 @@ type DetailRow = FeedRow & {
 
 export interface UsePost {
   post: PostDetail | null;
+  /** False while the post shown is the feed's copy (bookmark and avatar not read yet). */
+  complete: boolean;
   loading: boolean;
   notFound: boolean;
   error: string | null;
@@ -43,10 +46,26 @@ export interface UsePost {
   refresh: () => Promise<void>;
 }
 
+/**
+ * The feed's copy of a post the member has already seen in a channel: shown at
+ * once (with the pictures prepared for that feed) while post_by_id completes
+ * it behind. Its bookmark and the author's picture are not in a feed row, so
+ * until then the copy says it is not complete and the bookmark waits.
+ */
+function feedCopy(userId: string | undefined, postId: string | null): PostDetail | null {
+  if (!userId || !postId) return null;
+  for (const channel of ['official', 'students'] as const) {
+    const hit = readView<FeedPost[]>(feedKey(userId, channel))?.find(p => p.id === postId);
+    if (hit) return { ...hit, bookmarkedByMe: false, authorAvatarKey: null };
+  }
+  return null;
+}
+
 export function usePost(postId: string | null): UsePost {
   const { user } = useAuth();
-  const [post, setPost] = useState<PostDetail | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [post, setPost] = useState<PostDetail | null>(() => feedCopy(user?.id, postId));
+  const [complete, setComplete] = useState(false);
+  const [loading, setLoading] = useState(() => !feedCopy(user?.id, postId));
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,16 +88,22 @@ export function usePost(postId: string | null): UsePost {
       bookmarkedByMe: row.bookmarked_by_me,
       authorAvatarKey: row.author_avatar_key,
     });
+    setComplete(true);
     setNotFound(false);
     setError(null);
   }, [postId]);
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
+    const copy = feedCopy(user?.id, postId);
+    // A copy from the feed stays on screen while the full post is read; otherwise "Loading…".
+    setPost(previous => (previous?.id === postId ? previous : copy));
+    setComplete(false);
+    setLoading(!copy);
     setNotFound(false);
     refresh().finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
+    // user?.id only picks the copy; a refresh is keyed by the post itself.
   }, [refresh]);
 
   // Opening a post clears the notifications about it (a comment, a like, its
@@ -140,7 +165,8 @@ export function usePost(postId: string | null): UsePost {
   }, [post, user]);
 
   const toggleBookmark = useCallback(async () => {
-    if (!post || !user) return;
+    // Not known yet for the feed's copy: wait for the full post rather than guess.
+    if (!post || !user || !complete) return;
     const saved = post.bookmarkedByMe;
     setPost(p => p && ({ ...p, bookmarkedByMe: !saved }));
 
@@ -152,7 +178,7 @@ export function usePost(postId: string | null): UsePost {
       setPost(p => p && ({ ...p, bookmarkedByMe: saved }));
       setError(mutError.message);
     }
-  }, [post, user]);
+  }, [post, user, complete]);
 
-  return { post, loading, notFound, error, toggleLike, toggleBookmark, refresh };
+  return { post, complete, loading, notFound, error, toggleLike, toggleBookmark, refresh };
 }

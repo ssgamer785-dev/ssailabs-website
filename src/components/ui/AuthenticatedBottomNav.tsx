@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { intentForPath } from '../../lib/media/intent';
 import { css } from '../../lib/css';
 
 export type NavTab = 'home' | 'community' | 'calculator' | 'calendar' | 'chat';
@@ -101,6 +102,7 @@ export function AuthenticatedBottomNav() {
             // Re-tapping the tab you are on replaces the entry instead of
             // stacking duplicates that Back then has to walk through.
             onClick={() => navigate(route, { replace: on })}
+            data-prefetch={intentForPath(route)}
             aria-current={on ? 'page' : undefined}
             className="pressable"
             style={css(

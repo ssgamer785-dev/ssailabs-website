@@ -7,6 +7,9 @@ import { useAuth } from '../lib/auth-context';
 import { supabase } from '../lib/supabase';
 import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { useConversation } from '../lib/chat/useConversation';
+import type { AdminConversation } from '../lib/chat/useAdminConversations';
+import { readView } from '../lib/view-cache';
+import { noteText } from '../lib/media/media-metrics';
 import { useVoiceRecorder, type VoiceRecording } from '../lib/chat/useVoiceRecorder';
 import { formatDuration, type MediaKind } from '../lib/chat/types';
 import { PhoneShell } from '../components/PhoneShell';
@@ -79,7 +82,15 @@ export function AdminChatScreen() {
   // this admin cannot read); say so instead of offering to start one.
   const [threadMissing, setThreadMissing] = useState(false);
   const chatReady = !!chat.conversationId && !chat.loading && !threadMissing;
-  const [peer, setPeer] = useState<{ id: string; name: string; avatarKey: string | null } | null>(null);
+  // The member's name and picture are already in the inbox the admin came from: the header is complete at once.
+  const [peer, setPeer] = useState<{ id: string; name: string; avatarKey: string | null } | null>(() => {
+    if (!isAdmin || !conversationId || !user) return null;
+    const row = readView<AdminConversation[]>(`admin-inbox:${user.id}`)?.find(c => c.conversationId === conversationId);
+    return row ? { id: row.studentId, name: row.fullName, avatarKey: row.avatarKey } : null;
+  });
+  // On-device timing (Device diagnostics): the thread's messages are on screen.
+  const hasMessages = chat.messages.length > 0;
+  useEffect(() => { if (hasMessages) noteText(); }, [hasMessages]);
   useEffect(() => {
     if (!isAdmin || !conversationId) { setPeer(null); setThreadMissing(false); return; }
     let active = true;

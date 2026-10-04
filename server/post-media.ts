@@ -12,7 +12,7 @@ import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
 import { posix as posixPath } from 'path';
-import { asyncRoute, authenticate, bucket, deleteObjects, getAdmin, getS3, servedAs, signedPutUrl } from './r2.js';
+import { asyncRoute, authenticate, batchKeys, bucket, deleteObjects, getAdmin, getS3, MAX_BATCH_KEYS, servedAs, signedPutUrl } from './r2.js';
 import { recordUploadGrant } from './upload-grants.js';
 
 const PUT_URL_TTL_SECONDS = 300;
@@ -250,23 +250,98 @@ async function postMediaItems(db: SupabaseClient, postIds: string[]): Promise<Po
   return (data ?? []) as PostMediaItem[];
 }
 
-/** The post_media item (and its post's author and anonymity) that holds this key as object or poster. */
-async function postMediaItem(db: SupabaseClient, key: string): Promise<(PostMediaItem & { isPoster: boolean; author_id: string; is_anonymous: boolean }) | null> {
-  for (const column of ['storage_key', 'poster_key'] as const) {
-    const { data, error } = await db.from('post_media')
-      .select('id, post_id, kind, storage_key, poster_key, mime_type, file_name')
-      .eq(column, key).eq('media_purged', false).maybeSingle();
-    if (error) {
-      if (isMissingDatabaseObject(error)) return null;
-      throw error;
-    }
-    if (!data) continue;
-    const { data: post, error: postError } = await db.from('posts').select('author_id, is_anonymous').eq('id', data.post_id).maybeSingle();
-    if (postError) throw postError;
-    if (!post) return null;
-    return { ...(data as PostMediaItem), isPoster: column === 'poster_key', author_id: post.author_id as string, is_anonymous: !!post.is_anonymous };
+interface PostObjectRow {
+  attachment: string | null; mime_type: string | null; file_name: string | null;
+  author_id: string | null; is_anonymous: boolean | null; storage_key: string | null; poster_key: string | null;
+}
+
+/** Where a post media key lives: a post's own object, a post's video poster, or one of a post's items 2..n (RC5). */
+export type PostObject =
+  | { from: 'post'; row: PostObjectRow }
+  | { from: 'poster' }
+  | { from: 'item'; item: PostMediaItem & { isPoster: boolean; author_id: string; is_anonymous: boolean } };
+
+/**
+ * Finds every key the way /media-url always has, for one key or a screen's
+ * worth at once: the post that holds it as its object; else the post that
+ * holds it as its video poster; else the post_media item that holds it
+ * (object, then poster), with that item's post's author and anonymity. Purged
+ * media is never found. All reads run together, so a batch costs the same
+ * round trips as a single key. Before the RC5 migration there are no items.
+ */
+export async function findPostObjects(db: SupabaseClient, keys: string[]): Promise<Map<string, PostObject>> {
+  const found = new Map<string, PostObject>();
+  if (!keys.length) return found;
+  const postColumns = 'id, attachment, mime_type, file_name, author_id, is_anonymous, storage_key, poster_key';
+  const itemColumns = 'id, post_id, kind, storage_key, poster_key, mime_type, file_name';
+  const [objects, posters, itemObjects, itemPosters] = await Promise.all([
+    db.from('posts').select(postColumns).eq('media_purged', false).in('storage_key', keys),
+    db.from('posts').select(postColumns).eq('media_purged', false).in('poster_key', keys),
+    db.from('post_media').select(itemColumns).eq('media_purged', false).in('storage_key', keys),
+    db.from('post_media').select(itemColumns).eq('media_purged', false).in('poster_key', keys),
+  ]);
+  if (objects.error) throw objects.error;
+  if (posters.error) throw posters.error;
+  for (const result of [itemObjects, itemPosters]) {
+    if (result.error && !isMissingDatabaseObject(result.error)) throw result.error;
   }
-  return null;
+
+  for (const row of (objects.data ?? []) as PostObjectRow[]) {
+    if (row.storage_key && !found.has(row.storage_key)) found.set(row.storage_key, { from: 'post', row });
+  }
+  for (const row of (posters.data ?? []) as PostObjectRow[]) {
+    if (row.poster_key && !found.has(row.poster_key)) found.set(row.poster_key, { from: 'poster' });
+  }
+
+  const items: (PostMediaItem & { isPoster: boolean })[] = [
+    ...((itemObjects.error ? [] : itemObjects.data ?? []) as PostMediaItem[]).map(item => ({ ...item, isPoster: false })),
+    ...((itemPosters.error ? [] : itemPosters.data ?? []) as PostMediaItem[]).map(item => ({ ...item, isPoster: true })),
+  ].filter(item => {
+    const key = item.isPoster ? item.poster_key : item.storage_key;
+    return !!key && !found.has(key);
+  });
+  if (!items.length) return found;
+
+  const { data: parents, error: parentError } = await db.from('posts').select('id, author_id, is_anonymous')
+    .in('id', [...new Set(items.map(item => item.post_id))]);
+  if (parentError) throw parentError;
+  const parentOf = new Map(((parents ?? []) as { id: string; author_id: string; is_anonymous: boolean | null }[]).map(p => [p.id, p]));
+  for (const item of items) {
+    const key = (item.isPoster ? item.poster_key : item.storage_key) as string;
+    const parent = parentOf.get(item.post_id);
+    if (!parent || found.has(key)) continue;
+    found.set(key, { from: 'item', item: { ...item, author_id: parent.author_id, is_anonymous: !!parent.is_anonymous } });
+  }
+  return found;
+}
+
+/** How a found post object is served to this caller: its recorded type if allowed, and a neutral download name on an anonymous post. */
+export function servedForPostObject(found: PostObject, caller: { userId: string; isAdmin: boolean }): ReturnType<typeof servedAs> {
+  if (found.from === 'item') {
+    const { item } = found;
+    return item.isPoster
+      ? servedAs({ mimeType: POSTER_MIME, allowed: true, download: false })
+      : servedAs({
+          mimeType: item.mime_type,
+          allowed: isAllowedAttachment(item.kind, item.mime_type),
+          download: item.kind === 'file',
+          fileName: downloadName({ file_name: item.file_name, author_id: item.author_id, is_anonymous: item.is_anonymous }, caller),
+        });
+  }
+  if (found.from === 'post') {
+    const { row } = found;
+    return servedAs({
+      mimeType: row.mime_type,
+      allowed: isAllowedAttachment(row.attachment, row.mime_type),
+      download: row.attachment === 'file',
+      fileName: downloadName(row, caller),
+    });
+  }
+  return servedAs({ mimeType: POSTER_MIME, allowed: true, download: false });
+}
+
+function signGet(key: string, served: ReturnType<typeof servedAs>): Promise<string> {
+  return getSignedUrl(getS3()!, new GetObjectCommand({ Bucket: bucket()!, Key: key, ...served }), { expiresIn: GET_URL_TTL_SECONDS });
 }
 
 export function postMediaRouter(): Router {
@@ -373,39 +448,43 @@ export function postMediaRouter(): Router {
       return res.status(400).json({ error: 'Invalid media key.' });
     }
 
-    const db = getAdmin()!;
-    const base = () => db.from('posts').select('id, attachment, mime_type, file_name, author_id, is_anonymous').eq('media_purged', false);
-    const { data: object, error: objectError } = await base().eq('storage_key', storageKey).maybeSingle();
-    if (objectError) throw objectError;
-    const { data: poster, error: posterError } = object ? { data: object, error: null } : await base().eq('poster_key', storageKey).maybeSingle();
-    if (posterError) throw posterError;
     // Items 2..n of a post (RC5) live in post_media, under the same rules.
-    const item = object || poster ? null : await postMediaItem(db, storageKey);
-    if (!object && !poster && !item) return res.status(404).json({ error: 'Attachment unavailable.' });
-
-    const served = item
-      ? (item.isPoster
-          ? servedAs({ mimeType: POSTER_MIME, allowed: true, download: false })
-          : servedAs({
-              mimeType: item.mime_type,
-              allowed: isAllowedAttachment(item.kind, item.mime_type),
-              download: item.kind === 'file',
-              fileName: downloadName({ file_name: item.file_name, author_id: item.author_id, is_anonymous: item.is_anonymous }, caller),
-            }))
-      : object
-      ? servedAs({
-          mimeType: object.mime_type,
-          allowed: isAllowedAttachment(object.attachment, object.mime_type),
-          download: object.attachment === 'file',
-          fileName: downloadName(object, caller),
-        })
-      : servedAs({ mimeType: POSTER_MIME, allowed: true, download: false });
-    const url = await getSignedUrl(
-      getS3()!,
-      new GetObjectCommand({ Bucket: bucket()!, Key: storageKey, ...served }),
-      { expiresIn: GET_URL_TTL_SECONDS },
-    );
+    const found = (await findPostObjects(getAdmin()!, [storageKey])).get(storageKey);
+    if (!found) return res.status(404).json({ error: 'Attachment unavailable.' });
+    const url = await signGet(storageKey, servedForPostObject(found, caller));
     res.json({ url, expiresIn: GET_URL_TTL_SECONDS });
+  }));
+
+  /**
+   * Signed GETs for a screen's worth of keys (up to MAX_BATCH_KEYS) in one
+   * request: every key passes exactly the checks /media-url makes, through the
+   * same code. A key that /media-url would refuse is listed under `failed`
+   * with the status /media-url would have answered (400 / 404); the others
+   * are signed as /media-url would sign them.
+   */
+  router.post('/media-urls', asyncRoute(async (req, res) => {
+    if (!requireConfigured(res)) return;
+    const caller = await authenticate(req);
+    if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
+    if (!caller.isActivated) return res.status(403).json({ error: 'Activate your account first.' });
+    const keys = batchKeys(req.body?.keys);
+    if (!keys) return res.status(400).json({ error: `Send 1 to ${MAX_BATCH_KEYS} media keys.` });
+
+    const urls: Record<string, { url: string; expiresIn: number }> = {};
+    const failed: Record<string, number> = {};
+    const resolved = new Map<string, string>();
+    for (const key of keys) {
+      // Resolved, not just prefixed: see postObjectKey().
+      const object = postObjectKey(key);
+      if (object) resolved.set(key, object); else failed[key] = 400;
+    }
+    const found = await findPostObjects(getAdmin()!, [...new Set(resolved.values())]);
+    await Promise.all([...resolved].map(async ([key, object]) => {
+      const hit = found.get(object);
+      if (!hit) { failed[key] = 404; return; }
+      urls[key] = { url: await signGet(object, servedForPostObject(hit, caller)), expiresIn: GET_URL_TTL_SECONDS };
+    }));
+    res.json({ urls, failed });
   }));
 
   /** Clears the R2 object behind a post the caller is allowed to remove. */

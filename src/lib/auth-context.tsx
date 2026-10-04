@@ -3,6 +3,7 @@ import type { Session, User } from '@supabase/supabase-js';
 import { rememberSession, supabase } from './supabase';
 import { clearCachedProfile, readCachedProfile, writeCachedProfile } from './profile-cache';
 import { clearViews } from './view-cache';
+import { clearMediaCaches, setMediaAccount } from './media/media-cache';
 import type { Database } from './database.types';
 import { unsubscribePush } from './notifications/push';
 import { profileActionFor, stableUser } from './auth-events';
@@ -164,6 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth.getSession().then(({ data }) => {
       if (!active) return;
       setSession(data.session);
+      setMediaAccount(data.session?.user.id ?? null);
       setLoading(false);
       if (data.session?.user) startProfile(data.session.user.id);
     });
@@ -173,7 +175,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (event === 'PASSWORD_RECOVERY') markPasswordRecovery();
       setSession(newSession);
       const action = profileActionFor(event, newSession?.user?.id, profileRef.current?.id);
-      if (action === 'clear') { setProfile(null); setProfileLoading(false); setProfileError(false); clearCachedProfile(); clearViews(); }
+      if (newSession?.user) setMediaAccount(newSession.user.id);
+      if (action === 'clear') { setProfile(null); setProfileLoading(false); setProfileError(false); clearCachedProfile(); clearViews(); void clearMediaCaches(); }
       else if (action === 'load') startProfile(newSession!.user.id);
       else if (action === 'refresh-silently') void loadProfile(newSession!.user.id, true);
     });
@@ -270,6 +273,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await unsubscribePush().catch(() => {});
     clearCachedProfile();
     clearViews();
+    // Every picture, signed address and size hint kept for this device's accounts goes with the session.
+    await clearMediaCaches().catch(() => {});
     // The default is global and revokes this account's sessions on every device.
     await supabase.auth.signOut({ scope: 'local' });
   }, []);

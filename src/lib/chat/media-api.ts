@@ -5,7 +5,7 @@
  */
 
 import { supabase } from '../supabase';
-import { fetchSignedUrl } from '../media/fetchSignedUrl';
+import { peekMedia, signedUrl } from '../media/media-cache';
 import { OFFLINE_MESSAGE, ReadableError } from '../errors';
 import type { MediaKind } from './types';
 
@@ -158,37 +158,13 @@ export async function deleteRemoteMedia(messageId: string): Promise<void> {
 }
 
 /**
- * Resolves a private R2 key to a short-lived signed URL. Cached in-memory and
- * expired early, so a scrolling thread doesn't re-sign the same object.
+ * Resolves a private R2 key to a short-lived signed URL: from the shared media
+ * cache (this page's memory only — chat addresses are never written to the
+ * device) when one is still valid, otherwise signed together with every other
+ * request made in the same moment. `force` always signs afresh.
  */
-const urlCache = new Map<string, { url: string; expiresAt: number }>();
-/** Collapses the burst of requests a fast scroll makes for the same key. */
-const inFlight = new Map<string, Promise<string>>();
-
-export async function getMediaUrl(storageKey: string, force = false): Promise<string> {
-  const { data } = await supabase.auth.getSession();
-  const userId = data.session?.user.id;
-  if (!userId) throw new Error('Your session has ended. Please sign in again.');
-  const cacheKey = `${userId}:${storageKey}`;
-  if (force) urlCache.delete(cacheKey);
-  const hit = urlCache.get(cacheKey);
-  if (hit && hit.expiresAt > Date.now()) return hit.url;
-
-  const pending = inFlight.get(cacheKey);
-  if (pending && !force) return pending;
-  if (pending) await pending.catch(() => {});
-
-  const work = (async () => {
-    const { url, expiresIn } = await fetchSignedUrl(`/api/chat/media-url?key=${encodeURIComponent(storageKey)}`);
-    // Re-sign a minute before the real expiry to avoid racing a long render.
-    urlCache.set(cacheKey, { url, expiresAt: Date.now() + (expiresIn - 60) * 1000 });
-    return url as string;
-  })();
-
-  inFlight.set(cacheKey, work);
-  try {
-    return await work;
-  } finally {
-    inFlight.delete(cacheKey);
-  }
-}
+export const getMediaUrl = Object.assign(
+  (storageKey: string, force = false): Promise<string> => signedUrl('chat', storageKey, force),
+  /** What can be shown at once without asking anyone (a prepared picture, or a valid address). */
+  { peek: (storageKey: string) => peekMedia('chat', storageKey)?.src ?? null },
+);

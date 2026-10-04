@@ -17,7 +17,7 @@ import { ResetPasswordScreen } from './screens/ResetPasswordScreen';
 import { SignupScreen } from './screens/SignupScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 import { NameVisibilityScreen } from './screens/NameVisibilityScreen';
-import { DataWarmup, NavigationProgress, RouteFallback, RoutePreloader } from './components/RouteRuntime';
+import { DataWarmup, IntentPrefetch, MediaTimingRuntime, NavigationProgress, RouteFallback, RoutePreloader } from './components/RouteRuntime';
 import { HelpSupportScreen } from './screens/HelpSupportScreen';
 import { PushNotifications } from './components/PushNotifications';
 import { AppBadgeSync } from './components/AppBadgeSync';
@@ -53,6 +53,11 @@ function LocationResetBoundary({ children }: { children: ReactNode }) {
 const MEMBER_SCREENS = [HomeScreen, CommunityPage, ChatListScreen, NotificationsScreen, PostDetailScreen, AdminChatRoute,
   CreatePostScreen, RiskCalculatorScreen, EconomicCalendarScreen, HapticsScreen, PersonalInformationScreen];
 const ADMIN_SCREENS = [AdminInboxScreen, AdminMembershipRequestsScreen, AdminActivationCodesScreen];
+/** The screens each `data-prefetch` intent opens (IntentPrefetch fetches their code as the member reaches for them). */
+const INTENT_SCREENS = {
+  community: [CommunityPage], chat: [ChatListScreen, AdminChatRoute, AdminInboxScreen],
+  post: [PostDetailScreen], notifications: [NotificationsScreen],
+};
 
 export default function App() {
   return (
@@ -69,6 +74,8 @@ export default function App() {
           <NavigationProgress />
           <RoutePreloader member={MEMBER_SCREENS} admin={ADMIN_SCREENS} />
           <DataWarmup />
+          <IntentPrefetch screens={INTENT_SCREENS} />
+          <MediaTimingRuntime />
           <LocationResetBoundary><Suspense fallback={<RouteFallback />}><Routes>
             <Route path="/" element={<SplashScreen />} />
             {/* The entry point for anyone signed out. */}

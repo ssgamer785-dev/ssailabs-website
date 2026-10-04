@@ -130,10 +130,10 @@ export interface UseFeed {
  * rendering a feed is a single round trip rather than a query per post.
  */
 /** The first page of a channel, kept per account so a return visit renders at once. */
-const feedKey = (userId: string | undefined, channel: PostChannel) => `feed:${userId ?? '-'}:${channel}`;
+export const feedKey = (userId: string | undefined, channel: PostChannel) => `feed:${userId ?? '-'}:${channel}`;
 
 /** Fetches a channel's first page in the background (after sign-in) so the first visit is instant too. */
-export function warmFeed(userId: string, channel: PostChannel): Promise<unknown> {
+export function warmFeed(userId: string, channel: PostChannel): Promise<FeedPost[]> {
   return warmView(feedKey(userId, channel), () => fetchFeedPage(channel, null, PAGE_SIZE));
 }
 
@@ -142,12 +142,26 @@ export function useFeed(channel: PostChannel): UseFeed {
   const cacheKey = feedKey(user?.id, channel);
   const cached = readView<FeedPost[]>(cacheKey);
   const [posts, setPosts] = useState<FeedPost[]>(cached ?? []);
+  const [postsKey, setPostsKey] = useState(cacheKey);
   // With a copy on screen there is nothing to wait for: it refreshes behind.
   const [loading, setLoading] = useState(!cached);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const oldestRef = useRef<string | null>(null);
+  const keyRef = useRef(cacheKey);
+  keyRef.current = cacheKey;
+
+  // Another channel (or account): its own copy in this very render, so the
+  // previous channel's posts are never on screen under the new tab, even for a frame.
+  if (postsKey !== cacheKey) {
+    setPostsKey(cacheKey);
+    setPosts(cached ?? []);
+    setLoading(!cached);
+    setError(null);
+    // No "more" until this channel's own first page has been read (never the other channel's cursor).
+    setHasMore(false);
+  }
 
   const fetchPage = useCallback(
     (before: string | null) => fetchFeedPage(channel, before, PAGE_SIZE),
@@ -157,12 +171,15 @@ export function useFeed(channel: PostChannel): UseFeed {
   const refresh = useCallback(async () => {
     try {
       const rows = await fetchPage(null);
+      writeView(cacheKey, rows);
+      // Switched to the other channel meanwhile: this page is kept, but not put on screen.
+      if (keyRef.current !== cacheKey) return;
       setHasMore(rows.length === PAGE_SIZE);
       oldestRef.current = rows.length ? rows[rows.length - 1].createdAt : null;
       setPosts(rows);
-      writeView(cacheKey, rows);
       setError(null);
     } catch (e) {
+      if (keyRef.current !== cacheKey) return;
       console.error('[community] feed load failed:', e);
       setError(friendlyError(e, 'Could not load the feed.'));
     }
@@ -179,8 +196,10 @@ export function useFeed(channel: PostChannel): UseFeed {
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || !oldestRef.current) return;
     setLoadingMore(true);
+    const forKey = cacheKey;
     try {
       const rows = await fetchPage(oldestRef.current);
+      if (keyRef.current !== forKey) return;
       setHasMore(rows.length === PAGE_SIZE);
       if (rows.length) {
         oldestRef.current = rows[rows.length - 1].createdAt;
@@ -196,7 +215,7 @@ export function useFeed(channel: PostChannel): UseFeed {
     } finally {
       setLoadingMore(false);
     }
-  }, [fetchPage, hasMore, loadingMore]);
+  }, [fetchPage, hasMore, loadingMore, cacheKey]);
 
   // ---- realtime ------------------------------------------------------------
 

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { css } from '../../lib/css';
 import { getMediaUrl } from '../../lib/chat/media-api';
-import { useLazyMediaUrl } from '../../lib/media/useLazyMediaUrl';
+import { useMediaImage } from '../../lib/media/useMediaImage';
+import { MediaImg, MediaShimmer } from '../media/MediaPicture';
 import { mosaicLayout } from '../../lib/media/gallery-layout';
 import type { ChatMessage } from '../../lib/chat/types';
 import { MediaCarousel, type CarouselItem } from '../media/MediaCarousel';
@@ -14,19 +15,25 @@ function AlbumTile({ message, more, onOpen, onRetry, onCancel, out, label }: {
 }) {
   const isVideo = message.kind === 'video';
   const local = isVideo ? message.localPosterUrl : message.localPreviewUrl;
-  const remote = useLazyMediaUrl(local ? null : (isVideo ? message.posterKey : message.storageKey), getMediaUrl);
-  const url = local ?? remote.url;
+  // A video tile shows its poster frame. While an item uploads, its own local copy is shown.
+  const picture = useMediaImage('chat', message.mediaPurged ? null : (isVideo ? message.posterKey : message.storageKey),
+    { localUrl: local ?? null, bytes: isVideo ? message.posterSizeBytes : message.sizeBytes });
   const uploading = message.status === 'uploading' || message.status === 'sending';
   const failed = message.status === 'failed';
   return (
-    <div ref={remote.ref} style={css('position:relative;width:100%;height:100%;overflow:hidden;background:var(--surface-sunken-2)')}>
+    <div ref={picture.ref} style={css('position:relative;width:100%;height:100%;overflow:hidden;background:var(--surface-sunken-2)')}>
       <button type="button" onClick={onOpen} disabled={uploading || failed || message.mediaPurged} aria-label={label}
         style={css('display:block;width:100%;height:100%;padding:0;border:0;background:transparent;cursor:zoom-in')}>
         {message.mediaPurged ? (
           <span style={css('position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--text-faint);text-align:center;padding:6px')}>Removed</span>
-        ) : url ? (
-          <img src={url} alt="" decoding="async" loading="lazy" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
-        ) : null}
+        ) : picture.failed ? (
+          <span role="alert" style={css('position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--text-faint);text-align:center;padding:6px')}>Could not load</span>
+        ) : (
+          <>
+            {!picture.loaded && <MediaShimmer />}
+            <MediaImg media={picture} alt="" style={css('width:100%;height:100%;object-fit:cover;display:block')} />
+          </>
+        )}
         {isVideo && !uploading && !failed && !message.mediaPurged && (
           <span aria-hidden="true" style={css('position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center')}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M7 4.5v15l12-7.5z" /></svg>

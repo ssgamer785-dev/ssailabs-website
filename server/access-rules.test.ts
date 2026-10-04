@@ -4,7 +4,7 @@ import type { Server } from 'http';
 import { S3Client } from '@aws-sdk/client-s3';
 import webpush from 'web-push';
 import app from './app';
-import { resetClientsForTests } from './r2';
+import { claimedUserId, resetClientsForTests } from './r2';
 import { isConversationObjectKey, isResumableChatUpload } from './chat-media';
 import { isAuthorPostKey } from './post-media';
 import { setPushRetryDelayForTests } from './push';
@@ -22,7 +22,13 @@ const NEWCOMER = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const CONV = 'c0000000-0000-4000-8000-00000000000a';
 const OTHER_CONV = 'c0000000-0000-4000-8000-00000000000b';
 const NEW_CONV = 'c0000000-0000-4000-8000-00000000000c';
-const TOKENS = { 'admin-token': ADMIN, 'student-token': STUDENT, 'other-token': OTHER, 'newcomer-token': NEWCOMER };
+/** A token shaped like a real JWT: header.payload.signature, the payload claiming `sub`. */
+const jwtLike = (sub: string, tag: string) => `eyJhbGciOiJIUzI1NiJ9.${Buffer.from(JSON.stringify({ sub, role: 'authenticated' })).toString('base64url')}.${tag}`;
+const STUDENT_JWT = jwtLike(STUDENT, 'student-signature');
+/** Claims to be the admin, but Supabase verifies it as the student: the claim must never count. */
+const FORGED_ADMIN_CLAIM = jwtLike(ADMIN, 'student-signature-2');
+const TOKENS = { 'admin-token': ADMIN, 'student-token': STUDENT, 'other-token': OTHER, 'newcomer-token': NEWCOMER,
+  [STUDENT_JWT]: STUDENT, [FORGED_ADMIN_CLAIM]: STUDENT };
 
 const u = (n: number) => `0f0f0f0f-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const chatKey = (conversation: string, n: number, ext = 'bin') => `chat/${conversation}/17900000000${String(n).padStart(2, '0')}-${u(n)}.${ext}`;
@@ -737,5 +743,126 @@ describe('several attachments per post (RC5 post_media)', () => {
     const res = await call('/api/posts/run-retention', 'admin-token', {});
     expect(res.status).toBe(200);
     expect(deletedKeys.flat()).toEqual([neutral(10)]);
+  });
+});
+
+describe('batch signing: one request for a screen of pictures, under the single-key rules', () => {
+  const query = (url: unknown) => new URL(String(url)).searchParams;
+  const shape = (url: unknown) => ({ key: signedKey(url), type: query(url).get('response-content-type'),
+    disposition: query(url).get('response-content-disposition'), expires: query(url).get('X-Amz-Expires') });
+  const single = async (scope: 'posts' | 'chat', key: string, token: string) => {
+    const res = await call(`/api/${scope}/media-url?key=${encodeURIComponent(key)}`, token, undefined, 'GET');
+    return res.status === 200 ? { status: 200, ...shape(res.body.url) } : { status: res.status };
+  };
+  const batch = async (scope: 'posts' | 'chat', keys: unknown, token: string | null) => call(`/api/${scope}/media-urls`, token, { keys });
+  /** For every key and caller: the batch signs exactly what /media-url signs, or refuses with the status /media-url answers. */
+  const expectSameAsSingle = async (scope: 'posts' | 'chat', keys: string[], token: string) => {
+    const res = await batch(scope, keys, token);
+    expect(res.status).toBe(200);
+    const urls = res.body.urls as Record<string, { url: string; expiresIn: number }>;
+    const failed = res.body.failed as Record<string, number>;
+    for (const key of keys) {
+      const one = await single(scope, key, token);
+      const many = urls[key] ? { status: 200, ...shape(urls[key].url) } : { status: failed[key] };
+      expect({ key, ...many }).toEqual({ key, ...one });
+      if (urls[key]) expect(urls[key].expiresIn).toBe(900);
+    }
+  };
+  const neutral = (n: number, ext = 'bin') => `posts/${u(800 + n)}/17900000000${String(n).padStart(2, '0')}-${u(850 + n)}.${ext}`;
+
+  test('community: objects, posters, items, missing and malformed keys match /media-url for every caller', async () => {
+    Object.assign(fake.tables.posts[0], { attachment: 'image', mime_type: 'image/png', file_name: 'gold.png', is_anonymous: false });
+    Object.assign(fake.tables.posts[1], { attachment: 'file', mime_type: 'text/csv', file_name: 'Priya Sharma P&L.CSV', is_anonymous: true });
+    const poster = neutral(1, 'jpg');
+    fake.tables.posts.push({ id: u(810), author_id: OTHER, attachment: 'video', storage_key: neutral(2), poster_key: poster, mime_type: 'video/mp4', file_name: 'clip.mp4', media_purged: false, is_anonymous: false });
+    fake.tables.post_media = [
+      { id: u(811), post_id: u(202), position: 1, kind: 'image', storage_key: neutral(3), poster_key: null, mime_type: 'image/jpeg', file_name: 'Priya_2.jpg', media_purged: false },
+      { id: u(812), post_id: u(202), position: 2, kind: 'file', storage_key: neutral(4, 'pdf'), poster_key: null, mime_type: 'application/pdf', file_name: 'Priya notes.docx', media_purged: false },
+      { id: u(813), post_id: u(202), position: 3, kind: 'image', storage_key: neutral(5), poster_key: null, mime_type: 'image/jpeg', file_name: 'gone.jpg', media_purged: true },
+    ];
+    const keys = [OFFICIAL_KEY, STUDENT_POST_KEY, neutral(2), poster, neutral(3), neutral(4, 'pdf'), neutral(5), neutral(9),
+      `posts/${STUDENT}/../../chat/${CONV}/x.bin`, OWN_KEY, AVATAR_KEY];
+    for (const token of ['other-token', 'student-token', 'admin-token']) await expectSameAsSingle('posts', keys, token);
+    // The anonymous author's name never reaches another member through a batch either.
+    const other = await batch('posts', [STUDENT_POST_KEY, neutral(4, 'pdf')], 'other-token');
+    expect(JSON.stringify(other.body)).not.toContain('Priya');
+    const purged = await batch('posts', [neutral(5)], 'admin-token');
+    expect(purged.body.failed).toEqual({ [neutral(5)]: 404 });
+  });
+
+  test('community: works before the RC5 migration (no post_media table)', async () => {
+    fake.close();
+    fake = await startFakeSupabase({ tokens: TOKENS, tables: world(), missingTables: ['post_media'] });
+    Object.assign(process.env, { SUPABASE_URL: fake.url, VITE_SUPABASE_URL: fake.url });
+    resetClientsForTests();
+    const res = await batch('posts', [OFFICIAL_KEY, neutral(3)], 'other-token');
+    expect(res.status).toBe(200);
+    expect(signedKey((res.body.urls as Record<string, { url: string }>)[OFFICIAL_KEY].url)).toBe(OFFICIAL_KEY);
+    expect(res.body.failed).toEqual({ [neutral(3)]: 404 });
+  });
+
+  test('chat: a student gets only their own thread; the admin gets every thread; posters and documents keep their rules', async () => {
+    const docKey = chatKey(CONV, 61);
+    const clip = chatKey(CONV, 62);
+    const clipPoster = clip.replace(/\.bin$/, '-poster.jpg');
+    addMessage(message(u(161), { storage_key: docKey, kind: 'file', mime_type: 'text/csv', file_name: 'Q3 "report"/draft.csv' }));
+    addMessage(message(u(162), { storage_key: clip, poster_key: clipPoster, kind: 'video', mime_type: 'video/mp4' }));
+    addMessage(message(u(163), { storage_key: chatKey(CONV, 63), deleted_at: '2026-10-01T00:00:00Z' }));
+    // A row in the student's thread that names an object in another thread's namespace vouches for nothing.
+    addMessage(message(u(164), { storage_key: chatKey(OTHER_CONV, 64) }));
+    const keys = [OWN_KEY, ADMIN_KEY_IN_THREAD, docKey, clip, clipPoster, chatKey(CONV, 63), chatKey(CONV, 99),
+      OTHER_THREAD_KEY, chatKey(OTHER_CONV, 64), OFFICIAL_KEY, `chat/${CONV}/../${OTHER_CONV}/x.bin`, 'chat/not-a-uuid/x.bin'];
+    for (const token of ['student-token', 'other-token', 'admin-token']) await expectSameAsSingle('chat', keys, token);
+    const student = await batch('chat', keys, 'student-token');
+    expect(Object.keys(student.body.urls as object).sort()).toEqual([OWN_KEY, ADMIN_KEY_IN_THREAD, docKey, clip, clipPoster].sort());
+    expect((student.body.failed as Record<string, number>)[OTHER_THREAD_KEY]).toBe(403);
+    expect((student.body.failed as Record<string, number>)[chatKey(OTHER_CONV, 64)]).toBe(403);
+    expect((student.body.failed as Record<string, number>)[chatKey(CONV, 63)]).toBe(404);
+  });
+
+  test('who may ask: signed in, activated, and only a bounded list of strings', async () => {
+    expect((await batch('posts', [OFFICIAL_KEY], null)).status).toBe(401);
+    expect((await batch('chat', [OWN_KEY], null)).status).toBe(401);
+    expect((await batch('posts', [OFFICIAL_KEY], 'newcomer-token')).status).toBe(403);
+    const newcomer = await batch('chat', [chatKey(NEW_CONV, 1)], 'newcomer-token');
+    expect(newcomer.body.failed).toEqual({ [chatKey(NEW_CONV, 1)]: 403 });
+    for (const keys of [[], 'posts/x', [1, 2], Array.from({ length: 41 }, (_, i) => neutral(i)), ['x'.repeat(1025)]]) {
+      expect((await batch('posts', keys, 'admin-token')).status).toBe(400);
+      expect((await batch('chat', keys, 'admin-token')).status).toBe(400);
+    }
+    const forty = await batch('posts', Array.from({ length: 40 }, (_, i) => neutral(i)), 'admin-token');
+    expect(forty.status).toBe(200);
+    // Repeats are signed once.
+    const twice = await batch('posts', [OFFICIAL_KEY, OFFICIAL_KEY], 'admin-token');
+    expect(Object.keys(twice.body.urls as object)).toEqual([OFFICIAL_KEY]);
+  });
+});
+
+describe('authentication reads the profile while the token is verified', () => {
+  test('a claimed id is only ever a hint', () => {
+    expect(claimedUserId(STUDENT_JWT)).toBe(STUDENT);
+    expect(claimedUserId('student-token')).toBeNull();
+    expect(claimedUserId(jwtLike('not-a-uuid', 'x'))).toBeNull();
+    expect(claimedUserId('a.%%%.b')).toBeNull();
+  });
+
+  test('a real token works exactly as before', async () => {
+    const res = await call('/api/posts/media-urls', STUDENT_JWT, { keys: [STUDENT_POST_KEY] });
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body.urls as object)).toEqual([STUDENT_POST_KEY]);
+  });
+
+  test('a token claiming the admin\'s id but verified as a student is the student: no admin route, no other thread', async () => {
+    const admin = await call('/api/posts/run-retention', FORGED_ADMIN_CLAIM, {});
+    expect(admin.status).toBe(403);
+    const chat = await call('/api/chat/media-urls', FORGED_ADMIN_CLAIM, { keys: [OWN_KEY, OTHER_THREAD_KEY] });
+    expect(chat.status).toBe(200);
+    expect(Object.keys(chat.body.urls as object)).toEqual([OWN_KEY]);
+    expect(chat.body.failed).toEqual({ [OTHER_THREAD_KEY]: 403 });
+  });
+
+  test('an invalid token is refused whatever it claims', async () => {
+    const res = await call('/api/posts/media-urls', jwtLike(ADMIN, 'not-a-valid-signature'), { keys: [OFFICIAL_KEY] });
+    expect(res.status).toBe(401);
   });
 });

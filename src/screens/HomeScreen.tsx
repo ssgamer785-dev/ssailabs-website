@@ -4,8 +4,8 @@ import { css } from '../lib/css';
 import { useAppState, initials } from '../lib/app-state';
 import { useUnreadNotificationCount } from '../lib/notifications/useNotifications';
 import { useHomeHighlights } from '../lib/community/useHomeHighlights';
-import { getPostMediaUrl } from '../lib/community/media-api';
-import { useLazyMediaUrl } from '../lib/media/useLazyMediaUrl';
+import { useMediaImage } from '../lib/media/useMediaImage';
+import { MediaImg } from '../components/media/MediaPicture';
 import { formatDateTime } from '../lib/format-date-time';
 import { Avatar } from '../components/ui/Avatar';
 import { useAuth } from '../lib/auth-context';
@@ -94,7 +94,9 @@ function AttachmentChips({ post }: { post: FeedPost }) {
   const isVideo = post.attachment === 'video';
   const isImage = post.attachment === 'image';
   const key = post.mediaPurged ? null : post.posterKey ?? (isImage ? post.storageKey : null);
-  const { ref, url, retry } = useLazyMediaUrl(key, getPostMediaUrl);
+  // The same picture the feed shows, from the same place: fetched once for both.
+  const chip = useMediaImage('post', key, { bytes: post.posterKey ? null : post.sizeBytes });
+  const { ref } = chip;
 
   if (post.mediaPurged || post.attachment === 'none') return null;
 
@@ -109,9 +111,8 @@ function AttachmentChips({ post }: { post: FeedPost }) {
   if (isImage) {
     return (
       <div ref={ref} style={css('position:relative;width:31px;height:31px;border-radius:9px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer')}>
-        {url
-          ? <img src={url} onError={retry} alt="" decoding="async" style={css('width:100%;height:100%;object-fit:contain;display:block')} />
-          : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.8} strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3.4" /><circle cx="9" cy="10" r="1.7" /><path d="M4.6 17.4l4.5-4.3 3.3 3.1 2.6-2.4 4.4 4" /></svg>}
+        {!chip.loaded && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.8} strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3.4" /><circle cx="9" cy="10" r="1.7" /><path d="M4.6 17.4l4.5-4.3 3.3 3.1 2.6-2.4 4.4 4" /></svg>}
+        {chip.src && !chip.failed && <span style={css('position:absolute;inset:0')}><MediaImg media={chip} alt="" style={css('width:100%;height:100%;object-fit:contain;display:block')} /></span>}
       </div>
     );
   }
@@ -120,7 +121,7 @@ function AttachmentChips({ post }: { post: FeedPost }) {
 
   return (
     <div ref={ref} style={css('position:relative;width:38px;height:31px;border-radius:9px;background:var(--ink-chip);display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer')}>
-      {url && <img src={url} onError={retry} alt="" decoding="async" style={css('position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;opacity:.72')} />}
+      {chip.src && !chip.failed && <span style={css('position:absolute;inset:0;opacity:.72')}><MediaImg media={chip} alt="" style={css('width:100%;height:100%;object-fit:contain;display:block')} /></span>}
       <svg width="13" height="13" viewBox="0 0 24 24" fill="var(--on-accent)" style={css('position:relative')}><path d="M8.5 5.5l10 6.5-10 6.5z" /></svg>
     </div>
   );
@@ -266,13 +267,13 @@ export function HomeScreen() {
           {/* Was '/analysis' with no post id, which now opens a post-detail
               screen with nothing to detail. The Official feed is what this tile
               has always meant. */}
-          <div style={quickAction} onClick={() => navigate('/community')}>
+          <div style={quickAction} onClick={() => navigate('/community')} data-prefetch="community">
             <div style={quickIconWrap}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.7} strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3.4" /><circle cx="9" cy="10" r="1.7" /><path d="M4.6 17.4l4.5-4.3 3.3 3.1 2.6-2.4 4.4 4" /></svg>
             </div>
             <div style={quickLabel}>Official<br /><br />Update</div>
           </div>
-          <div style={quickAction} onClick={() => navigate('/community?tab=students')}>
+          <div style={quickAction} onClick={() => navigate('/community?tab=students')} data-prefetch="community:students">
             <div style={quickIconWrap}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="8.2" r="3.1" /><path d="M3.4 19.6c0-3.1 2.5-5.5 5.6-5.5s5.6 2.4 5.6 5.5" /><path d="M16.3 5.8a3 3 0 0 1 0 5.9" /><path d="M16.8 14.4c2.3.5 4 2.5 4 5.2" /></svg>
             </div>
@@ -290,7 +291,7 @@ export function HomeScreen() {
             </div>
             <div style={quickLabel}>Calendar</div>
           </div>
-          <div style={quickAction} onClick={() => navigate('/chat')}>
+          <div style={quickAction} onClick={() => navigate('/chat')} data-prefetch="chat">
             <div style={quickIconWrap}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d="M20.2 12.2c0 3.7-3.7 6.8-8.2 6.8-.9 0-1.8-.1-2.6-.4l-4.6 1.8 1.4-3.4c-1.5-1.3-2.4-3-2.4-4.8 0-3.7 3.7-6.8 8.2-6.8s8.2 3.1 8.2 6.8z" /><path d="M9.1 12.2h.01M12 12.2h.01M14.9 12.2h.01" /></svg>
             </div>

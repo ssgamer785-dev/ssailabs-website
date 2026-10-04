@@ -47,6 +47,7 @@
 
 :root {
   /* Surfaces */
+  --media-sheen: rgba(255, 255, 255, 0.55);
   --app-bg: #EEF1F7;
   --surface: #FFFFFF;
   --surface-2: #FDFDFE;
@@ -167,6 +168,7 @@
 [data-theme="dark"] {
   /* Scrollbars, form controls and the canvas behind the page follow suit. */
   color-scheme: dark;
+  --media-sheen: rgba(255, 255, 255, 0.05);
 
 
   /* Surfaces */
@@ -659,3 +661,13 @@ textarea {
 @media (prefers-reduced-motion: reduce) { .nav-progress-bar { animation: none; width: 100%; opacity: .6; } }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* A picture that is genuinely still on its way: a quiet surface with a slow sheen, never a "Loading…" block. */
+.media-shimmer { display: block; overflow: hidden; background: var(--surface-sunken-2); pointer-events: none; }
+.media-shimmer::after {
+  content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(100deg, transparent 20%, var(--media-sheen) 50%, transparent 80%);
+  animation: media-sheen 1.6s ease-in-out infinite;
+}
+@keyframes media-sheen { to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .media-shimmer::after { animation: none; display: none; } }

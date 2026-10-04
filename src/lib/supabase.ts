@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './database.types';
+import { rememberSession } from './remember-session';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
@@ -16,18 +17,8 @@ if (!supabaseUrl || !supabaseAnonKey) {
  * touch is governed by the RLS policies in supabase/migrations/. Never import the
  * service_role key into client code.
  */
-const REMEMBER_KEY = 'tp:remember-session';
 const memory = new Map<string, string>();
-
-export function setRememberSession(remember: boolean): void {
-  try { localStorage.setItem(REMEMBER_KEY, remember ? 'on' : 'off'); }
-  catch { /* The current tab still works if browser storage is unavailable. */ }
-}
-
-export function rememberSession(): boolean {
-  try { return localStorage.getItem(REMEMBER_KEY) !== 'off'; }
-  catch { return true; }
-}
+export { rememberSession, setRememberSession } from './remember-session';
 
 const authStorage = {
   getItem(key: string): string | null {

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { css } from '../../lib/css';
 import { formatDuration, type ChatMessage } from '../../lib/chat/types';
 import { useMediaUrl, usePosterUrl } from './useMediaUrl';
+import { MediaImg } from '../media/MediaPicture';
 import { FailedNote, MetaRow } from './bubble-parts';
 import { MediaActions } from '../media/MediaActions';
 import { getMediaUrl } from '../../lib/chat/media-api';
@@ -119,15 +120,7 @@ export function CircularVideoBubble({ message, out, onRetry }: {
           </div>
         ) : (
           <>
-            {poster.url && (
-              <img
-                src={poster.url}
-                onError={poster.retry}
-                alt={message.fileName ?? 'Video message'}
-                decoding="async"
-                style={css('width:100%;height:100%;object-fit:cover;display:block')}
-              />
-            )}
+            <MediaImg media={poster} alt={message.fileName ?? 'Video message'} style={css('width:100%;height:100%;object-fit:cover;display:block')} />
             <div style={css('position:absolute;inset:0;display:flex;align-items:center;justify-content:center')}>
               {uploading ? (
                 <div style={css('font-size:14px;font-weight:700;color:var(--on-accent);text-shadow:0 1px 6px rgba(var(--shadow-rgb),.5)')}>
@@ -164,7 +157,7 @@ export function CircularVideoBubble({ message, out, onRetry }: {
       </div>
       {viewerOpen && <VideoViewer
         src={media.url}
-        poster={poster.url}
+        poster={poster.src}
         fileName={message.fileName}
         loading={media.loading}
         error={media.failed ? media.error ?? 'Could not load this video.' : null}

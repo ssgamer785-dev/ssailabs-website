@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import { useAuth } from '../auth-context';
+import { readView, warmView, writeView } from '../view-cache';
 
 /**
  * Every activated member, with their thread, for the admin inbox.
@@ -43,31 +44,51 @@ export interface UseAdminConversations {
   refresh: () => Promise<void>;
 }
 
+const toConversation = (r: Row): AdminConversation => ({
+  studentId: r.student_id,
+  fullName: r.full_name,
+  avatarKey: r.avatar_key,
+  revealIdentity: r.reveal_identity,
+  conversationId: r.conversation_id,
+  unreadCount: Number(r.unread_count) || 0,
+  lastMessageAt: r.last_message_at,
+  lastMessagePreview: r.last_message_preview,
+});
+
+async function fetchAdminConversations(): Promise<AdminConversation[]> {
+  const { data, error } = await supabase.rpc('admin_conversations');
+  if (error) throw error;
+  return ((data ?? []) as unknown as Row[]).map(toConversation);
+}
+
+/** The inbox as last read, per admin account (memory only), so opening it renders at once. */
+const inboxKey = (userId: string) => `admin-inbox:${userId}`;
+
+/** Reads the inbox in the background (after an admin signs in, or as they reach for it). */
+export function warmAdminConversations(userId: string): Promise<AdminConversation[]> {
+  return warmView(inboxKey(userId), fetchAdminConversations);
+}
+
 export function useAdminConversations(): UseAdminConversations {
   const { user, isAdmin } = useAuth();
-  const [conversations, setConversations] = useState<AdminConversation[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cached = user && isAdmin ? readView<AdminConversation[]>(inboxKey(user.id)) : undefined;
+  const [conversations, setConversations] = useState<AdminConversation[]>(cached ?? []);
+  const [loading, setLoading] = useState(!cached);
   const [loadFailed, setLoadFailed] = useState(false);
 
   const refresh = useCallback(async () => {
-    const { data, error } = await supabase.rpc('admin_conversations');
-    if (error) {
+    let list: AdminConversation[];
+    try {
+      list = await fetchAdminConversations();
+    } catch (error) {
       console.error('[admin-chat] conversation list failed:', error);
       setLoadFailed(true);
       return;
     }
-    setConversations(((data ?? []) as unknown as Row[]).map(r => ({
-      studentId: r.student_id,
-      fullName: r.full_name,
-      avatarKey: r.avatar_key,
-      revealIdentity: r.reveal_identity,
-      conversationId: r.conversation_id,
-      unreadCount: Number(r.unread_count) || 0,
-      lastMessageAt: r.last_message_at,
-      lastMessagePreview: r.last_message_preview,
-    })));
+    if (user) writeView(inboxKey(user.id), list);
+    setConversations(list);
     setLoadFailed(false);
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     if (!user || !isAdmin) { setLoading(false); return; }

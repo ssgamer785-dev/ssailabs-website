@@ -1,13 +1,32 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import { useAuth } from '../auth-context';
-import { readView, writeView } from '../view-cache';
+import { readView, warmView, writeView } from '../view-cache';
 
 export interface ChatOverview {
   conversationId: string;
   unreadCount: number;
   lastMessageAt: string | null;
   lastMessagePreview: string | null;
+}
+
+async function fetchOverview(): Promise<ChatOverview | null> {
+  const { data, error } = await supabase.rpc('my_chat_overview');
+  if (error) throw error;
+  const row = data?.[0];
+  return row
+    ? {
+        conversationId: row.conversation_id,
+        unreadCount: Number(row.unread_count) || 0,
+        lastMessageAt: row.last_message_at,
+        lastMessagePreview: row.last_message_preview,
+      }
+    : null;
+}
+
+/** Reads the member's own chat row in the background (after sign-in, or as they reach for Chat). */
+export function warmChatOverview(userId: string): Promise<ChatOverview | null> {
+  return warmView(`chat-overview:${userId}`, fetchOverview);
 }
 
 /**
@@ -22,17 +41,8 @@ export function useChatOverview(): { overview: ChatOverview | null; loading: boo
   const [loading, setLoading] = useState(cached === undefined);
 
   const refresh = useCallback(async () => {
-    const { data, error } = await supabase.rpc('my_chat_overview');
-    if (error) return;
-    const row = data?.[0];
-    const next = row
-      ? {
-          conversationId: row.conversation_id,
-          unreadCount: Number(row.unread_count) || 0,
-          lastMessageAt: row.last_message_at,
-          lastMessagePreview: row.last_message_preview,
-        }
-      : null;
+    let next: ChatOverview | null;
+    try { next = await fetchOverview(); } catch { return; }
     setOverview(next);
     writeView(key, next);
   }, [key]);

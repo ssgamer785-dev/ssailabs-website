@@ -4,7 +4,9 @@ import { makeRand } from '../../lib/rng';
 import { useAudioPlayer } from '../../lib/chat/useAudioPlayer';
 import { getMediaUrl } from '../../lib/chat/media-api';
 import { formatBytes, formatDuration, type ChatMessage } from '../../lib/chat/types';
-import { useMediaUrl } from './useMediaUrl';
+import { useMediaImage } from '../../lib/media/useMediaImage';
+import { mediaSize } from '../../lib/media/media-cache';
+import { MediaImg, MediaShimmer } from '../media/MediaPicture';
 import { CircularVideoBubble } from './CircularVideoBubble';
 import { FailedNote, MetaRow, UploadBar } from './bubble-parts';
 import logo from '../../assets/traders-planet-mark.png';
@@ -73,22 +75,33 @@ function VoiceBubble({ message, out, onRetry }: { message: ChatMessage; out: boo
 }
 
 function ImageBubble({ message, out, onRetry }: { message: ChatMessage; out: boolean; onRetry: () => void }) {
-  const { ref, url, failed, retry, forceRetry, error, loading } = useMediaUrl(message);
+  const image = useMediaImage('chat', message.mediaPurged ? null : message.storageKey, { localUrl: message.localPreviewUrl ?? null, bytes: message.sizeBytes });
   const [viewerOpen, setViewerOpen] = useState(false);
+  // The photo's own size (sent with it, or seen on this device before): its space is held before it arrives.
+  const size = message.mediaWidth && message.mediaHeight ? { width: message.mediaWidth, height: message.mediaHeight } : mediaSize(message.storageKey);
 
   return (
     <div style={{ maxWidth: 250, background: out ? 'var(--accent-soft-2)' : 'var(--surface-secondary-2)', borderRadius: out ? '16px 16px 5px 16px' : '16px 16px 16px 5px', padding: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div ref={ref} style={css('position:relative;max-width:236px;min-height:90px;border-radius:10px;overflow:hidden;background:var(--surface-sunken-2)')}>
+      <div ref={image.ref} style={{ ...css('position:relative;width:236px;max-width:100%;border-radius:10px;overflow:hidden;background:var(--surface-sunken-2)'),
+        ...(message.mediaPurged || image.failed ? { minHeight: 90 } : size ? { aspectRatio: `${size.width} / ${size.height}`, maxHeight: '60vh' } : image.loaded ? {} : { minHeight: 90 }) }}>
         {message.mediaPurged ? (
           <div style={css('width:100%;min-height:90px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text-faint);text-align:center;padding:12px;line-height:1.4')}>
             Removed to stay within your 100 MB storage limit
           </div>
-        ) : failed || !url ? (
-          <div style={css('width:236px;max-width:100%;min-height:90px;display:flex;flex-direction:column;gap:5px;align-items:center;justify-content:center;font-size:11px;color:var(--text-faint);padding:10px;text-align:center')}>
-            {failed ? <><span role="alert">{error ?? 'Could not load'}</span><button type="button" onClick={forceRetry} disabled={loading} style={css('color:var(--accent-ink);font-weight:700')}>Try again</button></> : 'Loading…'}
+        ) : image.failed ? (
+          <div style={css('width:100%;min-height:90px;display:flex;flex-direction:column;gap:5px;align-items:center;justify-content:center;font-size:11px;color:var(--text-faint);padding:10px;text-align:center')}>
+            <span role="alert">{image.error ?? 'Could not load'}</span>
+            <button type="button" onClick={image.retry} style={css('color:var(--accent-ink);font-weight:700')}>Try again</button>
           </div>
         ) : (
-          <button type="button" onClick={() => setViewerOpen(true)} aria-label="View full image" style={css('display:block;width:100%;padding:0;border:0;cursor:zoom-in')}><img src={url} onError={retry} alt={message.fileName ?? 'Photo'} loading="lazy" decoding="async" style={css('width:100%;max-height:60vh;height:auto;object-fit:contain;display:block')} /></button>
+          <>
+            {!image.loaded && <MediaShimmer />}
+            <button type="button" onClick={() => setViewerOpen(true)} aria-label="View full image"
+              style={{ ...css('display:block;width:100%;padding:0;border:0;cursor:zoom-in;background:transparent'), height: size ? '100%' : undefined }}>
+              <MediaImg media={image} alt={message.fileName ?? 'Photo'}
+                style={css(size ? 'width:100%;height:100%;object-fit:contain;display:block' : 'width:100%;max-height:60vh;height:auto;object-fit:contain;display:block')} />
+            </button>
+          </>
         )}
         {message.status === 'uploading' && (
           <div style={css('position:absolute;inset:0;background:rgba(var(--shadow-rgb),.35);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--on-accent)')}>

@@ -3,6 +3,8 @@ import { useLocation } from 'react-router-dom';
 import { PhoneShell } from './PhoneShell';
 import { css } from '../lib/css';
 import { useAuth } from '../lib/auth-context';
+import { noteScreen, noteTap } from '../lib/media/media-metrics';
+import { screenOpened } from '../lib/media/media-cache';
 
 /**
  * What a screen shows while its code is fetched — only ever on a cold load
@@ -114,52 +116,98 @@ export function RoutePreloader({ member, admin }: { member: Preloadable[]; admin
 }
 
 /**
- * After sign-in, while the app is idle, fetches what the member opens first:
- * the first page of both community channels, the signed addresses of the
- * first few pictures, and the bytes of the first two. Opening Community then
- * shows posts and pictures at once. Never on Save-Data or a 2G link.
+ * After sign-in, a reopened app, or an installed app brought back after a few
+ * minutes away — right after the first screen has painted:
+ * reads what the member opens first — both community channels, their chat
+ * (the admin's most recent threads), the inbox — and prepares the pictures
+ * those first screens show: signed in one request per kind, fetched and
+ * decoded a few at a time, within a data budget (none on Save-Data or 2G).
+ * See lib/media/warmup.ts.
  */
 export function DataWarmup() {
-  const { session, isActivated } = useAuth();
+  const { session, isActivated, isAdmin } = useAuth();
   const userId = session && isActivated ? session.user.id : null;
 
   useEffect(() => {
     if (!userId) return;
-    const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
-    if (connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType ?? '')) return;
-    let cancelled = false;
-    const idle = (fn: () => void) => {
-      const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number };
-      if (w.requestIdleCallback) w.requestIdleCallback(fn, { timeout: 4000 });
-      else window.setTimeout(fn, 1500);
+    let controller = new AbortController();
+    const run = () => {
+      controller.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
+      void import('../lib/media/warmup').then(m => m.warmStartup(userId, isAdmin, signal)).catch(() => {});
     };
-    idle(() => {
-      void (async () => {
-        const { warmFeed } = await import('../lib/community/useFeed');
-        const { getPostMediaUrl } = await import('../lib/community/media-api');
-        const pages: { attachment: string; storageKey: string | null; posterKey: string | null; mediaPurged: boolean }[][] = [];
-        for (const channel of ['official', 'students'] as const) {
-          if (cancelled) return;
-          try { pages.push(await warmFeed(userId, channel) as never); } catch { /* the screen will load it itself */ }
-        }
-        try {
-          const { warmNotifications } = await import('../lib/notifications/useNotifications');
-          if (!cancelled) await warmNotifications(userId);
-        } catch { /* the inbox will load it itself */ }
-        const keys = pages.flat().filter(p => !p.mediaPurged && (p.attachment === 'image' || p.attachment === 'video'))
-          .map(p => (p.attachment === 'image' ? p.storageKey : p.posterKey)).filter((k): k is string => !!k).slice(0, 4);
-        for (const [index, key] of keys.entries()) {
-          if (cancelled) return;
-          try {
-            const url = await getPostMediaUrl(key);
-            // The first two pictures are fetched and decoded too, so they paint at once.
-            if (index < 2) { const img = new Image(); img.decoding = 'async'; img.src = url; void img.decode?.().catch(() => {}); }
-          } catch { /* lazy loading will try again */ }
-        }
-      })();
-    });
-    return () => { cancelled = true; };
-  }, [userId]);
+    const timer = window.setTimeout(run, 250);
+    // An installed app that comes back after a while is "opened" again: what is new since is prepared the same way.
+    let hiddenAt = 0;
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+      if (hiddenAt && Date.now() - hiddenAt > 3 * 60_000) run();
+      hiddenAt = 0;
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { controller.abort(); window.clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibility); };
+  }, [userId, isAdmin]);
 
+  return null;
+}
+
+/**
+ * Prepares a screen as the member reaches for it, before the tap completes: a
+ * pointer resting on a link, or a finger touching down on it. Elements opt in
+ * with `data-prefetch` (community, community:students, chat, chat:<id>,
+ * post:<id>, notifications); the screen's code is fetched too.
+ */
+export function IntentPrefetch({ screens }: { screens: Record<string, Preloadable[]> }) {
+  const { session, isActivated, isAdmin } = useAuth();
+  const userId = session && isActivated ? session.user.id : null;
+  const lists = useRef(screens);
+
+  useEffect(() => {
+    if (!userId) return;
+    const reach = (target: EventTarget | null) => {
+      const element = target instanceof Element ? target.closest('[data-prefetch]') : null;
+      const intent = element?.getAttribute('data-prefetch');
+      if (!intent) return;
+      for (const screen of lists.current[intent.split(':')[0]] ?? []) void screen.preload().catch(() => {});
+      void import('../lib/media/warmup').then(m => m.warmIntent(intent, userId, isAdmin)).catch(() => {});
+    };
+    const onOver = (event: PointerEvent) => { if (event.pointerType === 'mouse') reach(event.target); };
+    const onDown = (event: PointerEvent) => reach(event.target);
+    const onFocus = (event: FocusEvent) => reach(event.target);
+    document.addEventListener('pointerover', onOver, { capture: true, passive: true });
+    document.addEventListener('pointerdown', onDown, { capture: true, passive: true });
+    document.addEventListener('focusin', onFocus, true);
+    return () => {
+      document.removeEventListener('pointerover', onOver, true);
+      document.removeEventListener('pointerdown', onDown, true);
+      document.removeEventListener('focusin', onFocus, true);
+    };
+  }, [userId, isAdmin]);
+
+  return null;
+}
+
+/** Feeds the on-device media timing (Device diagnostics): each tap, and each screen it opened. */
+export function MediaTimingRuntime() {
+  useEffect(() => {
+    installHistorySignal();
+    const onDown = () => noteTap();
+    // Only a real change of screen (replaceState calls that keep the same address do not count).
+    let last = window.location.pathname + window.location.search;
+    const onLocation = () => {
+      const now = window.location.pathname + window.location.search;
+      if (now === last) return;
+      last = now;
+      screenOpened();
+      noteScreen(now);
+    };
+    document.addEventListener('pointerdown', onDown, { capture: true, passive: true });
+    window.addEventListener('tp:location', onLocation);
+    return () => {
+      document.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('tp:location', onLocation);
+    };
+  }, []);
   return null;
 }

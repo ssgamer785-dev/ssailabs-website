@@ -60,7 +60,7 @@ export function PostDetailScreen() {
   const { isAdmin } = useAuth();
   const { reveal, userName } = useAppState();
 
-  const { post, loading, notFound, error, toggleLike, toggleBookmark, refresh } = usePost(postId);
+  const { post, complete, loading, notFound, error, toggleLike, toggleBookmark, refresh } = usePost(postId);
   const comments = useComments(postId);
   useEffect(() => {
     if (!commentsRequested || loading || comments.loading) return;
@@ -313,7 +313,7 @@ export function PostDetailScreen() {
           </div>
         ) : post.attachment !== 'none' ? (
           <div style={css('flex:none;margin-top:12px')}>
-            <PostMedia post={post} height={210} />
+            <PostMedia post={post} height={210} priority="high" />
           </div>
         ) : null}
 
@@ -355,6 +355,7 @@ export function PostDetailScreen() {
             as="button"
             type="button"
             onClick={toggleBookmark}
+            aria-disabled={!complete}
             aria-pressed={post.bookmarkedByMe}
             aria-label={post.bookmarkedByMe ? 'Remove bookmark' : 'Bookmark this post'}
             className="row-focus"

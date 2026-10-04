@@ -17,6 +17,7 @@ import { sharedAudioOutput } from '../lib/audio/shared-output';
 import { currentPlaybackOwner } from '../lib/media/exclusive-playback';
 import { pushAvailability, sendTestPush } from '../lib/notifications/push';
 import { useRefreshHandler } from './PhoneShell';
+import { mediaLogLines } from '../lib/media/media-metrics';
 
 /**
  * Diagnostic-only refresh action. Public screens (/welcome, /login) register
@@ -37,6 +38,8 @@ function logHeader(events: readonly RefreshAudioDiagnostic[]): string[] {
     `sound output: ${outputLabel(typeof window !== 'undefined' && (window.AudioContext ?? (window as unknown as { webkitAudioContext?: unknown }).webkitAudioContext) ? sharedAudioOutput.status() : 'unsupported')} · media playing: ${currentPlaybackOwner() ? 'yes' : 'no'}`,
     `captured: ${new Date().toISOString()}`,
     `summary: ${summarizeRefreshAudioDiagnostics(events)}`,
+    // How fast pictures appeared on this device: per screen opened, text → first picture, signing, and sources.
+    ...mediaLogLines(),
     '---',
   ];
 }

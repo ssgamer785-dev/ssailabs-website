@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { css } from '../../lib/css';
 import { getPostMediaUrl } from '../../lib/community/media-api';
-import { useLazyMediaUrl } from '../../lib/media/useLazyMediaUrl';
+import { useMediaImage } from '../../lib/media/useMediaImage';
+import { mediaSize } from '../../lib/media/media-cache';
 import { feedAspectRatio } from '../../lib/media/dimensions';
+import { MediaImg, MediaShimmer } from '../media/MediaPicture';
 import { mosaicLayout } from '../../lib/media/gallery-layout';
 import type { FeedPost } from '../../lib/community/useFeed';
 import { MediaCarousel, type CarouselItem } from '../media/MediaCarousel';
@@ -46,21 +48,27 @@ function bytes(n: number | null): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function Tile({ entry, onOpen, more, label }: { entry: GalleryEntry; onOpen: () => void; more: number; label: string }) {
+function Tile({ entry, onOpen, more, label, priority }: { entry: GalleryEntry; onOpen: () => void; more: number; label: string; priority?: 'high' }) {
   // A video tile shows its poster frame; the video itself loads only in the viewer.
-  const picture = useLazyMediaUrl(entry.purged ? null : entry.kind === 'video' ? entry.posterKey : entry.storageKey, getPostMediaUrl);
-  const [loaded, setLoaded] = useState(false);
+  const picture = useMediaImage('post', entry.purged ? null : entry.kind === 'video' ? entry.posterKey : entry.storageKey,
+    { priority, bytes: entry.kind === 'video' ? null : entry.sizeBytes });
   return (
-    <button type="button" ref={picture.ref} onClick={event => { event.stopPropagation(); onOpen(); }} aria-label={label}
+    <button type="button" ref={picture.ref} onClick={event => { event.stopPropagation(); if (picture.failed) picture.retry(); else onOpen(); }}
+      aria-label={picture.failed ? `${label}: could not load, tap to try again` : label}
       style={css('position:relative;display:block;width:100%;height:100%;padding:0;border:0;overflow:hidden;background:var(--surface-sunken-2);cursor:zoom-in')}>
       {entry.purged ? (
         <span style={css('position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text-faint);padding:8px;text-align:center')}>Removed (6-month retention)</span>
-      ) : picture.url && !picture.failed ? (
-        <img src={picture.url} alt="" decoding="async" loading="lazy" onLoad={() => setLoaded(true)}
-          style={{ ...css('width:100%;height:100%;object-fit:cover;display:block;transition:opacity .25s ease'), opacity: loaded ? 1 : 0 }} />
       ) : picture.failed ? (
-        <span style={css('position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text-faint)')}>Could not load</span>
-      ) : null}
+        <span role="alert" style={css('position:absolute;inset:0;display:flex;flex-direction:column;gap:4px;align-items:center;justify-content:center;font-size:11px;color:var(--text-faint);text-align:center;padding:6px')}>
+          Could not load
+          <span style={css('color:var(--accent-ink);font-weight:700')}>Tap to try again</span>
+        </span>
+      ) : (
+        <>
+          {!picture.loaded && <MediaShimmer />}
+          <MediaImg media={picture} alt="" priority={priority} style={css('width:100%;height:100%;object-fit:cover;display:block')} />
+        </>
+      )}
       {entry.kind === 'video' && !entry.purged && (
         <span aria-hidden="true" style={css('position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center')}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M7 4.5v15l12-7.5z" /></svg>
@@ -97,13 +105,14 @@ function DocumentRow({ entry }: { entry: GalleryEntry }) {
  * (tap for the full-screen swipe viewer), its documents as rows below.
  * Every tile reserves its space before anything loads.
  */
-export function PostGallery({ post }: { post: FeedPost }) {
+export function PostGallery({ post, priority }: { post: FeedPost; priority?: 'high' }) {
   const all = entries(post);
   const visual = all.filter(e => (e.kind === 'image' || e.kind === 'video') && (e.storageKey || e.purged));
   const documents = all.filter(e => e.kind === 'pdf' || e.kind === 'file');
   const [viewerAt, setViewerAt] = useState<number | null>(null);
   const first = visual[0];
-  const layout = mosaicLayout(visual.length, feedAspectRatio(first?.width && first?.height ? { width: first.width, height: first.height } : null));
+  const firstSize = first?.width && first?.height ? { width: first.width, height: first.height } : mediaSize(first?.kind === 'video' ? first.posterKey : first?.storageKey);
+  const layout = mosaicLayout(visual.length, feedAspectRatio(firstSize));
   const carousel: CarouselItem[] = visual.filter(e => e.storageKey && !e.purged)
     .map(e => ({ key: e.key, kind: e.kind as 'image' | 'video', storageKey: e.storageKey!, posterKey: e.posterKey, fileName: e.fileName }));
 
@@ -117,7 +126,7 @@ export function PostGallery({ post }: { post: FeedPost }) {
             const at = carousel.findIndex(c => c.key === entry.key);
             return (
               <div key={entry.key} style={{ gridColumn: tile.column, gridRow: tile.row, minWidth: 0, minHeight: 0 }}>
-                <Tile entry={entry} more={tile.more} onOpen={() => { if (at >= 0) setViewerAt(at); }}
+                <Tile entry={entry} more={tile.more} priority={tile.index === 0 ? priority : undefined} onOpen={() => { if (at >= 0) setViewerAt(at); }}
                   label={`Open ${entry.kind === 'video' ? 'video' : 'photo'} ${tile.index + 1} of ${visual.length}`} />
               </div>
             );

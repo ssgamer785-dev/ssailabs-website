@@ -5,7 +5,7 @@
  */
 
 import { supabase } from '../supabase';
-import { fetchSignedUrl } from '../media/fetchSignedUrl';
+import { peekMedia, signedUrl } from '../media/media-cache';
 
 export type PostMediaKind = 'image' | 'video' | 'pdf' | 'file' | 'voice';
 
@@ -90,37 +90,16 @@ export async function deletePostMedia(postId: string): Promise<void> {
   if (!res.ok) throw new Error(await readError(res, 'Could not delete the attachment.'));
 }
 
-/** Signed GET URLs, cached and re-signed a minute before they lapse. */
-const urlCache = new Map<string, { url: string; expiresAt: number }>();
-/** Collapses the burst of requests a fast scroll makes for the same key. */
-const inFlight = new Map<string, Promise<string>>();
-
-export async function getPostMediaUrl(storageKey: string, force = false): Promise<string> {
-  const { data } = await supabase.auth.getSession();
-  const userId = data.session?.user.id;
-  if (!userId) throw new Error('Your session has ended. Please sign in again.');
-  const cacheKey = `${userId}:${storageKey}`;
-  if (force) urlCache.delete(cacheKey);
-  const hit = urlCache.get(cacheKey);
-  if (hit && hit.expiresAt > Date.now()) return hit.url;
-
-  const pending = inFlight.get(cacheKey);
-  if (pending && !force) return pending;
-  if (pending) await pending.catch(() => {});
-
-  const work = (async () => {
-    const { url, expiresIn } = await fetchSignedUrl(`/api/posts/media-url?key=${encodeURIComponent(storageKey)}`);
-    urlCache.set(cacheKey, { url, expiresAt: Date.now() + (expiresIn - 60) * 1000 });
-    return url as string;
-  })();
-
-  inFlight.set(cacheKey, work);
-  try {
-    return await work;
-  } finally {
-    inFlight.delete(cacheKey);
-  }
-}
+/**
+ * A signed GET for a community attachment: from the shared media cache when a
+ * valid one is known, otherwise signed together with every other request made
+ * in the same moment (one request for a screen). `force` always signs afresh.
+ */
+export const getPostMediaUrl = Object.assign(
+  (storageKey: string, force = false): Promise<string> => signedUrl('post', storageKey, force),
+  /** What can be shown at once without asking anyone (a prepared picture, or a valid address). */
+  { peek: (storageKey: string) => peekMedia('post', storageKey)?.src ?? null },
+);
 
 export async function resumePostUploadUrl(ticket: PostUploadTicket, args: {
   kind: PostMediaKind; mimeType: string; sizeBytes: number; posterBytes?: number;

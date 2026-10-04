@@ -13,7 +13,9 @@ import { clampVideoPosition, snapshotVideoPlayback, type VideoPlaybackSnapshot }
 import { isWithheldForAnonymity } from '../../lib/community/media-visibility';
 import { claimPlayback, releasePlayback } from '../../lib/media/exclusive-playback';
 import { PostGallery, hasGallery } from './PostGallery';
-import { feedAspectRatio } from '../../lib/media/dimensions';
+import { useMediaImage } from '../../lib/media/useMediaImage';
+import { mediaSize } from '../../lib/media/media-cache';
+import { MediaImg, MediaShimmer } from '../media/MediaPicture';
 
 function bytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -28,7 +30,8 @@ function PostVideo({ post }: { post: FeedPost }) {
   const [playing, setPlaying] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [duration, setDuration] = useState(0);
-  const poster = useLazyMediaUrl(post.posterKey, getPostMediaUrl);
+  // The poster frame is a picture like any other: prepared ahead, shown at once.
+  const poster = useMediaImage('post', post.mediaPurged ? null : post.posterKey);
   // Resolve a signed URL when the circle approaches the viewport; preload=none
   // keeps the large video body idle until the member taps Play.
   const media = useLazyMediaUrl(post.storageKey, getPostMediaUrl);
@@ -193,7 +196,7 @@ function PostVideo({ post }: { post: FeedPost }) {
       <video
         ref={videoRef}
         src={media.url ?? undefined}
-        poster={poster.url ?? undefined}
+        poster={poster.src ?? undefined}
         playsInline
         preload="none"
         onLoadedMetadata={event => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
@@ -229,7 +232,7 @@ function PostVideo({ post }: { post: FeedPost }) {
           )}
         </div>
       )}
-      {!poster.url && !playing && !media.loading && !failed && (
+      {!poster.src && !playing && !media.loading && !failed && (
         <div style={css('position:absolute;left:0;right:0;bottom:48px;text-align:center;font-size:10.5px;color:rgba(255,255,255,.75);pointer-events:none')}>VIDEO</div>
       )}
       {duration > 0 && (
@@ -249,7 +252,7 @@ function PostVideo({ post }: { post: FeedPost }) {
       </div>}
       {viewerOpen && <VideoViewer
         src={media.url}
-        poster={poster.url}
+        poster={poster.src}
         fileName={post.fileName}
         loading={media.loading}
         error={media.failed ? media.error ?? 'Could not load this video.' : null}
@@ -292,20 +295,17 @@ function NoMedia({ height, purged, withheld = false }: { height: number; purged:
  * The attachment area of a post card: the real image, the real video, or the
  * real document — never a stand-in for one that is not there.
  */
-export function PostMedia({ post, height }: { post: FeedPost; height: number }) {
+export function PostMedia({ post, height, priority }: { post: FeedPost; height: number; priority?: 'high' }) {
   // Several attachments: the album mosaic and its swipe viewer (RC5).
-  if (hasGallery(post)) return <PostGallery post={post} />;
-  return <SingleMedia post={post} height={height} />;
+  if (hasGallery(post)) return <PostGallery post={post} priority={priority} />;
+  return <SingleMedia post={post} height={height} priority={priority} />;
 }
 
-function SingleMedia({ post, height }: { post: FeedPost; height: number }) {
+function SingleMedia({ post, height, priority }: { post: FeedPost; height: number; priority?: 'high' }) {
   const [viewerOpen, setViewerOpen] = useState(false);
   const isImage = post.attachment === 'image';
   const isVideo = post.attachment === 'video';
-  const image = useLazyMediaUrl(
-    isImage && !post.mediaPurged ? post.storageKey : null,
-    getPostMediaUrl,
-  );
+  const image = useMediaImage('post', isImage && !post.mediaPurged ? post.storageKey : null, { priority, bytes: post.sizeBytes });
 
   if (isWithheldForAnonymity(post)) {
     const compact = post.attachment === 'voice' || post.attachment === 'pdf' || post.attachment === 'file';
@@ -328,22 +328,28 @@ function SingleMedia({ post, height }: { post: FeedPost; height: number }) {
   }
 
   if (isImage && post.storageKey && !post.mediaPurged) {
+    // The picture's own size (from the post, or from this device having shown it before): its space is held
+    // exactly — the same box the picture then fills, capped like the picture itself — so nothing moves.
+    const size = post.firstMediaSize ?? mediaSize(post.storageKey);
     return (
       <div ref={image.ref} onClick={e => e.stopPropagation()} style={{
         position: 'relative', borderRadius: 12, overflow: 'hidden', background: 'var(--surface-sunken-2)',
-        // With the picture's own size known, its space is reserved exactly, so the feed does not jump when it arrives.
-        ...(post.firstMediaSize && !(image.url && !image.failed)
-          ? { aspectRatio: String(feedAspectRatio(post.firstMediaSize)) }
-          : { minHeight: image.url && !image.failed ? undefined : height }),
+        ...(size ? { width: '100%', aspectRatio: `${size.width} / ${size.height}`, maxHeight: '70vh' } : image.loaded ? {} : { minHeight: height }),
       }}>
-        {image.failed || !image.url ? (
+        {image.failed ? (
           <div style={{ ...css('width:100%;display:flex;flex-direction:column;gap:8px;align-items:center;justify-content:center;font-size:11.5px;color:var(--text-faint);text-align:center;padding:16px'), minHeight: height }}>
-            {image.failed ? <><span role="alert">{image.error ?? 'Could not load attachment'}</span><button type="button" onClick={image.forceRetry} disabled={image.loading} style={css('color:var(--accent-ink);font-weight:700;padding:8px')}>Try again</button></> : 'Loading…'}
+            <span role="alert">{image.error ?? 'Could not load attachment'}</span>
+            <button type="button" onClick={image.retry} style={css('color:var(--accent-ink);font-weight:700;padding:8px')}>Try again</button>
           </div>
         ) : (
-          <button type="button" onClick={() => setViewerOpen(true)} aria-label="View full image" style={css('display:block;width:100%;cursor:zoom-in;padding:0;border:0;background:transparent')}>
-            <img src={image.url} onError={image.retry} alt={post.fileName ?? 'Attachment'} loading="lazy" decoding="async" style={css('width:100%;max-height:70vh;height:auto;object-fit:contain;display:block;background:var(--surface-sunken-2)')} />
-          </button>
+          <>
+            {!image.loaded && <MediaShimmer />}
+            <button type="button" onClick={() => setViewerOpen(true)} aria-label="View full image"
+              style={{ ...css('display:block;width:100%;cursor:zoom-in;padding:0;border:0;background:transparent'), height: size ? '100%' : undefined }}>
+              <MediaImg media={image} alt={post.fileName ?? 'Attachment'} priority={priority}
+                style={css(size ? 'width:100%;height:100%;object-fit:contain;display:block' : 'width:100%;max-height:70vh;height:auto;object-fit:contain;display:block')} />
+            </button>
+          </>
         )}
         <div style={css('position:absolute;right:8px;bottom:8px;background:var(--surface);padding:6px 8px;border-radius:8px')}>
           <MediaActions storageKey={post.storageKey} fileName={post.fileName} getUrl={getPostMediaUrl} />

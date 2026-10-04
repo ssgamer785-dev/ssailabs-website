@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
@@ -15,6 +15,8 @@ import { resolveAuthorName } from '../lib/community/author-name';
 import { Avatar } from './ui/Avatar';
 import logo from '../assets/traders-planet-logo.jpg';
 import { AuthenticatedBottomNav } from './ui/AuthenticatedBottomNav';
+import { noteScreen, noteText } from '../lib/media/media-metrics';
+import { screenOpened } from '../lib/media/media-cache';
 
 function MaskAvatar({ size, online }: { size: number; online: boolean }) {
   return (
@@ -229,6 +231,7 @@ function ChannelSwitch({ value, onChange }: {
             role="tab"
             aria-selected={active}
             onClick={() => !active && onChange(key)}
+            data-prefetch={key === 'students' ? 'community:students' : 'community'}
             className="row-focus"
             style={{
               ...css('flex:1;min-width:0;height:36px;border-radius:999px;display:flex;align-items:center;justify-content:center;' +
@@ -264,6 +267,11 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
 
   const feed = useFeed(tab);
   useRefreshHandler(feed.refresh);
+
+  // On-device timing (Device diagnostics): a tab switch is a screen of its own; the feed's text is on screen.
+  const switchTab = useCallback((next: 'official' | 'students') => { screenOpened(); noteScreen(`/community?tab=${next}`); setTab(next); }, []);
+  const hasPosts = feed.posts.length > 0;
+  useEffect(() => { if (hasPosts) noteText(); }, [hasPosts, tab]);
 
   // `adminView` / `asOthers` are the design's preview modes; a real admin
   // session also gets the admin treatment.
@@ -306,7 +314,7 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
   return (
     <div style={css('position:relative;width:100%;height:100%;display:flex;flex-direction:column;background:var(--surface);overflow:hidden;color:var(--text-primary)')}>
       <ChannelHeader channel={tab} badge={viewBadge} />
-      <ChannelSwitch value={tab} onChange={setTab} />
+      <ChannelSwitch value={tab} onChange={switchTab} />
 
       <div style={css('flex:1;min-height:0;background:var(--surface-sunken);display:flex;flex-direction:column;overflow:hidden;border-top:1px solid var(--border-3)')}>
         <div
@@ -350,8 +358,9 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
               {CHANNELS[tab].empty}
             </div>
           ) : (
-            feed.posts.map(post => (
+            feed.posts.map((post, index) => (
               <PostCard
+                first={index === 0}
                 key={post.id}
                 post={post}
                 official={isOfficial}
@@ -412,7 +421,9 @@ export function CommunityScreen({ initialTab = 'official', adminView = false, as
  * heart to like, long-press (or right-click) your own post to delete, the
  * name-visibility switch on your own student post, and the inline reply.
  */
-function PostCard({ post, official, admin, others, reveal, userName, onToggleAnonymity, onOpen, onToggleLike, onDelete }: {
+function PostCard({ post, first, official, admin, others, reveal, userName, onToggleAnonymity, onOpen, onToggleLike, onDelete }: {
+  /** The top card of the feed: its picture asks for the link first. */
+  first?: boolean;
   post: FeedPost;
   official: boolean;
   admin: boolean;
@@ -463,6 +474,7 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleAno
 
   return (
     <article
+      data-prefetch={`post:${post.id}`}
       style={css('background:var(--surface);border-bottom:1px solid var(--surface-divider);padding:13px 0 9px;display:flex;flex-direction:column;gap:9px')}
       {...pressHandlers}
     >
@@ -519,11 +531,11 @@ function PostCard({ post, official, admin, others, reveal, userName, onToggleAno
         isPoll ? (
           <div style={css('padding:2px 18px 3px')}><PollCard postId={post.id} /></div>
         ) : hasInteractiveMedia ? (
-          <div style={css('padding:0 18px')}><PostMedia post={post} height={150} /></div>
+          <div style={css('padding:0 18px')}><PostMedia post={post} height={150} priority={first ? 'high' : undefined} /></div>
         ) : (
           // Full-bleed. The media is the post; an 18px inset on both sides
           // costs it 36px of width for nothing but a card outline.
-          <div onClick={onOpen} style={css('cursor:pointer')}><PostMedia post={post} height={202} /></div>
+          <div onClick={onOpen} style={css('cursor:pointer')}><PostMedia post={post} height={202} priority={first ? 'high' : undefined} /></div>
         )
       )}
 

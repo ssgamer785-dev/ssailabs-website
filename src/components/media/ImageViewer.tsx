@@ -62,7 +62,7 @@ export function ImageViewer({ storageKey, fileName, getUrl, onClose }: {
           <button type="button" onClick={media.forceRetry} style={css('background:#fff;color:#0b172b;border-radius:9px;padding:10px 18px;font-weight:700')}>Try again</button>
         </div> : media.url ? <img src={media.url} alt={fileName ?? 'Image'} onError={media.retry} draggable={false}
           style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain', transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`, userSelect: 'none' }} />
-          : <div aria-live="polite">Loading image…</div>}
+          : <div role="status" aria-label="Opening image" style={css('width:34px;height:34px;border-radius:50%;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;animation:spin 1s linear infinite')} />}
       </div>
       <div style={css('flex:none;display:flex;justify-content:center;align-items:center;gap:14px;padding:12px 16px calc(12px + env(safe-area-inset-bottom, 0px))')}>
         <button type="button" aria-label="Zoom out" onClick={() => zoom(scale - .5)} style={css('color:#fff;font-size:22px;min-width:44px;min-height:44px')}>−</button>

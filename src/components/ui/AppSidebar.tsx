@@ -3,6 +3,7 @@ import logo from '../../assets/traders-planet-logo.jpg';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { css } from '../../lib/css';
 import { useAuth } from '../../lib/auth-context';
+import { intentForPath } from '../../lib/media/intent';
 
 /**
  * Every destination here is a route that already exists in App.tsx and was
@@ -144,6 +145,7 @@ export function AppSidebar({ open, onClose, unreadCount = 0 }: {
         key={route}
         type="button"
         onClick={() => go(route)}
+        data-prefetch={intentForPath(route)}
         aria-current={on ? 'page' : undefined}
         className="pressable"
         style={{

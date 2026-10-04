@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  */
 export function useLazyMediaUrl(
   storageKey: string | null | undefined,
-  resolve: (key: string, force?: boolean) => Promise<string>,
+  resolve: ((key: string, force?: boolean) => Promise<string>) & { peek?: (key: string) => string | null },
   options?: { armed?: boolean; localUrl?: string | null; rootMargin?: string },
 ): {
   ref: (node: Element | null) => void;
@@ -29,8 +29,10 @@ export function useLazyMediaUrl(
   const localUrl = options?.localUrl ?? null;
   const rootMargin = options?.rootMargin ?? '300px';
 
+  // What can be shown at once — a picture already on another screen, or a still-valid address — needs no wait.
+  const known = (key: string | null | undefined) => localUrl ?? (key && resolve.peek ? resolve.peek(key) : null);
   const [visible, setVisible] = useState(false);
-  const [url, setUrl] = useState<string | null>(localUrl);
+  const [url, setUrl] = useState<string | null>(() => known(storageKey));
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +92,7 @@ export function useLazyMediaUrl(
 
   useEffect(() => () => observerRef.current?.disconnect(), []);
 
-  useEffect(() => { setUrl(localUrl); setFailed(false); setError(null); lastRetry.current = 0; loadFailures.current = 0; }, [storageKey]);
+  useEffect(() => { setUrl(known(storageKey)); setFailed(false); setError(null); lastRetry.current = 0; loadFailures.current = 0; }, [storageKey]);
 
   // A local object URL (an attachment still uploading) always wins: it is the
   // real bytes, already in memory, and needs no round trip.
@@ -99,7 +101,7 @@ export function useLazyMediaUrl(
   }, [localUrl]);
 
   useEffect(() => {
-    if (localUrl || !storageKey || !armed || !visible) return;
+    if (localUrl || !storageKey || !armed || !visible || url) return;
 
     let active = true;
     setLoading(true);
@@ -114,7 +116,7 @@ export function useLazyMediaUrl(
       .finally(() => { if (active) setLoading(false); });
 
     return () => { active = false; };
-  }, [storageKey, armed, visible, localUrl]);
+  }, [storageKey, armed, visible, localUrl, url]);
 
   useEffect(() => {
     if (!visible || !armed || !storageKey || localUrl) return;

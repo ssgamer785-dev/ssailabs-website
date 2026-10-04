@@ -84,6 +84,7 @@ export function ChatListScreen() {
           <>
             <div
               onClick={() => navigate('/admin-inbox')}
+              data-prefetch="chat"
               style={css('display:flex;align-items:center;gap:12px;padding:12px 0;cursor:pointer')}
             >
               <div style={css('width:46px;height:46px;border-radius:50%;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;flex:none')}>
@@ -99,7 +100,7 @@ export function ChatListScreen() {
           </>
         )}
         {showAdminThread && !isAdmin && (
-          <div onClick={() => navigate('/chat/admin')} style={css('display:flex;align-items:center;gap:12px;padding:11px 0;cursor:pointer')}>
+          <div onClick={() => navigate('/chat/admin')} data-prefetch="chat" style={css('display:flex;align-items:center;gap:12px;padding:11px 0;cursor:pointer')}>
             <div style={css('position:relative;flex:none')}>
               <div style={css('width:46px;height:46px;border-radius:50%;background:var(--ink-chip-2);display:flex;align-items:center;justify-content:center;overflow:hidden')}>
                 <img src={logo} alt="The Traders Planet" style={css('width:40px;height:40px;object-fit:contain')} />

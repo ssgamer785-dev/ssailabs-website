@@ -35,6 +35,7 @@ function Row({ item, presence, onOpen, opening }: {
       as="button"
       type="button"
       onClick={onOpen}
+      data-prefetch={item.conversationId ? `chat:${item.conversationId}` : undefined}
       aria-disabled={opening}
       className="row-focus"
       style={{
