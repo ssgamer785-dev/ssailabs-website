@@ -2,8 +2,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import type { AddressInfo } from 'net';
 import type { Server } from 'http';
 import { S3Client } from '@aws-sdk/client-s3';
+import sharp from 'sharp';
 import webpush from 'web-push';
 import app from './app';
+import { displayVariantKey, mayHaveVariant } from './media-variants';
 import { claimedUserId, resetClientsForTests } from './r2';
 import { isConversationObjectKey, isResumableChatUpload } from './chat-media';
 import { isAuthorPostKey } from './post-media';
@@ -40,6 +42,12 @@ const STUDENT_POST_KEY = `posts/${STUDENT}/1790000000001-${u(5)}.bin`;
 const AVATAR_KEY = `avatars/${OTHER}/1790000000000-${u(6)}.bin`;
 
 const deletedKeys: string[][] = [];
+/** Objects in the fake bucket (for display copies: read, made, checked). */
+const stored = new Map<string, { body: Uint8Array; type?: string }>();
+/** Every storage call other than a delete, as "Command key". */
+const s3Log: string[] = [];
+/** Deletes whose display copies were not exactly the copies of the deleted originals. */
+const copyMismatches: string[] = [];
 const pushes: string[] = [];
 /** Statuses the fake push service answers before accepting; 0 = no answer (transport error). */
 let pushFailures: number[] = [];
@@ -95,9 +103,29 @@ function world(): Record<string, Row[]> {
 beforeAll(() => {
   setPushRetryDelayForTests(0);
   originalSend = S3Client.prototype.send;
-  (S3Client.prototype as { send: unknown }).send = async function (command: { input?: { Delete?: { Objects?: { Key: string }[] } } }) {
+  (S3Client.prototype as { send: unknown }).send = async function (command: { constructor: { name: string }; input?: { Key?: string; Body?: Uint8Array; ContentType?: string; Delete?: { Objects?: { Key: string }[] } } }) {
     const keys = command?.input?.Delete?.Objects?.map(o => o.Key);
-    if (keys) deletedKeys.push(keys);
+    if (keys) {
+      // Originals as before; a deleted picture's display copy must go with it, and no other copy.
+      const originals = keys.filter(k => !k.startsWith('variants/'));
+      const copies = keys.filter(k => k.startsWith('variants/'));
+      const expected = originals.filter(mayHaveVariant).map(displayVariantKey);
+      if (JSON.stringify(copies) !== JSON.stringify(expected)) copyMismatches.push(`${originals.join(',')} -> ${copies.join(',')}`);
+      deletedKeys.push(originals);
+      for (const k of keys) stored.delete(k);
+      return { Errors: [] };
+    }
+    const name = command.constructor.name.replace(/Command$/, '');
+    const key = command.input?.Key ?? '';
+    s3Log.push(`${name} ${key}`);
+    const missing = () => Object.assign(new Error('not found'), { name: name === 'HeadObject' ? 'NotFound' : 'NoSuchKey', $metadata: { httpStatusCode: 404 } });
+    if (name === 'HeadObject') { if (!stored.has(key)) throw missing(); return {}; }
+    if (name === 'GetObject') {
+      const hit = stored.get(key);
+      if (!hit) throw missing();
+      return { ContentLength: hit.body.length, ContentType: hit.type, Body: { transformToByteArray: async () => hit.body } };
+    }
+    if (name === 'PutObject') { stored.set(key, { body: new Uint8Array(command.input!.Body!), type: command.input?.ContentType }); return {}; }
     return { Errors: [] };
   };
   originalNotify = webpush.sendNotification;
@@ -116,6 +144,9 @@ afterAll(() => {
 
 beforeEach(async () => {
   deletedKeys.length = 0;
+  stored.clear();
+  s3Log.length = 0;
+  copyMismatches.length = 0;
   pushes.length = 0;
   pushFailures = [];
   purgeVictims = [];
@@ -176,6 +207,8 @@ afterEach(() => {
     else process.env[key] = savedEnv[key];
   }
   resetClientsForTests();
+  // Whatever a test deleted, every picture's display copy went with it, and nothing else did.
+  expect(copyMismatches).toEqual([]);
 });
 
 async function call(path: string, token: string | null, body?: unknown, method = 'POST', headers: Record<string, string> = {}) {
@@ -752,20 +785,26 @@ describe('batch signing: one request for a screen of pictures, under the single-
     disposition: query(url).get('response-content-disposition'), expires: query(url).get('X-Amz-Expires') });
   const single = async (scope: 'posts' | 'chat', key: string, token: string) => {
     const res = await call(`/api/${scope}/media-url?key=${encodeURIComponent(key)}`, token, undefined, 'GET');
-    return res.status === 200 ? { status: 200, ...shape(res.body.url) } : { status: res.status };
+    return res.status === 200 ? { status: 200, ...shape(res.body.url), display: res.body.display ? shape(res.body.display) : null } : { status: res.status };
   };
   const batch = async (scope: 'posts' | 'chat', keys: unknown, token: string | null) => call(`/api/${scope}/media-urls`, token, { keys });
   /** For every key and caller: the batch signs exactly what /media-url signs, or refuses with the status /media-url answers. */
   const expectSameAsSingle = async (scope: 'posts' | 'chat', keys: string[], token: string) => {
     const res = await batch(scope, keys, token);
     expect(res.status).toBe(200);
-    const urls = res.body.urls as Record<string, { url: string; expiresIn: number }>;
+    const urls = res.body.urls as Record<string, { url: string; expiresIn: number; display?: string }>;
     const failed = res.body.failed as Record<string, number>;
+    // Signed per window (community 30 min, chat 15 min), alive for two: always good for at least one more window.
+    const window = scope === 'posts' ? 1800 : 900;
     for (const key of keys) {
       const one = await single(scope, key, token);
-      const many = urls[key] ? { status: 200, ...shape(urls[key].url) } : { status: failed[key] };
+      const many = urls[key] ? { status: 200, ...shape(urls[key].url), display: urls[key].display ? shape(urls[key].display) : null } : { status: failed[key] };
       expect({ key, ...many }).toEqual({ key, ...one });
-      if (urls[key]) expect(urls[key].expiresIn).toBe(900);
+      if (urls[key]) {
+        expect(urls[key].expiresIn).toBeGreaterThanOrEqual(window - 5);
+        expect(urls[key].expiresIn).toBeLessThanOrEqual(window * 2);
+        expect(query(urls[key].url).get('X-Amz-Expires')).toBe(String(window * 2));
+      }
     }
   };
   const neutral = (n: number, ext = 'bin') => `posts/${u(800 + n)}/17900000000${String(n).padStart(2, '0')}-${u(850 + n)}.${ext}`;
@@ -864,5 +903,126 @@ describe('authentication reads the profile while the token is verified', () => {
   test('an invalid token is refused whatever it claims', async () => {
     const res = await call('/api/posts/media-urls', jwtLike(ADMIN, 'not-a-valid-signature'), { keys: [OFFICIAL_KEY] });
     expect(res.status).toBe(401);
+  });
+});
+
+describe('display copies: the size a phone shows, no metadata, under the original\'s rules', () => {
+  const query = (url: unknown) => new URL(String(url)).searchParams;
+  const urlsOf = (res: { body: Record<string, unknown> }) => res.body.urls as Record<string, { url: string; expiresIn: number; display?: string }>;
+  /** A 1600×1200 photo taken rotated (EXIF orientation 6), carrying an author name and a GPS position. */
+  const photo = () => sharp({ create: { width: 1600, height: 1200, channels: 3, background: '#3366aa' } })
+    .jpeg({ quality: 90 })
+    .withExif({ IFD0: { Artist: 'Priya Sharma', Copyright: 'Priya Sharma' }, IFD3: { GPSLatitudeRef: 'N', GPSLatitude: '28/1 36/1 0/1' } })
+    .withMetadata({ orientation: 6 })
+    .toBuffer();
+
+  test('a still picture comes with its display copy\'s address; posters, videos and documents do not', async () => {
+    Object.assign(fake.tables.posts[0], { attachment: 'image', mime_type: 'image/png', file_name: 'gold.png' });
+    Object.assign(fake.tables.posts[1], { attachment: 'file', mime_type: 'text/csv', file_name: 'pl.csv' });
+    const res = await call('/api/posts/media-urls', 'other-token', { keys: [OFFICIAL_KEY, STUDENT_POST_KEY] });
+    const urls = urlsOf(res);
+    expect(signedKey(urls[OFFICIAL_KEY].display)).toBe(displayVariantKey(OFFICIAL_KEY));
+    expect(query(urls[OFFICIAL_KEY].display).get('response-content-type')).toBe('image/jpeg');
+    expect(query(urls[OFFICIAL_KEY].display).get('response-content-disposition')).toBe('inline');
+    expect(urls[STUDENT_POST_KEY].display).toBeUndefined();
+    const chat = await call('/api/chat/media-urls', 'student-token', { keys: [OWN_KEY, ADMIN_KEY_IN_THREAD] });
+    expect(signedKey(urlsOf(chat)[OWN_KEY].display)).toBe(displayVariantKey(OWN_KEY));
+    expect(urlsOf(chat)[ADMIN_KEY_IN_THREAD].display).toBeUndefined();
+  });
+
+  test('the same picture gets the same address all window long, so the browser\'s cache answers', async () => {
+    Object.assign(fake.tables.posts[0], { attachment: 'image', mime_type: 'image/jpeg' });
+    const first = urlsOf(await call('/api/posts/media-urls', 'other-token', { keys: [OFFICIAL_KEY] }))[OFFICIAL_KEY];
+    const again = urlsOf(await call('/api/posts/media-urls', 'student-token', { keys: [OFFICIAL_KEY] }))[OFFICIAL_KEY];
+    expect(again.url).toBe(first.url);
+    expect(again.display).toBe(first.display);
+    expect(query(first.url).get('response-cache-control')).toBe('private, max-age=86400, immutable');
+    // Private chat media: kept by the browser only while its address lives.
+    const chat = urlsOf(await call('/api/chat/media-urls', 'student-token', { keys: [OWN_KEY] }))[OWN_KEY];
+    expect(query(chat.url).get('response-cache-control')).toBe('private, max-age=1800');
+  });
+
+  test('a missing copy is made upright, at most 1080 × 1920, as JPEG, with no metadata at all — once', async () => {
+    Object.assign(fake.tables.posts[0], { attachment: 'image', mime_type: 'image/jpeg' });
+    stored.set(OFFICIAL_KEY, { body: new Uint8Array(await photo()), type: 'image/jpeg' });
+    const res = await call('/api/posts/media-variants', 'other-token', { keys: [OFFICIAL_KEY] });
+    expect(res.status).toBe(200);
+    expect(res.body.ready).toEqual([OFFICIAL_KEY]);
+    const copy = stored.get(displayVariantKey(OFFICIAL_KEY))!;
+    expect(copy.type).toBe('image/jpeg');
+    const meta = await sharp(Buffer.from(copy.body)).metadata();
+    expect(meta.format).toBe('jpeg');
+    expect([meta.width, meta.height]).toEqual([1080, 1440]);   // turned upright: 1200 × 1600, then fitted
+    expect(meta.exif).toBeUndefined();
+    expect(meta.orientation).toBeUndefined();
+    expect(Buffer.from(copy.body).includes(Buffer.from('Priya'))).toBe(false);
+    // Asked again: it is there; nothing is read or written.
+    s3Log.length = 0;
+    const again = await call('/api/posts/media-variants', 'student-token', { keys: [OFFICIAL_KEY] });
+    expect(again.body.ready).toEqual([OFFICIAL_KEY]);
+    expect(s3Log).toEqual([`HeadObject ${displayVariantKey(OFFICIAL_KEY)}`]);
+  });
+
+  test('the answer names the keys as they were asked for; a picture named twice is made once', async () => {
+    Object.assign(fake.tables.posts[0], { attachment: 'image', mime_type: 'image/jpeg' });
+    stored.set(OFFICIAL_KEY, { body: new Uint8Array(await photo()), type: 'image/jpeg' });
+    s3Log.length = 0;
+    const res = await call('/api/posts/media-variants', 'other-token', { keys: [OFFICIAL_KEY, ` ${OFFICIAL_KEY} `] });
+    expect(res.status).toBe(200);
+    expect(res.body.ready).toEqual([OFFICIAL_KEY, ` ${OFFICIAL_KEY} `]);
+    expect(s3Log.filter(line => line.startsWith('PutObject'))).toEqual([`PutObject ${displayVariantKey(OFFICIAL_KEY)}`]);
+  });
+
+  test('copies are made only for what the caller may read, and only for still pictures', async () => {
+    Object.assign(fake.tables.posts[0], { attachment: 'image', mime_type: 'image/gif' });
+    Object.assign(fake.tables.posts[1], { attachment: 'file', mime_type: 'text/csv' });
+    const posts = await call('/api/posts/media-variants', 'other-token', { keys: [OFFICIAL_KEY, STUDENT_POST_KEY, 'posts/../x.bin'] });
+    expect(posts.body.skipped).toEqual(expect.arrayContaining([OFFICIAL_KEY, STUDENT_POST_KEY]));   // an animated GIF keeps its animation
+    expect(posts.body.failed).toEqual({ 'posts/../x.bin': 400 });
+    stored.set(OTHER_THREAD_KEY, { body: new Uint8Array(await photo()), type: 'image/jpeg' });
+    s3Log.length = 0;
+    const student = await call('/api/chat/media-variants', 'student-token', { keys: [OTHER_THREAD_KEY, chatKey(CONV, 77)] });
+    expect(student.body.failed).toEqual({ [OTHER_THREAD_KEY]: 403, [chatKey(CONV, 77)]: 404 });
+    expect(s3Log).toEqual([]);                       // another member's private photo is never even read
+    expect(stored.has(displayVariantKey(OTHER_THREAD_KEY))).toBe(false);
+    const admin = await call('/api/chat/media-variants', 'admin-token', { keys: [OTHER_THREAD_KEY] });
+    expect(admin.body.ready).toEqual([OTHER_THREAD_KEY]);
+    // Who may ask at all.
+    expect((await call('/api/chat/media-variants', null, { keys: [OWN_KEY] })).status).toBe(401);
+    expect((await call('/api/posts/media-variants', 'newcomer-token', { keys: [OFFICIAL_KEY] })).status).toBe(403);
+    expect((await call('/api/posts/media-variants', 'admin-token', { keys: [] })).status).toBe(400);
+  });
+
+  test('deleting a picture deletes its display copy (checked for every delete in this file)', async () => {
+    stored.set(OWN_KEY, { body: new Uint8Array(await photo()), type: 'image/jpeg' });
+    await call('/api/chat/media-variants', 'student-token', { keys: [OWN_KEY] });
+    expect(stored.has(displayVariantKey(OWN_KEY))).toBe(true);
+    const res = await call('/api/chat/delete-media', 'student-token', { messageId: u(101) });
+    expect(res.status).toBe(200);
+    expect(stored.has(OWN_KEY)).toBe(false);
+    expect(stored.has(displayVariantKey(OWN_KEY))).toBe(false);
+  });
+
+  test('an auth server outage is a temporary failure (503), never "not signed in" (401) — which would make the app refresh its session', async () => {
+    fake.authOutage = 503;
+    try {
+      const res = await call('/api/posts/media-urls', 'student-token', { keys: [OFFICIAL_KEY] });
+      expect(res.status).toBe(503);
+      const chat = await call('/api/chat/media-url?key=' + encodeURIComponent(OWN_KEY), 'student-token', undefined, 'GET');
+      expect(chat.status).toBe(503);
+    } finally {
+      fake.authOutage = null;
+    }
+    // A token the auth server really refuses is still a 401.
+    expect((await call('/api/posts/media-urls', 'no-such-token', { keys: [OFFICIAL_KEY] })).status).toBe(401);
+  });
+
+  test('a deployment check says whether copies can be made here, without an account and without reading storage', async () => {
+    s3Log.length = 0;
+    const res = await call('/api/posts/media-variants/status', null, undefined, 'GET');
+    expect(res.status).toBe(200);
+    expect(res.body.displayCopies).toBe('ready');
+    expect(Object.keys(res.body).sort()).toEqual(['displayCopies', 'ms']);
+    expect(s3Log).toEqual([]);
   });
 });

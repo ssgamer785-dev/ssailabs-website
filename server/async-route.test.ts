@@ -62,7 +62,7 @@ describe('deleteObjects: a failed R2 delete must not read as success', () => {
     const s3 = fakeS3({ errors: [{ Key: 'chat/a/2.bin', Code: 'InternalError', Message: 'try again' }] });
     await expect(
       deleteObjects(s3 as never, 'bucket', [{ Key: 'chat/a/1.bin' }, { Key: 'chat/a/2.bin' }]),
-    ).rejects.toThrow(/1 of 2 object\(s\)/);
+    ).rejects.toThrow(/1 of 4 object\(s\)/);   // the two pictures and their two display copies
   });
 
   test('the thrown message names the object and the reason', async () => {

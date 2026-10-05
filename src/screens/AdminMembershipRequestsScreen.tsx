@@ -4,7 +4,9 @@ import { Hoverable } from '../lib/Hoverable';
 import { PhoneShell } from '../components/PhoneShell';
 import { playMoneyRefreshSound } from '../lib/useMoneySound';
 import { AppBackButton } from '../components/ui/AppBackButton';
-import { listMembershipRequests, setMembershipStatus, type MembershipRequest } from '../lib/activation';
+import { adminRequestsKey, listMembershipRequests, setMembershipStatus, type MembershipRequest } from '../lib/activation';
+import { useAuth } from '../lib/auth-context';
+import { readView, writeView } from '../lib/view-cache';
 import type { MembershipRequestStatus } from '../lib/database.types';
 
 /**
@@ -97,8 +99,11 @@ function Row({ request, onChange }: { request: MembershipRequest; onChange: (s: 
 }
 
 export function AdminMembershipRequestsScreen() {
-  const [requests, setRequests] = useState<MembershipRequest[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  // The list as last read (at start-up, or the last visit) is on screen at once and re-read behind.
+  const viewKey = adminRequestsKey(user?.id ?? '-');
+  const [requests, setRequests] = useState<MembershipRequest[]>(() => readView<MembershipRequest[]>(viewKey) ?? []);
+  const [loading, setLoading] = useState(() => readView(viewKey) === undefined);
   // A failed read must not render as "No requests yet": telling an admin that
   // nobody has applied, when the query simply errored, is the one wrong answer
   // this screen can give.
@@ -106,9 +111,9 @@ export function AdminMembershipRequestsScreen() {
 
   const refresh = useCallback(async () => {
     const rows = await listMembershipRequests(100);
-    if (rows) { setRequests(rows); setLoadFailed(false); } else { setLoadFailed(true); }
+    if (rows) { setRequests(rows); setLoadFailed(false); writeView(viewKey, rows); } else { setLoadFailed(true); }
     setLoading(false);
-  }, []);
+  }, [viewKey]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 

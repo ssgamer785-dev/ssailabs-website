@@ -15,6 +15,8 @@ export interface FakeSupabase {
   url: string;
   tables: Record<string, Row[]>;
   rpcCalls: { fn: string; args: Record<string, unknown> }[];
+  /** The auth server's answer to every token check while set (an outage: 502, 503…); null for normal service. */
+  authOutage: number | null;
   close: () => void;
 }
 
@@ -65,10 +67,12 @@ export async function startFakeSupabase(options: {
 }): Promise<FakeSupabase> {
   const tables: Record<string, Row[]> = options.tables ?? {};
   const rpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
+  const fake: FakeSupabase = { url: '', tables, rpcCalls, authOutage: null, close: () => {} };
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/auth/v1/user', (req, res) => {
+    if (fake.authOutage) return res.status(fake.authOutage).json({ message: 'upstream unavailable' });
     const id = options.tokens[req.get('authorization')?.replace(/^Bearer /, '') ?? ''];
     if (!id) return res.status(401).json({ message: 'invalid JWT' });
     return res.json({ id, aud: 'authenticated', email: `${id}@example.test`, app_metadata: {}, user_metadata: {} });
@@ -147,10 +151,7 @@ export async function startFakeSupabase(options: {
   });
 
   const server = await new Promise<Server>(resolve => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
-  return {
-    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-    tables,
-    rpcCalls,
-    close: () => server.close(),
-  };
+  fake.url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  fake.close = () => server.close();
+  return fake;
 }

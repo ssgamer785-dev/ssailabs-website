@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabase';
 import { useAuth } from '../auth-context';
 import type { NotificationKind } from '../database.types';
-import { friendlyError, withTimeout } from '../errors';
+import { friendlyError, isNetworkError, withTimeout } from '../errors';
 import { mergeFirstPage } from '../community/comments-merge';
 import { readView, warmView, writeView } from '../view-cache';
 import { NOTIFICATIONS_CHANGED_EVENT, announceNotificationsChanged } from './events';
@@ -134,7 +134,12 @@ export function useNotifications(): UseNotifications {
     }
 
     if (activeUser.current !== userId) return;
-    if (qError) { console.error('[notifications] load failed:', qError); setError(friendlyError(qError, 'Could not load notifications.')); return; }
+    if (qError) {
+      // Offline is a state the screen shows (and recovers from by itself), not a fault.
+      (isNetworkError(qError) ? console.warn : console.error)('[notifications] load failed:', qError);
+      setError(friendlyError(qError, 'Could not load notifications.'));
+      return;
+    }
     const rows = ((data ?? []) as NotificationRow[]).map(toNotification);
     const pageOldest = rows.length ? rows[rows.length - 1].createdAt : null;
     if (!oldestRef.current || !pageOldest || pageOldest < oldestRef.current) {

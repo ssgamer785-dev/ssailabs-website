@@ -14,15 +14,15 @@ describe('runStorageCleanup', () => {
     };
     const progress: number[] = [];
     const totals = await runStorageCleanup(request, { remove: false, onProgress: t => progress.push(t.scanned) });
-    expect(seen).toEqual(['chat/|null|false|', 'chat/|chat/k1000|false|', 'posts/|null|false|', 'avatars/|null|false|']);
-    expect(totals).toEqual({ scanned: 1014, inUse: 909, recent: 1, unused: 104, unusedBytes: 104, deleted: 0 });
-    expect(progress).toEqual([1000, 1010, 1012, 1014]);
+    expect(seen).toEqual(['chat/|null|false|', 'chat/|chat/k1000|false|', 'posts/|null|false|', 'avatars/|null|false|', 'variants/v1/|null|false|']);
+    expect(totals).toEqual({ scanned: 1016, inUse: 911, recent: 1, unused: 104, unusedBytes: 104, deleted: 0 });
+    expect(progress).toEqual([1000, 1010, 1012, 1014, 1016]);
   });
 
   it('sends the confirmation only when deleting', async () => {
     const bodies: unknown[] = [];
     await runStorageCleanup(async body => { bodies.push(body); return page({}); }, { remove: true });
-    expect(bodies).toEqual(['chat/', 'posts/', 'avatars/'].map(prefix => ({ prefix, after: null, remove: true, confirm: 'DELETE' })));
+    expect(bodies).toEqual(['chat/', 'posts/', 'avatars/', 'variants/v1/'].map(prefix => ({ prefix, after: null, remove: true, confirm: 'DELETE' })));
   });
 
   it('stops on the first failed page and never reports it as done', async () => {

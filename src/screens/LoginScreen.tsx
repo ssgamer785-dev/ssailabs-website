@@ -7,6 +7,7 @@ import { PhoneShell } from '../components/PhoneShell';
 import { AuthDivider, GoogleSignInButton } from '../components/ui/GoogleSignInButton';
 import { pendingDestination } from '../lib/notifications/destination';
 import { rememberSession, setRememberSession } from '../lib/supabase';
+import { takeSessionEndedNotice } from '../lib/session-ended';
 
 export function LoginScreen() {
   const navigate = useNavigate();
@@ -17,6 +18,7 @@ export function LoginScreen() {
   const [remember, setRemember] = useState(rememberSession);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice] = useState(takeSessionEndedNotice);
   const inFlight = useRef(false);
 
   async function handleLogin() {
@@ -46,6 +48,7 @@ export function LoginScreen() {
         <div style={css('height:52px;flex:none')} />
         <div style={css('font-size:28px;font-weight:800;letter-spacing:-.8px')}>Welcome Back 👋</div>
         <div style={css('margin-top:9px;font-size:14px;color:#8794A8')}>Login to continue your journey</div>
+        {notice && <div role="status" style={css('margin-top:16px;padding:11px 13px;border-radius:11px;background:#EEF4FF;border:1px solid #CFE0FF;font-size:13px;color:#1E3A8A;line-height:1.45')}>{notice}</div>}
         <div style={css('height:32px;flex:none')} />
         <div style={css('font-size:13px;font-weight:700;letter-spacing:-.1px')}>Email</div>
         <div style={css('margin-top:9px;height:52px;border:1px solid #E6EAF1;border-radius:12px;display:flex;align-items:center;padding:0 16px')}>
@@ -85,6 +88,7 @@ export function LoginScreen() {
           </div>
           <div style={css('font-size:13px;color:#475569;white-space:nowrap')}>Remember me</div>
         </div>
+        {!remember && <div style={css('margin-top:6px;font-size:12px;color:#64748B;line-height:1.45')}>You will be signed out when you close this app or browser.</div>}
         <AuthDivider />
         <div style={css('margin-top:18px;flex:none')}>
           <GoogleSignInButton onError={setError} />

@@ -13,6 +13,8 @@ export function intentForPath(path: string): string | undefined {
     case '/chat':
     case '/admin-inbox': return 'chat';
     case '/notifications': return 'notifications';
+    case '/admin/activation-codes': return 'admin-codes';
+    case '/admin/membership-requests': return 'admin-requests';
     default: return undefined;
   }
 }

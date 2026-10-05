@@ -9,6 +9,7 @@
  */
 
 import { supabase } from './supabase';
+import { warmView } from './view-cache';
 import type { Database, MembershipRequestStatus } from './database.types';
 
 // Re-exported so screens have one import for the whole flow, while the
@@ -106,6 +107,27 @@ export async function listMembershipRequests(limit = 100): Promise<MembershipReq
     return null;
   }
   return (data ?? []) as unknown as MembershipRequest[];
+}
+
+/** Where the admin's lists are kept between visits (memory only, per account, emptied on sign-out). */
+export const adminCodesKey = (userId: string) => `admin-codes:${userId}`;
+export const adminRequestsKey = (userId: string) => `admin-requests:${userId}`;
+
+/** Read ahead for the admin — at start-up, or as they reach for the screen. A failed read is not kept. */
+export function warmActivationCodes(userId: string): Promise<AdminActivationCode[]> {
+  return warmView(adminCodesKey(userId), async () => {
+    const rows = await listActivationCodes(50);
+    if (!rows) throw new Error('Activation codes could not be read.');
+    return rows;
+  });
+}
+
+export function warmMembershipRequests(userId: string): Promise<MembershipRequest[]> {
+  return warmView(adminRequestsKey(userId), async () => {
+    const rows = await listMembershipRequests(100);
+    if (!rows) throw new Error('Membership requests could not be read.');
+    return rows;
+  });
 }
 
 export async function setMembershipStatus(

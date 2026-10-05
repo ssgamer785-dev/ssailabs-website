@@ -38,6 +38,8 @@ const totals = {
   sources: emptySources(),
   prefetched: 0,
   prefetchedBytes: 0,
+  /** Pictures drawn from their display copy, or (no copy yet) from the full original. */
+  copies: { copy: 0, original: 0 },
   deviceCache: 'unknown' as 'unknown' | 'on' | 'unavailable' | 'blocked',
 };
 
@@ -90,13 +92,15 @@ export function notePrefetched(bytes: number): void {
 
 export function noteDeviceCache(state: typeof totals.deviceCache): void { totals.deviceCache = state; }
 
+export function noteCopy(kind: 'copy' | 'original'): void { totals.copies[kind] += 1; }
+
 export function mediaStats() {
-  return { ...totals, sources: { ...totals.sources }, visits: visits.map(v => ({ ...v, sources: { ...v.sources } })) };
+  return { ...totals, sources: { ...totals.sources }, copies: { ...totals.copies }, visits: visits.map(v => ({ ...v, sources: { ...v.sources } })) };
 }
 
 export function resetMediaStats(): void {
   visits.length = 0;
-  Object.assign(totals, { signRequests: 0, batchRequests: 0, signedKeys: 0, sources: emptySources(), prefetched: 0, prefetchedBytes: 0 });
+  Object.assign(totals, { signRequests: 0, batchRequests: 0, signedKeys: 0, sources: emptySources(), prefetched: 0, prefetchedBytes: 0, copies: { copy: 0, original: 0 } });
 }
 
 const ms = (value: number | null) => (value == null ? '—' : `${value} ms`);
@@ -105,7 +109,7 @@ const ms = (value: number | null) => (value == null ? '—' : `${value} ms`);
 export function mediaLogLines(): string[] {
   const s = totals.sources;
   return [
-    `media: device cache ${totals.deviceCache} · prepared ${totals.prefetched} (${Math.round(totals.prefetchedBytes / 1024)} KB) · signing ${totals.signRequests} request(s) for ${totals.signedKeys} key(s) (${totals.batchRequests} batched) · shown from memory ${s.memory} / device ${s.device} / signed address ${s.url} / network ${s.network}`,
+    `media: device cache ${totals.deviceCache} · prepared ${totals.prefetched} (${Math.round(totals.prefetchedBytes / 1024)} KB) · signing ${totals.signRequests} request(s) for ${totals.signedKeys} key(s) (${totals.batchRequests} batched) · shown from memory ${s.memory} / device ${s.device} / signed address ${s.url} / network ${s.network} · display copies ${totals.copies.copy} / full originals ${totals.copies.original}`,
     ...visits.map(v => `media ${v.screen}: text ${ms(v.textMs)} · first picture ${ms(v.mediaMs)} · signing ${v.signRequests} (${v.signedKeys} keys) · memory ${v.sources.memory} / device ${v.sources.device} / address ${v.sources.url} / network ${v.sources.network}`),
   ];
 }

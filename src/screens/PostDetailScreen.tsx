@@ -305,7 +305,7 @@ export function PostDetailScreen() {
         {/* ---- attachment ---- */}
         {post.attachment === 'poll' ? (
           <div style={css('flex:none;margin-top:14px')}>
-            <PollCard postId={post.id} />
+            <PollCard postId={post.id} showVoters={isAdmin} />
           </div>
         ) : (post.attachment === 'pdf' || post.attachment === 'file') && !post.extraMedia?.length ? (
           <div style={css('flex:none;margin-top:12px')}>

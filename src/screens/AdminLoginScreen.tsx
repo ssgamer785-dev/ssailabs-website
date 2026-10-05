@@ -7,6 +7,7 @@ import { AppBackButton } from '../components/ui/AppBackButton';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth-context';
 import { pendingDestination } from '../lib/notifications/destination';
+import { takeSessionEndedNotice } from '../lib/session-ended';
 
 /**
  * The single admin's sign-in. Username and password, nothing else.
@@ -29,6 +30,7 @@ export function AdminLoginScreen() {
   const [show, setShow] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice] = useState(takeSessionEndedNotice);
   const inFlight = useRef(false);
 
   const login = useCallback(async () => {
@@ -93,6 +95,7 @@ export function AdminLoginScreen() {
         <div style={css('margin-top:9px;font-size:13.5px;color:var(--text-muted);line-height:1.5')}>
           Restricted to The Traders Planet administrator.
         </div>
+        {notice && <div role="status" style={css('margin-top:16px;padding:11px 13px;border-radius:11px;background:var(--accent-soft);border:1px solid var(--accent-border-2);font-size:13px;color:var(--accent-ink);line-height:1.45')}>{notice}</div>}
 
         <div style={css('height:28px;flex:none')} />
 

@@ -5,6 +5,7 @@ import { S3Client } from '@aws-sdk/client-s3';
 import app from './app';
 import { resetClientsForTests } from './r2';
 import { CLEANUP_MIN_AGE_MS } from './storage-cleanup';
+import { displayVariantKey } from './media-variants';
 import { startFakeSupabase, type FakeSupabase, type Row } from './testing/fake-supabase';
 
 /**
@@ -36,6 +37,12 @@ const K = {
   elsewhere: 'regency-tailors/catalogue.pdf',
   lookalike: 'chatter/1790000000011-x.bin',
 };
+/** Display copies: of a picture still in use (kept), and of one whose original is long gone (removed). */
+const COPY_USED = displayVariantKey(K.chatUsed);
+const COPY_ORPHAN = displayVariantKey(`chat/${CONV}/1790000000099-gone.bin`);
+/** The originals a delete call removed (each call also removes those originals' display copies). */
+const originalsOf = (calls: string[][]) => calls.flat().filter(k => !k.startsWith('variants/'));
+const copiesOf = (calls: string[][]) => calls.flat().filter(k => k.startsWith('variants/'));
 
 let objects: Map<string, { size: number; modified: Date }>;
 let deleteCalls: string[][];
@@ -71,7 +78,7 @@ function world(): Record<string, Row[]> {
 
 function seedBucket() {
   objects = new Map();
-  for (const key of Object.values(K)) objects.set(key, { size: 1000, modified: OLD });
+  for (const key of [...Object.values(K), COPY_USED, COPY_ORPHAN]) objects.set(key, { size: 1000, modified: OLD });
   objects.get(K.chatFreshOrphan)!.modified = FRESH;
 }
 
@@ -199,7 +206,7 @@ describe('dry run', () => {
     const [avatars] = await sweep('avatars/');
     expect(avatars).toMatchObject({ scanned: 3, inUse: 2, recent: 0, unused: 1, deleted: 0 });
     expect(deleteCalls).toEqual([]);
-    expect(objects.size).toBe(Object.keys(K).length);
+    expect(objects.size).toBe(Object.keys(K).length + 2);   // and the two display copies
   });
 });
 
@@ -207,7 +214,9 @@ describe('delete', () => {
   test('removes exactly the unused objects and keeps everything else, including other projects\' files', async () => {
     await startWith();
     for (const prefix of ['chat/', 'posts/', 'avatars/']) await sweep(prefix, true);
-    expect(deleteCalls.flat().sort()).toEqual([K.avatarReplaced, K.chatOrphan, K.postOrphan].sort());
+    expect(originalsOf(deleteCalls).sort()).toEqual([K.avatarReplaced, K.chatOrphan, K.postOrphan].sort());
+    // A removed picture's display copy goes with it (avatars have none).
+    expect(copiesOf(deleteCalls).sort()).toEqual([K.chatOrphan, K.postOrphan].map(displayVariantKey).sort());
     for (const key of [K.chatUsed, K.chatPoster, K.chatLegacyLink, K.chatFreshOrphan, K.postUsed, K.postGranted,
       K.avatarCurrent, K.avatarLegacyUrl, K.elsewhere, K.lookalike]) {
       expect(objects.has(key)).toBe(true);
@@ -221,7 +230,8 @@ describe('delete', () => {
     await startWith();
     listExtraKey = K.elsewhere;
     await sweep('chat/', true);
-    expect(deleteCalls.flat()).toEqual([K.chatOrphan]);
+    expect(originalsOf(deleteCalls)).toEqual([K.chatOrphan]);
+    expect(copiesOf(deleteCalls)).toEqual([displayVariantKey(K.chatOrphan)]);
     expect(objects.has(K.elsewhere)).toBe(true);
   });
 
@@ -262,5 +272,16 @@ describe('scale', () => {
     await startWith({ tables, missingTables: ['media_upload_grants'] });
     const [posts] = await sweep('posts/');
     expect(posts).toMatchObject({ inUse: 1, unused: 2 });
+  });
+});
+
+describe('display copies (variants/)', () => {
+  test('a copy is in use exactly while its original is: the copy of a picture still named is kept, an orphan copy removed', async () => {
+    await startWith();
+    const [dry] = await sweep('variants/v1/');
+    expect(dry).toMatchObject({ prefix: 'variants/v1/', scanned: 2, inUse: 1, unused: 1, deleted: 0 });
+    await sweep('variants/v1/', true);
+    expect(deleteCalls.flat()).toEqual([COPY_ORPHAN]);
+    expect(objects.has(COPY_USED)).toBe(true);
   });
 });

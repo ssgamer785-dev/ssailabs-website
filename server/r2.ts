@@ -7,9 +7,10 @@
  */
 
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { DeleteObjectsCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { createClient, isAuthRetryableFetchError, type SupabaseClient } from '@supabase/supabase-js';
+import { DeleteObjectsCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { displayVariantKey, mayHaveVariant } from './media-variants.js';
 
 export function env(name: string): string | undefined {
   const v = process.env[name];
@@ -54,6 +55,33 @@ export function servedAs(args: { mimeType: string | null | undefined; allowed: b
 
 export function bucket(): string | undefined {
   return env('R2_BUCKET');
+}
+
+/**
+ * A signed GET that is the same for everyone who asks within one window: it is
+ * signed as of the window's start and lives two windows, so whoever receives
+ * it can use it for at least one more window. The same address for the same
+ * picture lets the browser's own cache answer a reload, a reopened app or
+ * another screen without downloading the picture again. An object never
+ * changes under its key, so the answer may be kept while it is fresh:
+ * community media for a day; private chat media only while its address lives.
+ */
+export async function signStableGet(
+  key: string,
+  served: ReturnType<typeof servedAs>,
+  { windowSeconds, keepPrivateCopyShort }: { windowSeconds: number; keepPrivateCopyShort: boolean },
+): Promise<{ url: string; expiresIn: number }> {
+  const now = Date.now();
+  const windowMs = windowSeconds * 1000;
+  const start = Math.floor(now / windowMs) * windowMs;
+  const lifetime = windowSeconds * 2;
+  const cacheControl = keepPrivateCopyShort ? `private, max-age=${lifetime}` : 'private, max-age=86400, immutable';
+  const url = await getSignedUrl(
+    getS3()!,
+    new GetObjectCommand({ Bucket: bucket()!, Key: key, ...served, ResponseCacheControl: cacheControl }),
+    { expiresIn: lifetime, signingDate: new Date(start) },
+  );
+  return { url, expiresIn: Math.max(1, Math.floor((start + lifetime * 1000 - now) / 1000)) };
 }
 
 /** The most keys one batch of signed GETs may ask for: a screen's worth of pictures, never a whole history. */
@@ -168,18 +196,26 @@ export async function deleteObjects(
 ): Promise<void> {
   if (!keys.length) return;
 
-  const result = await client.send(new DeleteObjectsCommand({
-    Bucket: bucketName,
-    Delete: { Objects: keys, Quiet: true },
-  }));
+  // A picture's display copy goes with it, whichever path removes the picture.
+  // (Deleting a copy that was never made is not an error.)
+  const all = [...keys, ...keys.filter(k => mayHaveVariant(k.Key)).map(k => ({ Key: displayVariantKey(k.Key) }))];
 
-  const errors = result.Errors ?? [];
-  if (errors.length) {
-    const first = errors[0];
-    throw new Error(
-      `R2 delete failed for ${errors.length} of ${keys.length} object(s); ` +
-      `first: ${first.Key ?? '(unknown key)'} — ${first.Code ?? 'unknown'}: ${first.Message ?? 'no message'}`,
-    );
+  // DeleteObjects takes at most 1000 keys.
+  for (let i = 0; i < all.length; i += 1000) {
+    const chunk = all.slice(i, i + 1000);
+    const result = await client.send(new DeleteObjectsCommand({
+      Bucket: bucketName,
+      Delete: { Objects: chunk, Quiet: true },
+    }));
+
+    const errors = result.Errors ?? [];
+    if (errors.length) {
+      const first = errors[0];
+      throw new Error(
+        `R2 delete failed for ${errors.length} of ${chunk.length} object(s); ` +
+        `first: ${first.Key ?? '(unknown key)'} — ${first.Code ?? 'unknown'}: ${first.Message ?? 'no message'}`,
+      );
+    }
   }
 }
 
@@ -230,6 +266,11 @@ export async function authenticate(req: Request): Promise<Caller | null> {
       .then(r => r as ProfileRead, (e: unknown) => ({ data: null, error: { code: (e as { code?: string })?.code ?? 'FETCH' } }));
   const claimed = claimedUserId(token);
   const [{ data, error }, early] = await Promise.all([db.auth.getUser(token), claimed ? readProfile(claimed) : Promise.resolve(null)]);
+  // The auth server could not answer (down, or unreachable): that says nothing about the caller's token. It is a
+  // temporary failure (503 through asyncRoute), never "not signed in" (401), which would make the app refresh the
+  // member's session for nothing — each refresh rotates the refresh token, and one cut off by a phone suspending
+  // the app is how a Supabase session gets revoked.
+  if (error && isAuthRetryableFetchError(error)) throw error;
   if (error || !data.user) return null;
 
   const { data: profile, error: profileError } = early && claimed === data.user.id && early.error?.code !== 'FETCH'

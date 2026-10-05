@@ -22,6 +22,7 @@ import { friendlyError } from '../errors';
 import { measureImage } from '../media/dimensions';
 import { announceNotificationsChanged } from '../notifications/events';
 import { readView, warmView, writeView } from '../view-cache';
+import { requestCopies } from '../media/media-cache';
 import type { ChatOverview } from './useChatOverview';
 
 const PAGE_SIZE = 30;
@@ -524,6 +525,8 @@ export function useConversation(explicitConversationId?: string): UseConversatio
         ? { ...saved, localPreviewUrl: m.localPreviewUrl, localPosterUrl: m.localPosterUrl }
         : m)));
       if (!newestAt.current || saved.createdAt > newestAt.current) newestAt.current = saved.createdAt;
+      // A photo's display copy is made now, so the thread draws that rather than the original.
+      if (saved.kind === 'image' && saved.storageKey) void requestCopies('chat', [saved.storageKey]);
 
       // Reconciliation only — the space was already made in step 1.
       finalizeUpload(draft.conversationId)

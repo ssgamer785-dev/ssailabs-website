@@ -35,26 +35,42 @@ let calls: Call[];
 let refuse: Record<string, number>;
 let batchRoute: boolean;
 let expiresIn: number;
+/** Keys the fake server signs a display copy for (a still JPEG/PNG/WebP picture). */
+let display: Set<string>;
+/** Keys whose display copy the fake server can make (the rest come back as skipped). */
+let makeable: Set<string>;
+let variantCalls: Call[];
+/** The server's image library cannot be loaded: every request to make copies is refused. */
+let copiesUnavailable: boolean;
 
 function fakeServer() {
+  const copyOf = (key: string) => (display.has(key) ? { display: `https://r2.example.test/variants/v1/${key}?sig=${calls.length}` } : {});
   g.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
+    if (path.endsWith('/media-variants')) {
+      const keys = JSON.parse(String(init?.body)).keys as string[];
+      variantCalls.push({ path, keys });
+      if (copiesUnavailable) return Response.json({ error: 'Media storage is temporarily unavailable.' }, { status: 503 });
+      // Made: from now on the copy is there to be downloaded.
+      for (const k of keys) if (makeable.has(k)) FakeImage.broken.delete(`variants/v1/${k}`);
+      return Response.json({ ready: keys.filter(k => makeable.has(k)), skipped: keys.filter(k => !makeable.has(k)), pending: [], failed: [] });
+    }
     if (path.endsWith('/media-urls')) {
       const keys = JSON.parse(String(init?.body)).keys as string[];
       calls.push({ path, keys });
       if (!batchRoute) return new Response('not found', { status: 404 });
-      const urls: Record<string, { url: string; expiresIn: number }> = {};
+      const urls: Record<string, { url: string; expiresIn: number; display?: string }> = {};
       const failed: Record<string, number> = {};
       for (const key of keys) {
         if (refuse[key]) failed[key] = refuse[key];
-        else urls[key] = { url: `https://r2.example.test/${key}?sig=${calls.length}`, expiresIn };
+        else urls[key] = { url: `https://r2.example.test/${key}?sig=${calls.length}`, expiresIn, ...copyOf(key) };
       }
       return Response.json({ urls, failed });
     }
     const key = new URL(path, 'https://app.example.test').searchParams.get('key') ?? '';
     calls.push({ path, keys: [key] });
     if (refuse[key]) return new Response('{}', { status: refuse[key] });
-    return Response.json({ url: `https://r2.example.test/${key}?single=${calls.length}`, expiresIn });
+    return Response.json({ url: `https://r2.example.test/${key}?single=${calls.length}`, expiresIn, ...copyOf(key) });
   }) as typeof fetch;
 }
 
@@ -64,6 +80,7 @@ beforeEach(() => {
   g.window = { localStorage: local, sessionStorage: session, isSecureContext: false };
   (globalThis as unknown as { localStorage: unknown }).localStorage = local;
   calls = []; refuse = {}; batchRoute = true; expiresIn = 900; sessionUser = 'user-a';
+  display = new Set(); makeable = new Set(); variantCalls = []; copiesUnavailable = false;
   fakeServer();
   cache.resetMediaCacheForTests();
   resetMediaStats();
@@ -241,6 +258,8 @@ class FakeImage {
   /** How many were downloading at once, each time one started. */
   static startedWith: number[] = [];
   static delay: (src: string) => number = () => 15;
+  /** Objects (by key) whose download fails: a display copy that is not there. */
+  static broken = new Set<string>();
   decoding = 'auto';
   fetchPriority?: string;
   naturalWidth = 0;
@@ -250,7 +269,12 @@ class FakeImage {
   decode(): Promise<void> {
     FakeImage.active += 1;
     FakeImage.startedWith.push(FakeImage.active);
-    return new Promise(resolve => setTimeout(() => { FakeImage.active -= 1; this.naturalWidth = 400; this.naturalHeight = 300; resolve(); }, FakeImage.delay(this.src)));
+    const broken = FakeImage.broken.has(this.src.split('?')[0].replace('https://r2.example.test/', ''));
+    return new Promise((resolve, reject) => setTimeout(() => {
+      FakeImage.active -= 1;
+      if (broken) { reject(new Error('EncodingError')); return; }
+      this.naturalWidth = 400; this.naturalHeight = 300; resolve();
+    }, FakeImage.delay(this.src)));
   }
 }
 
@@ -443,5 +467,167 @@ describe('pictures kept on this device: found out with the first download', () =
     expect(entries()).toBe(2);
     await cache.clearMediaCaches();
     expect(stores.size).toBe(0);
+  });
+});
+
+describe('display copies: lists draw a phone-sized copy, never the full original', () => {
+  const gi = globalThis as unknown as { Image?: unknown };
+  const realImage = gi.Image;
+  const plan = { fetchBytes: true, budgetBytes: 16 * 1024 * 1024, concurrency: 2 };
+  const post = (key: string, bytes = 2 * 1024 * 1024) => ({ scope: 'post' as const, key, bytes });
+  const name = (src: string) => src.split('?')[0].replace('https://r2.example.test/', '');
+  beforeEach(() => {
+    FakeImage.created = []; FakeImage.active = 0; FakeImage.startedWith = []; FakeImage.delay = () => 5;
+    FakeImage.broken = new Set();
+    gi.Image = FakeImage;
+  });
+  afterEach(() => { gi.Image = realImage; FakeImage.broken = new Set(); });
+
+  test('a screen draws the copy; the original\'s own address is still what viewers and downloads get', async () => {
+    display.add('posts/a.bin');
+    const shown = await cache.displaySource('post', 'posts/a.bin', { urgent: true });
+    expect(name(shown.src)).toBe('variants/v1/posts/a.bin');
+    expect(FakeImage.created.map(i => name(i.src))).toEqual(['variants/v1/posts/a.bin']);
+    // The prepared picture (drawn under a viewer at once) is the copy; the viewer's own address is the original.
+    expect(cache.peekMedia('post', 'posts/a.bin')).toEqual({ src: shown.src, ready: true });
+    expect(name(cache.peekSignedUrl('post', 'posts/a.bin')!)).toBe('posts/a.bin');
+    expect(mediaStats().copies).toEqual({ copy: 1, original: 0 });
+  });
+
+  test('a picture the server gives no copy for (a GIF, a video frame) is drawn from its original, as before', async () => {
+    const shown = await cache.displaySource('chat', 'chat/c1/anim.bin', { urgent: true });
+    expect(name(shown.src)).toBe('chat/c1/anim.bin');
+    expect(variantCalls).toEqual([]);
+  });
+
+  test('a copy that will not load: the original is drawn straight away and the copy asked for; one the server cannot make is not tried again', async () => {
+    display.add('posts/a.bin');
+    FakeImage.broken.add('variants/v1/posts/a.bin');
+    const shown = await cache.displaySource('post', 'posts/a.bin', { urgent: true });
+    expect(name(shown.src)).toBe('posts/a.bin');
+    await flushTimers();
+    expect(variantCalls).toEqual([{ path: '/api/posts/media-variants', keys: ['posts/a.bin'] }]);
+    expect(mediaStats().copies).toEqual({ copy: 0, original: 1 });
+    // Skipped by the server: a retry goes straight to the original (one download, no second request).
+    FakeImage.created = [];
+    const again = await cache.displaySource('post', 'posts/a.bin', { urgent: true, fresh: true });
+    expect(name(again.src)).toBe('posts/a.bin');
+    expect(FakeImage.created.map(i => name(i.src))).toEqual(['posts/a.bin']);
+    expect(variantCalls.length).toBe(1);
+  });
+
+  test('a copy not made yet is made at once and drawn — never the full original on a link not known to be fast', async () => {
+    display.add('chat/c1/x.bin');
+    makeable.add('chat/c1/x.bin');
+    FakeImage.broken.add('variants/v1/chat/c1/x.bin');
+    const shown = await cache.displaySource('chat', 'chat/c1/x.bin', { urgent: true });
+    expect(name(shown.src)).toBe('variants/v1/chat/c1/x.bin');
+    expect(FakeImage.created.map(i => name(i.src))).toEqual(['variants/v1/chat/c1/x.bin', 'variants/v1/chat/c1/x.bin']);
+    expect(variantCalls).toEqual([{ path: '/api/chat/media-variants', keys: ['chat/c1/x.bin'] }]);
+    expect(mediaStats().copies).toEqual({ copy: 1, original: 0 });
+  });
+
+  test('on a link known to be fast the original is drawn at once, and the copy made for the next time', async () => {
+    cache.setLinkRateForTests(5000);
+    display.add('posts/a.bin');
+    makeable.add('posts/a.bin');
+    FakeImage.broken.add('variants/v1/posts/a.bin');
+    expect(name((await cache.displaySource('post', 'posts/a.bin', { urgent: true })).src)).toBe('posts/a.bin');
+    await flushTimers();
+    expect(variantCalls.length).toBe(1);
+    const again = await cache.displaySource('post', 'posts/a.bin', { urgent: true, fresh: true });
+    expect(name(again.src)).toBe('variants/v1/posts/a.bin');
+  });
+
+  test('a copy made by preparation while a screen was trying it is tried again at once, with no request of its own', async () => {
+    display.add('posts/a.bin');
+    makeable.add('posts/a.bin');
+    FakeImage.broken.add('variants/v1/posts/a.bin');
+    FakeImage.delay = () => 40;
+    // Preparation asks for the copy while the screen's first try is still on its way.
+    const screen = cache.displaySource('post', 'posts/a.bin', { urgent: true });
+    for (let i = 0; i < 200 && !FakeImage.created.length; i++) await new Promise(resolve => setTimeout(resolve, 2));
+    await cache.requestCopies('post', ['posts/a.bin']);
+    const shown = await screen;
+    expect(name(shown.src)).toBe('variants/v1/posts/a.bin');
+    expect(variantCalls.length).toBe(1);
+  });
+
+  test('prepared ahead: missing copies are made first, and only copies are downloaded in the background', async () => {
+    for (const k of ['posts/a.bin', 'posts/b.bin', 'posts/odd.bin']) display.add(k);
+    makeable.add('posts/a.bin'); makeable.add('posts/b.bin');
+    await cache.prefetchMedia([post('posts/a.bin'), post('posts/b.bin'), post('posts/odd.bin'), post('posts/gif.bin')], plan);
+    expect(variantCalls).toEqual([{ path: '/api/posts/media-variants', keys: ['posts/a.bin', 'posts/b.bin', 'posts/odd.bin'] }]);
+    // odd.bin's copy could not be made: its full original is left for its screen, never fetched in the background.
+    // gif.bin has no copy at all: its original is the only picture there is.
+    expect(FakeImage.created.map(i => name(i.src)).sort()).toEqual(['posts/gif.bin', 'variants/v1/posts/a.bin', 'variants/v1/posts/b.bin']);
+    // Known now: the next preparation asks nothing.
+    variantCalls = [];
+    cache.resetMediaCacheForTests();
+    await flushTimers();
+    await cache.prefetchMedia([post('posts/odd.bin')], plan);
+    expect(variantCalls.length).toBe(1);
+  });
+
+  test('on a slow link the copies let every screen be prepared where the originals would not fit', async () => {
+    cache.setLinkRateForTests(100);
+    const keys = ['a', 'b', 'c', 'd', 'e', 'f'].map(k => `posts/${k}.bin`);
+    for (const k of keys) { display.add(k); makeable.add(k); }
+    await cache.prefetchMedia(keys.map(k => post(k, 3 * 1024 * 1024)), plan);
+    expect(FakeImage.created.map(i => name(i.src))).toEqual(keys.map(k => `variants/v1/${k}`));
+    expect(Math.max(...FakeImage.startedWith)).toBe(1);
+  });
+
+  test('a server that cannot make copies: the original is drawn after one quick answer, and the next screens go straight to it', async () => {
+    copiesUnavailable = true;
+    for (const k of ['posts/a.bin', 'posts/b.bin']) { display.add(k); FakeImage.broken.add(`variants/v1/${k}`); }
+    const started = Date.now();
+    const shown = await cache.displaySource('post', 'posts/a.bin', { urgent: true });
+    expect(name(shown.src)).toBe('posts/a.bin');
+    expect(Date.now() - started).toBeLessThan(1000);
+    // Preparation asks once for what it does not know, is refused, and then downloads nothing it cannot use…
+    FakeImage.created = [];
+    await cache.prefetchMedia([post('posts/b.bin')], plan);
+    expect(FakeImage.created.map(i => name(i.src))).toEqual([]);
+    // …and the screen draws the original at once, without trying the copy first.
+    FakeImage.created = [];
+    const b = await cache.displaySource('post', 'posts/b.bin', { urgent: true });
+    expect(name(b.src)).toBe('posts/b.bin');
+    expect(FakeImage.created.map(i => name(i.src))).toEqual(['posts/b.bin']);
+  });
+
+  test('each copy is asked for once, however many ask at the same moment; a skipped one not again for a while', async () => {
+    display.add('posts/a.bin');
+    await Promise.all([cache.requestCopies('post', ['posts/a.bin']), cache.requestCopies('post', ['posts/a.bin', 'posts/a.bin'])]);
+    await cache.requestCopies('post', ['posts/a.bin']);
+    expect(variantCalls).toEqual([{ path: '/api/posts/media-variants', keys: ['posts/a.bin'] }]);
+  });
+
+  test('which community copies are ready is kept per account; chat\'s never leave memory; another account and sign-out start clean', async () => {
+    makeable.add('posts/a.bin'); makeable.add('chat/c1/x.bin');
+    await cache.requestCopies('post', ['posts/a.bin']);
+    await cache.requestCopies('chat', ['chat/c1/x.bin']);
+    await new Promise(resolve => setTimeout(resolve, 750));
+    expect(JSON.parse(local.getItem('tp:media-copies:v1:user-a')!)).toEqual(['posts/a.bin']);
+    const everything = [...local.keys(), ...session.keys()].map(k => `${k}=${local.getItem(k) ?? session.getItem(k)}`).join('\n');
+    expect(everything).not.toContain('chat/c1');
+
+    // The next launch knows it is ready: nothing asked.
+    cache.resetMediaCacheForTests();
+    cache.setMediaAccount('user-a');
+    variantCalls = [];
+    await cache.requestCopies('post', ['posts/a.bin']);
+    expect(variantCalls).toEqual([]);
+
+    // Another account on this device: the first account's marks are removed, and nothing is assumed.
+    sessionUser = 'user-b';
+    cache.setMediaAccount('user-b');
+    expect(local.getItem('tp:media-copies:v1:user-a')).toBeNull();
+    await cache.requestCopies('post', ['posts/a.bin']);
+    expect(variantCalls.length).toBe(1);
+
+    await new Promise(resolve => setTimeout(resolve, 750));
+    await cache.clearMediaCaches();
+    expect(local.keys().filter(k => k.startsWith('tp:media-copies'))).toEqual([]);
   });
 });

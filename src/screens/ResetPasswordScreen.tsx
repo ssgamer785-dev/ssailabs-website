@@ -5,6 +5,7 @@ import { css } from '../lib/css';
 import { useAuth } from '../lib/auth-context';
 import { supabase } from '../lib/supabase';
 import { clearPasswordRecovery, hasPasswordRecovery, validateNewPassword } from '../lib/password-policy';
+import { expectSignOut } from '../lib/session-ended';
 
 export function ResetPasswordScreen() {
   const navigate = useNavigate();
@@ -25,6 +26,7 @@ export function ResetPasswordScreen() {
       const { error: result } = await supabase.auth.updateUser({ password });
       if (result) { setError(result.message); return; }
       clearPasswordRecovery();
+      expectSignOut();
       await supabase.auth.signOut({ scope: 'local' });
       navigate('/login', { replace: true });
     } catch { setError('Could not update your password. Please try again.'); }

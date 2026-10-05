@@ -3,54 +3,32 @@ import { PhoneShell } from './PhoneShell';
 import splashArt from '../assets/traders-planet-splash.webp';
 import { barAnimationDelay, bootArtShownAt, bootSplash, releaseBootSplash } from '../lib/boot-splash';
 
-const MIN_MS = 2300;
+/**
+ * A deep link opened from cold (a notification tap, a shared link): the
+ * artwork index.html already shows stays only until the screen is ready, and
+ * at least this long so it never flashes. The full start-up splash belongs to
+ * a normal launch (the '/' route, SplashScreen).
+ */
+const MIN_MS = 700;
 const EXIT_MS = 460;
-const BACKGROUND_MS = 3000;
 
-/** Covers deep-link cold starts and an installed app returning from background. */
+/**
+ * Covers a deep-link cold start. Coming back to the app from the background
+ * shows no splash at all: the screen the member left is still there, and
+ * refreshes itself behind (a 2.3-second splash after every glance at another
+ * app, TP-023, is gone).
+ */
 export function LifecycleSplash() {
   const [generation, setGeneration] = useState(() => window.location.pathname === '/' ? 0 : 1);
   const [leaving, setLeaving] = useState(false);
   const [imageReady, setImageReady] = useState(false);
-  const hiddenAt = useRef<number | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   // A deep-link cold start adopts index.html's splash (same picture, bar
   // continues); a return from the background starts its own.
-  const [adopted, setAdopted] = useState(() => generation === 1 && bootSplash() !== null);
+  const [adopted] = useState(() => generation === 1 && bootSplash() !== null);
   /** When the artwork was first drawn; the minimum counts from then (TP-023). */
   const shownAt = useRef<number | null>(adopted ? bootArtShownAt() : null);
-  const [barDelay, setBarDelay] = useState(() => barAnimationDelay(shownAt.current));
-
-  useEffect(() => {
-    const resume = () => {
-      if (window.location.pathname === '/') return;
-      if (hiddenAt.current !== null && Date.now() - hiddenAt.current >= BACKGROUND_MS) {
-        shownAt.current = null;
-        setAdopted(false);
-        setBarDelay('0ms');
-        setImageReady(false);
-        setLeaving(false);
-        setGeneration(n => n + 1);
-      }
-      hiddenAt.current = null;
-    };
-    const visibility = () => {
-      if (document.visibilityState === 'hidden') hiddenAt.current = Date.now();
-      else resume();
-    };
-    const pageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) {
-        hiddenAt.current = Date.now() - BACKGROUND_MS;
-        resume();
-      }
-    };
-    document.addEventListener('visibilitychange', visibility);
-    window.addEventListener('pageshow', pageShow);
-    return () => {
-      document.removeEventListener('visibilitychange', visibility);
-      window.removeEventListener('pageshow', pageShow);
-    };
-  }, []);
+  const [barDelay] = useState(() => barAnimationDelay(shownAt.current));
 
   // A cached picture can finish before React attaches onLoad.
   useEffect(() => {

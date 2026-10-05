@@ -6,6 +6,8 @@
  * cannot, the member is told plainly instead of sending a photo others can't
  * open.
  */
+import { withoutMetadata } from './strip-metadata';
+
 export const HEIC_UNSUPPORTED_MESSAGE =
   "This photo is in Apple's HEIC format, which other phones cannot show. Choose it again from your iPhone, or pick a JPEG or PNG.";
 
@@ -38,9 +40,14 @@ const browserCodec: Codec = {
   },
 };
 
-/** The file unchanged unless it is HEIC; a JPEG copy when it is. Throws PortableImageError if it cannot be converted. */
+/**
+ * The picture as it is sent: a HEIC photo becomes a JPEG copy, and any other
+ * photo loses what it says about who took it and where (EXIF, GPS, XMP —
+ * the picture itself is not re-encoded). Throws PortableImageError if a HEIC
+ * photo cannot be converted.
+ */
 export async function toPortableImage(file: File, codec: Codec = browserCodec): Promise<File> {
-  if (!isHeic(file)) return file;
+  if (!isHeic(file)) return withoutMetadata(file);
   let image: Awaited<ReturnType<Codec['decode']>>;
   try { image = await codec.decode(file); } catch { throw new PortableImageError(); }
   try {

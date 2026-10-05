@@ -529,7 +529,7 @@ function PostCard({ post, first, official, admin, others, reveal, userName, onTo
           video component stops its own click before it reaches here. */}
       {hasAttachment && (
         isPoll ? (
-          <div style={css('padding:2px 18px 3px')}><PollCard postId={post.id} /></div>
+          <div style={css('padding:2px 18px 3px')}><PollCard postId={post.id} showVoters={admin} /></div>
         ) : hasInteractiveMedia ? (
           <div style={css('padding:0 18px')}><PostMedia post={post} height={150} priority={first ? 'high' : undefined} /></div>
         ) : (

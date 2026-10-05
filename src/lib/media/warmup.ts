@@ -99,6 +99,7 @@ async function chatThreads(userId: string, isAdmin: boolean, reuse: boolean): Pr
 /** After sign-in or a reopened app: every first screen, read and its pictures prepared. */
 export async function warmStartup(userId: string, isAdmin: boolean, signal: AbortSignal): Promise<void> {
   const notes = import('../notifications/useNotifications').then(m => m.warmNotifications(userId)).catch(() => {});
+  const adminLists = isAdmin ? warmAdminLists(userId).catch(() => {}) : null;
   const [[official, students], threads] = await Promise.all([
     feedPages(userId, ['official', 'students'], false),
     chatThreads(userId, isAdmin, false).catch(() => [] as ChatMessage[][]),
@@ -109,6 +110,7 @@ export async function warmStartup(userId: string, isAdmin: boolean, signal: Abor
   // Every screen's top picture is prepared even on a slow link; past those, the budget decides.
   await prefetchMedia(interleave(...lists), { ...prefetchPlan(), yieldToScreens: true, alwaysFirst: lists.filter(l => l.length).length }, signal);
   await notes;
+  await adminLists;
 }
 
 const reachedFor = new Map<string, number>();
@@ -147,5 +149,16 @@ export async function warmIntent(intent: string, userId: string, isAdmin: boolea
   } else if (intent === 'notifications') {
     const { warmNotifications } = await import('../notifications/useNotifications');
     if (!readView(`notes:${userId}`)) await warmNotifications(userId).catch(() => {});
+  } else if (isAdmin && (intent === 'admin-codes' || intent === 'admin-requests')) {
+    await warmAdminLists(userId, intent);
   }
+}
+
+/** The admin's own lists (activation codes, membership requests): small reads, kept for the next visit. */
+async function warmAdminLists(userId: string, only?: 'admin-codes' | 'admin-requests'): Promise<void> {
+  const { adminCodesKey, adminRequestsKey, warmActivationCodes, warmMembershipRequests } = await import('../activation');
+  await Promise.all([
+    only !== 'admin-requests' && !readView(adminCodesKey(userId)) ? warmActivationCodes(userId).catch(() => {}) : null,
+    only !== 'admin-codes' && !readView(adminRequestsKey(userId)) ? warmMembershipRequests(userId).catch(() => {}) : null,
+  ]);
 }

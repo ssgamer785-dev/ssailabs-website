@@ -1,13 +1,24 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { css } from '../../lib/css';
 import { useLazyMediaUrl } from '../../lib/media/useLazyMediaUrl';
 import { MediaActions } from './MediaActions';
 
+/** One picture layer of the viewer: fills the stage, keeps its proportions, follows the zoom and pan. */
+function layer(offset: { x: number; y: number }, scale: number, opacity: number): CSSProperties {
+  return { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', opacity,
+    transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`, userSelect: 'none' };
+}
+
 export function ImageViewer({ storageKey, fileName, getUrl, onClose }: {
-  storageKey: string; fileName: string | null; getUrl: (key: string, force: boolean) => Promise<string>; onClose: () => void;
+  storageKey: string; fileName: string | null;
+  getUrl: ((key: string, force: boolean) => Promise<string>) & { prepared?: (key: string) => string | null };
+  onClose: () => void;
 }) {
   const media = useLazyMediaUrl(storageKey, getUrl);
+  // The picture the list already shows (its display copy) appears at once; the full original replaces it when it has arrived.
+  const [preview] = useState(() => getUrl.prepared?.(storageKey) ?? null);
+  const [full, setFull] = useState(false);
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number; fromX: number; fromY: number } | null>(null);
@@ -56,13 +67,16 @@ export function ImageViewer({ storageKey, fileName, getUrl, onClose }: {
       }} onPointerUp={event => { pointers.current.delete(event.pointerId); drag.current = null; pinch.current = null; }} onPointerCancel={event => { pointers.current.delete(event.pointerId); drag.current = null; pinch.current = null; }}
         onDoubleClick={() => zoom(scale === 1 ? 2 : 1)}
         onWheel={event => { if (event.ctrlKey) { event.preventDefault(); zoom(scale + (event.deltaY < 0 ? .25 : -.25)); } }}
-        style={css('flex:1;min-height:0;overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none')}>
+        style={css('flex:1;min-height:0;overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center;touch-action:none')}>
         {media.failed ? <div role="alert" style={css('text-align:center;padding:24px;display:flex;flex-direction:column;gap:14px;align-items:center')}>
           <span>{media.error ?? 'Could not load image.'}</span>
           <button type="button" onClick={media.forceRetry} style={css('background:#fff;color:#0b172b;border-radius:9px;padding:10px 18px;font-weight:700')}>Try again</button>
-        </div> : media.url ? <img src={media.url} alt={fileName ?? 'Image'} onError={media.retry} draggable={false}
-          style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain', transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`, userSelect: 'none' }} />
-          : <div role="status" aria-label="Opening image" style={css('width:34px;height:34px;border-radius:50%;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;animation:spin 1s linear infinite')} />}
+        </div> : <>
+          {preview && !full && <img src={preview} alt="" aria-hidden="true" draggable={false} style={layer(offset, scale, 1)} />}
+          {media.url && <img src={media.url} alt={fileName ?? 'Image'} onLoad={() => setFull(true)} onError={media.retry} draggable={false}
+            style={layer(offset, scale, full || !preview ? 1 : 0)} />}
+          {!media.url && !preview && <div role="status" aria-label="Opening image" style={css('width:34px;height:34px;border-radius:50%;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;animation:spin 1s linear infinite')} />}
+        </>}
       </div>
       <div style={css('flex:none;display:flex;justify-content:center;align-items:center;gap:14px;padding:12px 16px calc(12px + env(safe-area-inset-bottom, 0px))')}>
         <button type="button" aria-label="Zoom out" onClick={() => zoom(scale - .5)} style={css('color:#fff;font-size:22px;min-width:44px;min-height:44px')}>−</button>

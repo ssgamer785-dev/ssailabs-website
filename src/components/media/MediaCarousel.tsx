@@ -12,12 +12,15 @@ export interface CarouselItem {
   fileName: string | null;
 }
 
-type GetUrl = (key: string, force?: boolean) => Promise<string>;
+type GetUrl = ((key: string, force?: boolean) => Promise<string>) & { prepared?: (key: string) => string | null };
 
 function Slide({ item, active, getUrl }: { item: CarouselItem; active: boolean; getUrl: GetUrl }) {
   // Only the visible slide and its neighbours sign and load their media.
   const media = useLazyMediaUrl(item.storageKey, getUrl, { rootMargin: '100% 100%' });
   const poster = useLazyMediaUrl(item.kind === 'video' ? item.posterKey : null, getUrl, { rootMargin: '100% 100%' });
+  // A photo the album tile already shows (its display copy) appears at once; the full original replaces it when it arrives.
+  const [preview] = useState(() => (item.kind === 'image' ? getUrl.prepared?.(item.storageKey) ?? null : null));
+  const [full, setFull] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   useEffect(() => { if (!active) videoRef.current?.pause(); }, [active]);
   return (
@@ -27,14 +30,18 @@ function Slide({ item, active, getUrl }: { item: CarouselItem; active: boolean; 
           {media.error ?? 'This attachment could not be loaded.'}
           <button type="button" onClick={media.forceRetry} style={css('color:#fff;font-weight:700;border:1px solid rgba(255,255,255,.4);border-radius:10px;padding:8px 16px')}>Try again</button>
         </div>
-      ) : !media.url ? (
+      ) : !media.url && !preview ? (
         <div aria-label="Loading" style={css('width:34px;height:34px;border-radius:50%;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;animation:spin 1s linear infinite')} />
-      ) : item.kind === 'video' ? (
+      ) : item.kind === 'video' && media.url ? (
         <video ref={videoRef} src={media.url} poster={poster.url ?? undefined} controls playsInline preload="metadata"
           style={css('max-width:100%;max-height:100%;background:#000')} />
       ) : (
-        <img src={media.url} alt={item.fileName ?? 'Photo'} decoding="async" draggable={false}
-          style={css('max-width:100%;max-height:100%;object-fit:contain;user-select:none')} />
+        <>
+          {preview && !full && <img src={preview} alt="" aria-hidden="true" draggable={false}
+            style={css('position:absolute;inset:0;width:100%;height:100%;object-fit:contain;user-select:none')} />}
+          {media.url && <img src={media.url} alt={item.fileName ?? 'Photo'} decoding="async" draggable={false} onLoad={() => setFull(true)}
+            style={{ ...css('position:absolute;inset:0;width:100%;height:100%;object-fit:contain;user-select:none'), opacity: full || !preview ? 1 : 0 }} />}
+        </>
       )}
     </div>
   );
@@ -52,12 +59,20 @@ export function MediaCarousel({ items, start, getUrl, onClose }: {
   const track = useRef<HTMLDivElement>(null);
   const [index, setIndex] = useState(Math.max(0, Math.min(items.length - 1, start)));
 
+  /**
+   * The slide a Next/Previous is already scrolling to. `index` only changes once
+   * the smooth scroll passes the middle, so stepping from it lost presses made
+   * in quick succession; steps count from where the viewer is going instead.
+   */
+  const target = useRef<number | null>(null);
   const go = useCallback((next: number) => {
     const el = track.current;
     if (!el) return;
     const bounded = Math.max(0, Math.min(items.length - 1, next));
+    target.current = bounded;
     el.scrollTo({ left: bounded * el.clientWidth, behavior: 'smooth' });
   }, [items.length]);
+  const step = useCallback((delta: number) => go((target.current ?? index) + delta), [go, index]);
 
   useEffect(() => {
     const el = track.current;
@@ -69,12 +84,12 @@ export function MediaCarousel({ items, start, getUrl, onClose }: {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
-      else if (event.key === 'ArrowRight') go(index + 1);
-      else if (event.key === 'ArrowLeft') go(index - 1);
+      else if (event.key === 'ArrowRight') step(1);
+      else if (event.key === 'ArrowLeft') step(-1);
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [go, index, onClose]);
+  }, [step, onClose]);
 
   const current = items[index];
   return createPortal(
@@ -89,17 +104,21 @@ export function MediaCarousel({ items, start, getUrl, onClose }: {
         const el = event.currentTarget;
         const next = Math.round(el.scrollLeft / Math.max(1, el.clientWidth));
         if (next !== index) setIndex(next);
-      }} style={css('flex:1;min-height:0;display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior:contain')}>
+        if (next === target.current && Math.abs(el.scrollLeft - next * el.clientWidth) < 2) target.current = null;
+      }}
+      // A swipe (or a trackpad scroll) takes over from any Next/Previous still scrolling.
+      onPointerDown={() => { target.current = null; }} onTouchStart={() => { target.current = null; }} onWheel={() => { target.current = null; }}
+      style={css('flex:1;min-height:0;display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior:contain')}>
         {items.map((item, i) => <Slide key={item.key} item={item} active={i === index} getUrl={getUrl} />)}
       </div>
       {items.length > 1 && (
         <div style={css('flex:none;display:flex;align-items:center;justify-content:center;gap:18px;padding:12px 16px calc(14px + env(safe-area-inset-bottom, 0px))')}>
-          <button type="button" onClick={() => go(index - 1)} disabled={index === 0} aria-label="Previous"
+          <button type="button" onClick={() => step(-1)} disabled={index === 0} aria-label="Previous"
             style={{ ...css('min-width:44px;min-height:44px;border-radius:50%;background:rgba(255,255,255,.12);color:#fff;font-size:20px;cursor:pointer'), opacity: index === 0 ? 0.35 : 1 }}>‹</button>
           <div aria-hidden="true" style={css('display:flex;gap:6px')}>
             {items.map((item, i) => <span key={item.key} style={{ width: 6, height: 6, borderRadius: '50%', background: i === index ? '#fff' : 'rgba(255,255,255,.35)' }} />)}
           </div>
-          <button type="button" onClick={() => go(index + 1)} disabled={index === items.length - 1} aria-label="Next"
+          <button type="button" onClick={() => step(1)} disabled={index === items.length - 1} aria-label="Next"
             style={{ ...css('min-width:44px;min-height:44px;border-radius:50%;background:rgba(255,255,255,.12);color:#fff;font-size:20px;cursor:pointer'), opacity: index === items.length - 1 ? 0.35 : 1 }}>›</button>
         </div>
       )}

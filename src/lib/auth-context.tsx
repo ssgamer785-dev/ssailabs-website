@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { Session, User } from '@supabase/supabase-js';
+import { isAuthRetryableFetchError, type Session, type User } from '@supabase/supabase-js';
 import { rememberSession, supabase } from './supabase';
+import { authStorage } from './auth-storage';
 import { clearCachedProfile, readCachedProfile, writeCachedProfile } from './profile-cache';
 import { clearViews } from './view-cache';
 import { clearMediaCaches, setMediaAccount } from './media/media-cache';
@@ -8,6 +9,7 @@ import type { Database } from './database.types';
 import { unsubscribePush } from './notifications/push';
 import { profileActionFor, stableUser } from './auth-events';
 import { markPasswordRecovery } from './password-policy';
+import { expectSignOut, noteSignedOut } from './session-ended';
 
 type Profile = Database['public']['Tables']['profiles']['Row'];
 
@@ -82,9 +84,45 @@ function errorMessage(e: unknown): string {
   return error?.message || 'Something went wrong. Please try again.';
 }
 
+/**
+ * The session saved on this device, exactly as stored — even with an expired
+ * access token. Offline, or with the auth server briefly unreachable, the auth
+ * client cannot refresh such a session and reports none; but it keeps it saved
+ * (it deletes only a session the server refused). That session is still the
+ * member's: the app stays signed in on it, and the client refreshes it by
+ * itself as soon as the server answers. Treating "could not refresh just now"
+ * as "signed out" is what showed the sign-in screen after reopening the app
+ * offline or on a changing network, and emptied every cache on the way.
+ */
+function savedSession(): Session | null {
+  try {
+    const key = (supabase.auth as unknown as { storageKey?: string }).storageKey;
+    const raw = key ? authStorage.getItem(key) : null;
+    const saved = raw ? JSON.parse(raw) as Session : null;
+    return saved?.refresh_token && saved.user?.id ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A sign-in or recovery link being completed: its session comes from the address, not from this device. */
+function authResultInAddress(): boolean {
+  if (typeof location === 'undefined') return false;
+  return /(^|[#&])(access_token|error_description|type=recovery)/.test(location.hash) || /[?&]code=/.test(location.search);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [loading, setLoading] = useState(true);
-  const [session, setSession] = useState<Session | null>(null);
+  /**
+   * A launch starts from the session this device kept, at once: the app is on
+   * screen without waiting for the network, while the auth client checks and,
+   * if needed, refreshes it behind (with an expired access token, offline or
+   * on a slow link, that check alone used to hold the whole app back — for up
+   * to half a minute when the auth server could not be reached). Data requests
+   * still wait for that check, and a session the server refuses ends as before.
+   */
+  const [initial] = useState(() => (authResultInAddress() ? null : savedSession()));
+  const [loading, setLoading] = useState(!initial);
+  const [session, setSession] = useState<Session | null>(initial);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState(false);
@@ -161,31 +199,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    if (initial) {
+      setMediaAccount(initial.user.id);
+      startProfile(initial.user.id);
+    }
 
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(({ data, error }) => {
       if (!active) return;
-      setSession(data.session);
-      setMediaAccount(data.session?.user.id ?? null);
+      // Not refreshable just now (offline, or the auth server unreachable): still signed in on the saved session.
+      const current = data.session ?? (error && isAuthRetryableFetchError(error) ? savedSession() : null);
+      setSession(current);
+      setMediaAccount(current?.user.id ?? null);
       setLoading(false);
-      if (data.session?.user) startProfile(data.session.user.id);
+      if (current?.user && current.user.id !== initial?.user.id) startProfile(current.user.id);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
       if (!active) return;
       if (event === 'PASSWORD_RECOVERY') markPasswordRecovery();
-      setSession(newSession);
-      const action = profileActionFor(event, newSession?.user?.id, profileRef.current?.id);
-      if (newSession?.user) setMediaAccount(newSession.user.id);
+      // The server ended a session the member did not end: the sign-in screen says so.
+      if (event === 'SIGNED_OUT') noteSignedOut(!!sessionRef.current);
+      // A launch whose session could not be refreshed just now still has it saved (see savedSession).
+      const next = newSession ?? (event === 'INITIAL_SESSION' ? savedSession() : null);
+      setSession(next);
+      const action = profileActionFor(event, next?.user?.id, profileRef.current?.id);
+      if (next?.user) setMediaAccount(next.user.id);
       if (action === 'clear') { setProfile(null); setProfileLoading(false); setProfileError(false); clearCachedProfile(); clearViews(); void clearMediaCaches(); }
-      else if (action === 'load') startProfile(newSession!.user.id);
-      else if (action === 'refresh-silently') void loadProfile(newSession!.user.id, true);
+      else if (action === 'load') startProfile(next!.user.id);
+      else if (action === 'refresh-silently') void loadProfile(next!.user.id, true);
     });
 
     return () => {
       active = false;
       subscription.unsubscribe();
     };
-  }, [loadProfile, startProfile]);
+  }, [initial, loadProfile, startProfile]);
+
+  // Signed in on a saved session that could not be refreshed: refresh it the moment the connection is back
+  // (the auth client also retries by itself every 30 seconds while the app is open).
+  const heldExpired = !!session?.expires_at && session.expires_at * 1000 <= Date.now();
+  useEffect(() => {
+    if (!heldExpired) return;
+    const retry = () => { void supabase.auth.getSession(); };
+    window.addEventListener('online', retry);
+    document.addEventListener('visibilitychange', retry);
+    return () => { window.removeEventListener('online', retry); document.removeEventListener('visibilitychange', retry); };
+  }, [heldExpired]);
 
   const retryProfile = useCallback(() => {
     const userId = sessionRef.current?.user?.id;
@@ -276,6 +335,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Every picture, signed address and size hint kept for this device's accounts goes with the session.
     await clearMediaCaches().catch(() => {});
     // The default is global and revokes this account's sessions on every device.
+    expectSignOut();
     await supabase.auth.signOut({ scope: 'local' });
   }, []);
 

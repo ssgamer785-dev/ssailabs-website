@@ -1,10 +1,10 @@
 /**
  * The admin storage clean-up, client side: walks every page of every area the
- * server allows (chat, community posts, profile pictures) and adds up what it
+ * server allows (chat, community posts, profile pictures, display copies) and adds up what it
  * found. Kept free of the Supabase client so the loop can be tested on its own;
  * the request itself is passed in.
  */
-export const CLEANUP_AREAS = ['chat/', 'posts/', 'avatars/'] as const;
+export const CLEANUP_AREAS = ['chat/', 'posts/', 'avatars/', 'variants/v1/'] as const;
 export const CLEANUP_CONFIRM_WORD = 'DELETE';
 
 export interface CleanupPage {

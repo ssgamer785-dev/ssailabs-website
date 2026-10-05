@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../lib/auth-context';
+import { readView, writeView } from '../lib/view-cache';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { PhoneShell } from '../components/PhoneShell';
 import { playMoneyRefreshSound } from '../lib/useMoneySound';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import {
-  createActivationCode, listActivationCodes,
+  adminCodesKey, createActivationCode, listActivationCodes,
   type AdminActivationCode, type CreatedCode,
 } from '../lib/activation';
 
@@ -50,8 +52,11 @@ function useCountdown(expiresAt: string | undefined): string | null {
 
 export function AdminActivationCodesScreen() {
   const navigate = useNavigate();
-  const [codes, setCodes] = useState<AdminActivationCode[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  // The list as last read (at start-up, or the last visit) is on screen at once and re-read behind.
+  const viewKey = adminCodesKey(user?.id ?? '-');
+  const [codes, setCodes] = useState<AdminActivationCode[]>(() => readView<AdminActivationCode[]>(viewKey) ?? []);
+  const [loading, setLoading] = useState(() => readView(viewKey) === undefined);
   // Separate from `error`, which reports a failed creation. This one says the
   // history could not be READ — without it a failed load renders "No codes
   // yet", which is a different and untrue statement.
@@ -65,9 +70,9 @@ export function AdminActivationCodesScreen() {
 
   const refresh = useCallback(async () => {
     const rows = await listActivationCodes(50);
-    if (rows) { setCodes(rows); setLoadFailed(false); } else { setLoadFailed(true); }
+    if (rows) { setCodes(rows); setLoadFailed(false); writeView(viewKey, rows); } else { setLoadFailed(true); }
     setLoading(false);
-  }, []);
+  }, [viewKey]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 

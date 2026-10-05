@@ -8,15 +8,20 @@
 
 import { Router, type Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { GetObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
 import { posix as posixPath } from 'path';
-import { asyncRoute, authenticate, batchKeys, bucket, deleteObjects, getAdmin, getS3, MAX_BATCH_KEYS, servedAs, signedPutUrl } from './r2.js';
+import { asyncRoute, authenticate, batchKeys, bucket, deleteObjects, getAdmin, getS3, MAX_BATCH_KEYS, servedAs, signedPutUrl, signStableGet } from './r2.js';
 import { recordUploadGrant } from './upload-grants.js';
+import { displayCopiesOffered, displayVariantKey, ensureDisplayVariants, imageLibraryCheck, isDisplayable } from './media-variants.js';
 
 const PUT_URL_TTL_SECONDS = 300;
-const GET_URL_TTL_SECONDS = 900;
+/**
+ * Community addresses are signed per 30-minute window and live two windows
+ * (signStableGet): everyone reading the same picture within a window gets the
+ * same address, so the browser's cache answers instead of a new download.
+ */
+const READ_WINDOW_SECONDS = 1800;
+const DISPLAY_SERVED = servedAs({ mimeType: 'image/jpeg', allowed: true, download: false });
 
 const MAX_BYTES: Record<string, number> = {
   image: 10 * 1024 * 1024,
@@ -340,8 +345,23 @@ export function servedForPostObject(found: PostObject, caller: { userId: string;
   return servedAs({ mimeType: POSTER_MIME, allowed: true, download: false });
 }
 
-function signGet(key: string, served: ReturnType<typeof servedAs>): Promise<string> {
-  return getSignedUrl(getS3()!, new GetObjectCommand({ Bucket: bucket()!, Key: key, ...served }), { expiresIn: GET_URL_TTL_SECONDS });
+/** The type of a still picture this object is (a post's image, or an image item of an album); null for anything else. */
+export function displayableMime(found: PostObject): string | null {
+  if (found.from === 'post') return found.row.attachment === 'image' && isDisplayable(found.row.mime_type) ? found.row.mime_type : null;
+  if (found.from === 'item') return !found.item.isPoster && found.item.kind === 'image' && isDisplayable(found.item.mime_type) ? found.item.mime_type : null;
+  return null;
+}
+
+/**
+ * The signed original, and for a still picture also its display copy — signed
+ * under the same check, never named by the caller. The copy may not exist yet
+ * (the client then shows the original and asks /media-variants to make it).
+ */
+async function signPostObject(key: string, found: PostObject, caller: { userId: string; isAdmin: boolean }): Promise<{ url: string; expiresIn: number; display?: string }> {
+  const original = await signStableGet(key, servedForPostObject(found, caller), { windowSeconds: READ_WINDOW_SECONDS, keepPrivateCopyShort: false });
+  if (!displayableMime(found) || !displayCopiesOffered()) return original;
+  const display = await signStableGet(displayVariantKey(key), DISPLAY_SERVED, { windowSeconds: READ_WINDOW_SECONDS, keepPrivateCopyShort: false });
+  return { ...original, display: display.url, expiresIn: Math.min(original.expiresIn, display.expiresIn) };
 }
 
 export function postMediaRouter(): Router {
@@ -451,8 +471,7 @@ export function postMediaRouter(): Router {
     // Items 2..n of a post (RC5) live in post_media, under the same rules.
     const found = (await findPostObjects(getAdmin()!, [storageKey])).get(storageKey);
     if (!found) return res.status(404).json({ error: 'Attachment unavailable.' });
-    const url = await signGet(storageKey, servedForPostObject(found, caller));
-    res.json({ url, expiresIn: GET_URL_TTL_SECONDS });
+    res.json(await signPostObject(storageKey, found, caller));
   }));
 
   /**
@@ -470,7 +489,7 @@ export function postMediaRouter(): Router {
     const keys = batchKeys(req.body?.keys);
     if (!keys) return res.status(400).json({ error: `Send 1 to ${MAX_BATCH_KEYS} media keys.` });
 
-    const urls: Record<string, { url: string; expiresIn: number }> = {};
+    const urls: Record<string, { url: string; expiresIn: number; display?: string }> = {};
     const failed: Record<string, number> = {};
     const resolved = new Map<string, string>();
     for (const key of keys) {
@@ -482,9 +501,56 @@ export function postMediaRouter(): Router {
     await Promise.all([...resolved].map(async ([key, object]) => {
       const hit = found.get(object);
       if (!hit) { failed[key] = 404; return; }
-      urls[key] = { url: await signGet(object, servedForPostObject(hit, caller)), expiresIn: GET_URL_TTL_SECONDS };
+      urls[key] = await signPostObject(object, hit, caller);
     }));
     res.json({ urls, failed });
+  }));
+
+  /** Deployment check: whether display copies can be made here. Says nothing about any member or picture. */
+  router.get('/media-variants/status', asyncRoute(async (_req, res) => {
+    const check = await imageLibraryCheck();
+    res.set('Cache-Control', 'no-store');
+    res.status(check.ok ? 200 : 503).json({ displayCopies: check.ok ? 'ready' : 'unavailable', ms: check.ms });
+  }));
+
+  /**
+   * Makes the display copies of still pictures that do not have one yet: right
+   * after a post is published, and whenever a member's app finds a picture
+   * without one. Every key passes exactly the checks /media-url makes; the
+   * copy's key is derived here and never accepted from the caller. Answers
+   * with the keys as they were asked for.
+   */
+  router.post('/media-variants', asyncRoute(async (req, res) => {
+    if (!requireConfigured(res)) return;
+    const caller = await authenticate(req);
+    if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
+    if (!caller.isActivated) return res.status(403).json({ error: 'Activate your account first.' });
+    const keys = batchKeys(req.body?.keys);
+    if (!keys) return res.status(400).json({ error: `Send 1 to ${MAX_BATCH_KEYS} media keys.` });
+
+    const failed: Record<string, number> = {};
+    const skipped: string[] = [];
+    const resolved = new Map<string, string>();
+    for (const key of keys) {
+      const object = postObjectKey(key);
+      if (object) resolved.set(key, object); else failed[key] = 400;
+    }
+    const found = await findPostObjects(getAdmin()!, [...new Set(resolved.values())]);
+    const work: { key: string; mimeType: string }[] = [];
+    // Each stored picture is worked on once, however many of the keys name it.
+    const askedAs = new Map<string, string[]>();
+    for (const [key, object] of resolved) {
+      const hit = found.get(object);
+      if (!hit) { failed[key] = 404; continue; }
+      const mimeType = displayableMime(hit);
+      if (!mimeType) { skipped.push(key); continue; }
+      if (!askedAs.has(object)) { askedAs.set(object, []); work.push({ key: object, mimeType }); }
+      askedAs.get(object)!.push(key);
+    }
+    const done = await ensureDisplayVariants(getS3()!, bucket()!, work);
+    const asked = (objects: string[]) => objects.flatMap(object => askedAs.get(object) ?? []);
+    for (const key of asked(done.failed)) failed[key] = 503;
+    res.json({ ready: asked(done.ready), pending: asked(done.pending), skipped: [...skipped, ...asked(done.skipped)], failed });
   }));
 
   /** Clears the R2 object behind a post the caller is allowed to remove. */

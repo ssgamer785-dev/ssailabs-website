@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { css } from '../../lib/css';
 import { Hoverable } from '../../lib/Hoverable';
 import { castPollVote, fetchPollResults, type PollOption } from '../../lib/community/polls';
+import { fetchPollVoters, type PollVoter } from '../../lib/community/poll-voters';
+import { formatDateTime } from '../../lib/format-date-time';
 
 /**
  * A poll attached to a post.
@@ -22,16 +24,104 @@ function percent(votes: number, total: number): number {
   return total === 0 ? 0 : Math.round((votes / total) * 100);
 }
 
-export function PollCard({ postId }: { postId: string }) {
+/**
+ * Admin only: who chose each option, with their real names and when. The list
+ * is read under the database's own rules (see poll-voters.ts), so it is
+ * enforced there, not by hiding this panel from students.
+ */
+function PollVoters({ postId, options, version }: { postId: string; options: PollOption[]; version: number }) {
+  const [open, setOpen] = useState(false);
+  const [voters, setVoters] = useState<Map<string, PollVoter[]> | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  const load = useCallback(async () => {
+    setFailed(false);
+    const result = await fetchPollVoters(postId);
+    if (result) setVoters(result); else setFailed(true);
+  }, [postId]);
+
+  // Read when opened, and again whenever the poll's own numbers were re-read.
+  useEffect(() => { if (open) void load(); }, [open, version, load]);
+
+  return (
+    <div style={css('display:flex;flex-direction:column;gap:8px')}>
+      <Hoverable
+        onClick={() => setOpen(o => !o)}
+        role="button"
+        aria-expanded={open}
+        className="pressable"
+        style={css('align-self:flex-start;height:30px;padding:0 11px;border-radius:9px;border:1px solid var(--border-4);display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--text-muted);cursor:pointer')}
+        hoverStyle={css('border-color:var(--border-strong)')}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5" /><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.8c1.6.8 2.6 2.5 3 5.2" />
+        </svg>
+        {open ? 'Hide voters' : 'View voters'}
+      </Hoverable>
+
+      {open && (
+        <div aria-label="Who voted for each option" style={css('display:flex;flex-direction:column;gap:10px;padding:12px;border-radius:11px;background:var(--surface-inset);border:1px solid var(--border-4)')}>
+          {failed ? (
+            <div role="alert" style={css('display:flex;flex-direction:column;gap:8px;align-items:flex-start;font-size:12.5px;color:var(--danger-ink);line-height:1.5')}>
+              Couldn&rsquo;t load who voted. The votes are safe &mdash; this is a loading problem.
+              <Hoverable
+                onClick={() => void load()}
+                className="pressable"
+                style={css('height:30px;padding:0 12px;border-radius:9px;border:1px solid var(--danger-border);display:flex;align-items:center;font-size:12px;font-weight:700;color:var(--danger-ink);cursor:pointer')}
+                hoverStyle={css('background:var(--danger-soft)')}
+              >
+                Try again
+              </Hoverable>
+            </div>
+          ) : !voters ? (
+            <div style={css('font-size:12.5px;color:var(--text-faint)')}>Loading who voted…</div>
+          ) : (
+            options.map(o => {
+              const list = voters.get(o.optionId) ?? [];
+              return (
+                <section key={o.optionId} aria-label={`${o.label}: ${list.length} vote${list.length === 1 ? '' : 's'}`} style={css('display:flex;flex-direction:column;gap:5px')}>
+                  <div style={css('display:flex;align-items:baseline;gap:8px')}>
+                    <div style={css('flex:1;min-width:0;font-size:12.5px;font-weight:700;color:var(--text-primary);line-height:1.35;overflow-wrap:anywhere')}>{o.label}</div>
+                    <div style={css('flex:none;font-size:11.5px;font-weight:700;color:var(--text-muted);font-variant-numeric:tabular-nums')}>
+                      {list.length} {list.length === 1 ? 'vote' : 'votes'}
+                    </div>
+                  </div>
+                  {list.length ? (
+                    <ul style={css('list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px')}>
+                      {list.map(v => (
+                        <li key={v.voterId} style={css('display:flex;align-items:baseline;gap:8px;font-size:12px;line-height:1.4')}>
+                          <span style={css('flex:1;min-width:0;color:var(--text-primary);overflow-wrap:anywhere')}>{v.name}</span>
+                          <span style={css('flex:none;color:var(--text-faint);font-variant-numeric:tabular-nums')}>
+                            {formatDateTime(v.votedAt)}{v.changed ? ' · changed' : ''}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div style={css('font-size:12px;color:var(--text-faint)')}>No votes</div>
+                  )}
+                </section>
+              );
+            })
+          )}
+          <div style={css('font-size:11px;color:var(--text-faint);line-height:1.45')}>Only admins can see who voted. Members see the totals only.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function PollCard({ postId, showVoters = false }: { postId: string; showVoters?: boolean }) {
   const [options, setOptions] = useState<PollOption[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [version, setVersion] = useState(0);
 
   const load = useCallback(async () => {
     const rows = await fetchPollResults(postId);
-    if (rows) { setOptions(rows); setFailed(false); } else { setFailed(true); }
+    if (rows) { setOptions(rows); setFailed(false); setVersion(v => v + 1); } else { setFailed(true); }
     setLoading(false);
   }, [postId]);
 
@@ -163,6 +253,8 @@ export function PollCard({ postId }: { postId: string }) {
       {error && (
         <div role="alert" style={css('font-size:12px;color:var(--danger-ink);line-height:1.45')}>{error}</div>
       )}
+
+      {showVoters && <PollVoters postId={postId} options={options} version={version} />}
     </div>
   );
 }

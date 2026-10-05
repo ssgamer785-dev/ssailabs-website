@@ -5,7 +5,7 @@
  */
 
 import { supabase } from '../supabase';
-import { peekMedia, signedUrl } from '../media/media-cache';
+import { peekMedia, peekSignedUrl, signedUrl } from '../media/media-cache';
 import { OFFLINE_MESSAGE, ReadableError } from '../errors';
 import type { MediaKind } from './types';
 
@@ -165,6 +165,10 @@ export async function deleteRemoteMedia(messageId: string): Promise<void> {
  */
 export const getMediaUrl = Object.assign(
   (storageKey: string, force = false): Promise<string> => signedUrl('chat', storageKey, force),
-  /** What can be shown at once without asking anyone (a prepared picture, or a valid address). */
-  { peek: (storageKey: string) => peekMedia('chat', storageKey)?.src ?? null },
+  {
+    /** A still-valid address of the original itself, known without asking anyone (viewers, players, downloads). */
+    peek: (storageKey: string) => peekSignedUrl('chat', storageKey),
+    /** The picture already prepared for lists (its display copy): drawn at once while the original loads. */
+    prepared: (storageKey: string) => peekMedia('chat', storageKey)?.src ?? null,
+  },
 );

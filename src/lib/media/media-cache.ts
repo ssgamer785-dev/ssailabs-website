@@ -21,7 +21,7 @@
 import { supabase } from '../supabase';
 import { rememberSession } from '../remember-session';
 import { authorizedFetch, fetchSignedUrl, mediaErrorFor } from './fetchSignedUrl';
-import { noteDeviceCache, notePrefetched, noteSigning, noteSource, type MediaSource } from './media-metrics';
+import { noteCopy, noteDeviceCache, notePrefetched, noteSigning, noteSource, type MediaSource } from './media-metrics';
 
 export type MediaScope = 'post' | 'chat';
 
@@ -34,6 +34,8 @@ const BATCH_WINDOW_MS = 8;
 const EXPIRY_MARGIN_MS = 60_000;
 
 const URLS_PREFIX = 'tp:media-urls:v1:';
+const COPIES_PREFIX = 'tp:media-copies:v1:';
+const MAX_KNOWN_COPIES = 400;
 const SIZES_PREFIX = 'tp:media-sizes:v1:';
 const INDEX_PREFIX = 'tp:media-index:v1:';
 const CORS_KEY = 'tp:media-cors:v2';
@@ -52,7 +54,12 @@ const CORS_OK_MS = 7 * 24 * 60 * 60 * 1000;
 /** After a screen opens, start-up preparation waits this long before its next download, so the screen has the link. */
 const SCREEN_QUIET_MS = 1500;
 
-interface Signed { url: string; expiresAt: number }
+interface Signed {
+  url: string;
+  expiresAt: number;
+  /** A still picture's display copy (at most 1080 × 1920, no metadata): what lists and chat draw. */
+  display?: string;
+}
 interface Shown { src: string; decoded: boolean; expiresAt: number }
 
 let account: string | null = null;
@@ -114,10 +121,10 @@ function removeMatching(prefix: string, keep?: string): void {
 }
 
 function loadUrls(userId: string): Map<string, Signed> {
-  const raw = readJson<Record<string, [string, number]>>(URLS_PREFIX + userId) ?? {};
+  const raw = readJson<Record<string, [string, number, string?]>>(URLS_PREFIX + userId) ?? {};
   const now = Date.now();
   return new Map(Object.entries(raw).filter(([, v]) => Array.isArray(v) && typeof v[0] === 'string' && v[1] > now)
-    .map(([k, v]) => [k, { url: v[0], expiresAt: v[1] }]));
+    .map(([k, v]) => [k, { url: v[0], expiresAt: v[1], ...(typeof v[2] === 'string' ? { display: v[2] } : {}) }]));
 }
 let urlsTimer: ReturnType<typeof setTimeout> | null = null;
 function saveUrlsSoon(): void {
@@ -128,7 +135,7 @@ function saveUrlsSoon(): void {
     if (account !== forAccount) return;
     const now = Date.now();
     const live = [...persistedUrls].filter(([, v]) => v.expiresAt > now).sort((a, b) => b[1].expiresAt - a[1].expiresAt).slice(0, MAX_PERSISTED_URLS);
-    writeJson(URLS_PREFIX + forAccount, Object.fromEntries(live.map(([k, v]) => [k, [v.url, v.expiresAt]])));
+    writeJson(URLS_PREFIX + forAccount, Object.fromEntries(live.map(([k, v]) => [k, v.display ? [v.url, v.expiresAt, v.display] : [v.url, v.expiresAt]])));
   }, 400);
 }
 
@@ -409,6 +416,114 @@ async function readIntoDevice(key: string, url: string, background: boolean): Pr
   return blob;
 }
 
+// ---- display copies ------------------------------------------------------------
+
+/**
+ * Whether a still picture's display copy (made by the server: at most
+ * 1080 × 1920, no metadata) can be drawn: 'ready', or 'missing' — not made
+ * yet, so the original is drawn meanwhile and the server is asked to make it.
+ * Not known means "try the copy". Community marks are kept per account for the
+ * next launch; chat marks never leave memory.
+ */
+const copies = new Map<string, 'ready' | 'missing'>();
+/** A missing copy is asked for again no sooner than this. */
+const COPY_RETRY_MS = 30_000;
+const copyAsked = new Map<string, number>();
+const copyRequests = new Map<string, Promise<void>>();
+
+function loadCopies(userId: string): void {
+  const raw = readJson<string[]>(COPIES_PREFIX + userId);
+  if (Array.isArray(raw)) for (const key of raw.slice(-MAX_KNOWN_COPIES)) if (typeof key === 'string') copies.set(id('post', key), 'ready');
+}
+let copiesTimer: ReturnType<typeof setTimeout> | null = null;
+function saveCopiesSoon(): void {
+  if (copiesTimer || !account) return;
+  const forAccount = account;
+  copiesTimer = setTimeout(() => {
+    copiesTimer = null;
+    if (account !== forAccount) return;
+    const ready = [...copies].filter(([entry, state]) => state === 'ready' && entry.startsWith('post|')).map(([entry]) => entry.slice(5));
+    writeJson(COPIES_PREFIX + forAccount, ready.slice(-MAX_KNOWN_COPIES));
+  }, 700);
+}
+
+function markCopy(scope: MediaScope, key: string, state: 'ready' | 'missing'): void {
+  copies.delete(id(scope, key));
+  copies.set(id(scope, key), state);
+  if (scope === 'post' && state === 'ready') saveCopiesSoon();
+}
+
+/**
+ * Asks the server to make the display copies these pictures do not have yet
+ * (each key passes the same checks as signing it), and notes which are ready.
+ * Used ahead of start-up preparation, right after a picture is posted or sent,
+ * and when a copy turned out to be missing.
+ */
+export async function requestCopies(scope: MediaScope, keys: string[]): Promise<void> {
+  let forAccount: string;
+  try { forAccount = await sessionUser(); } catch { return; }
+  const now = Date.now();
+  const wanted = [...new Set(keys)].filter(key => {
+    const entry = id(scope, key);
+    if (copies.get(entry) === 'ready' || copyRequests.has(entry)) return false;
+    return now - (copyAsked.get(entry) ?? 0) > COPY_RETRY_MS;
+  });
+  const waits = [...new Set(keys)].map(key => copyRequests.get(id(scope, key))).filter((w): w is Promise<void> => !!w);
+  for (let i = 0; i < wanted.length; i += BATCH_MAX) {
+    const chunk = wanted.slice(i, i + BATCH_MAX);
+    const work = (async () => {
+      try {
+        const response = await authorizedFetch(`${API[scope]}/media-variants`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keys: chunk }),
+        });
+        if (account !== forAccount) return;
+        // The server could not make them (its image library unavailable, or a passing failure): these pictures are
+        // drawn from their originals straight away, and asked about again no sooner than COPY_RETRY_MS.
+        if (!response.ok) { for (const key of chunk) markCopy(scope, key, 'missing'); return; }
+        const body = await response.json() as { ready?: string[]; skipped?: string[]; failed?: Record<string, number> };
+        for (const key of body.ready ?? []) markCopy(scope, key, 'ready');
+        for (const key of [...(body.skipped ?? []), ...Object.keys(body.failed ?? {})]) markCopy(scope, key, 'missing');
+      } catch {
+        // Not answered (offline): the originals keep working, and nothing is assumed about the copies.
+      }
+    })();
+    for (const key of chunk) { copyAsked.set(id(scope, key), now); copyRequests.set(id(scope, key), work); }
+    void work.finally(() => { for (const key of chunk) if (copyRequests.get(id(scope, key)) === work) copyRequests.delete(id(scope, key)); });
+    waits.push(work);
+  }
+  await Promise.all(waits);
+}
+
+/** A copy that would not load: draw the original for now, and have the copy made for next time. */
+function copyMissing(scope: MediaScope, key: string): void {
+  markCopy(scope, key, 'missing');
+  void requestCopies(scope, [key]);
+}
+
+/** How long a screen waits for a missing display copy to be made before it loads the full original instead. */
+const COPY_MAKE_WAIT_MS = 5000;
+
+/**
+ * A copy that was not there: it is made now (or the request already under way
+ * is joined) and, unless the link is known to be fast, the screen waits a
+ * little for it — a copy made in a second beats a full-size original on a
+ * phone link. True when the copy is ready to be tried again.
+ */
+async function copyMadeInTime(scope: MediaScope, key: string): Promise<boolean> {
+  markCopy(scope, key, 'missing');
+  const asked = requestCopies(scope, [key]);
+  // A fast link takes the original now; the copy is there the next time.
+  if (linkRate !== null && !slowLink()) return false;
+  await Promise.race([asked, new Promise(resolve => setTimeout(resolve, COPY_MAKE_WAIT_MS))]);
+  return copies.get(id(scope, key)) === 'ready';
+}
+
+/** What to draw for a picture: its display copy when it has one that is not known to be missing, else the original. */
+function pictureAddress(scope: MediaScope, key: string, signedEntry: Signed | null, original: string): { src: string; copy: boolean } {
+  if (signedEntry?.display && copies.get(id(scope, key)) !== 'missing') return { src: signedEntry.display, copy: true };
+  return { src: original, copy: false };
+}
+
 // ---- account -------------------------------------------------------------------
 
 function revokeAll(): void {
@@ -426,6 +541,9 @@ function rejectQueued(): void {
 }
 function resetMemory(): void {
   rejectQueued();
+  copies.clear();
+  copyAsked.clear();
+  copyRequests.clear();
   deviceFetches.clear();
   decoding.clear();
   signed.clear();
@@ -442,8 +560,10 @@ export function setMediaAccount(userId: string | null): void {
   account = userId;
   persistedUrls = userId ? loadUrls(userId) : new Map();
   sizes = userId ? loadSizes(userId) : new Map();
+  if (userId) loadCopies(userId);
   if (userId) removeMatching(URLS_PREFIX, URLS_PREFIX + userId);
   if (userId) removeMatching(SIZES_PREFIX, SIZES_PREFIX + userId);
+  if (userId) removeMatching(COPIES_PREFIX, COPIES_PREFIX + userId);
   cors = userId ? knownCors() : 'unknown';
   device = userId ? openDevice(userId) : Promise.resolve(null);
 }
@@ -457,6 +577,7 @@ export async function clearMediaCaches(): Promise<void> {
   device = Promise.resolve(null);
   removeMatching(URLS_PREFIX);
   removeMatching(SIZES_PREFIX);
+  removeMatching(COPIES_PREFIX);
   await dropDeviceStores().catch(() => {});
 }
 
@@ -496,19 +617,21 @@ async function signBatch(scope: MediaScope, keys: string[]): Promise<Map<string,
   if (response.status === 404 || response.status === 405) throw new BatchRouteMissing();
   if (!response.ok) throw new Error(mediaErrorFor(response.status));
   noteSigning(keys.length, true);
-  const body = await response.json() as { urls?: Record<string, { url: string; expiresIn: number }>; failed?: Record<string, number> };
+  const body = await response.json() as { urls?: Record<string, { url: string; expiresIn: number; display?: string }>; failed?: Record<string, number> };
   const issued = Date.now();
   return new Map(keys.map(key => {
     const hit = body.urls?.[key];
-    return [key, hit ? { url: hit.url, expiresAt: issued + hit.expiresIn * 1000 - EXPIRY_MARGIN_MS } : new Error(mediaErrorFor(body.failed?.[key] ?? 404))];
+    return [key, hit
+      ? { url: hit.url, expiresAt: issued + hit.expiresIn * 1000 - EXPIRY_MARGIN_MS, ...(typeof hit.display === 'string' ? { display: hit.display } : {}) }
+      : new Error(mediaErrorFor(body.failed?.[key] ?? 404))];
   }));
 }
 
 async function signOne(scope: MediaScope, key: string): Promise<Signed> {
   const issued = Date.now();
-  const { url, expiresIn } = await fetchSignedUrl(`${API[scope]}/media-url?key=${encodeURIComponent(key)}`);
+  const { url, expiresIn, display } = await fetchSignedUrl(`${API[scope]}/media-url?key=${encodeURIComponent(key)}`);
   noteSigning(1, false);
-  return { url, expiresAt: issued + expiresIn * 1000 - EXPIRY_MARGIN_MS };
+  return { url, expiresAt: issued + expiresIn * 1000 - EXPIRY_MARGIN_MS, ...(typeof display === 'string' ? { display } : {}) };
 }
 
 async function flush(scope: MediaScope): Promise<void> {
@@ -705,17 +828,36 @@ export async function displaySource(scope: MediaScope, key: string, options: { f
   if (!options.fresh) { const late = await joined(source); if (late) return late; }
   // The screen's top picture goes at once; on a slow link the others follow it one by one.
   const turn = <T>(work: () => Promise<T>) => (options.urgent ? work() : inTurn(work));
+  const signedEntry = knownSigned(scope, key);
+  // A still picture is drawn from its display copy; without one yet, from the original (and the copy is asked for).
+  const choice = pictureAddress(scope, key, signedEntry, url);
+  const markBefore = copies.get(entry);
+  // The copy was not there: made just now by preparation (try it again at once), or made now and waited for.
+  const copyAgain = async () => (markBefore !== 'ready' && copies.get(entry) === 'ready') || copyMadeInTime(scope, key);
   // Kept on the device as it is fetched — only once the bucket is known to allow it; a screen never waits to find out.
   if (scope === 'post' && cors === 'ok') {
-    const blob = await turn(() => fetchForDevice(key, url).catch(() => null));
+    const read = (from: string) => turn(() => fetchForDevice(key, from).catch(() => null));
+    let blob = await read(choice.src);
+    let drawn: 'copy' | 'original' = choice.copy ? 'copy' : 'original';
+    if (!blob && choice.copy && await copyAgain()) blob = await read(choice.src);
+    if (!blob && choice.copy) { copyMissing(scope, key); drawn = 'original'; blob = await read(url); }
     sameAccount();
-    if (blob) { noteSource(source); return { src: objectUrlFor(entry, blob), source }; }
+    if (blob) { noteSource(source); noteCopy(drawn); return { src: objectUrlFor(entry, blob), source }; }
   }
   // Fetched and decoded here, then drawn whole; anything else asking for it meanwhile shares this one download.
-  await turn(() => decodeInto(scope, key, url, knownSigned(scope, key)?.expiresAt ?? Date.now() + 5 * 60_000, options.urgent ? 'high' : 'auto', options.bytes));
+  const expiresAt = signedEntry?.expiresAt ?? Date.now() + 5 * 60_000;
+  const priority = options.urgent ? 'high' : 'auto';
+  const decode = (from: string, bytes?: number | null) => turn(() => decodeInto(scope, key, from, expiresAt, priority, bytes));
+  let src = choice.src;
+  if (!(await decode(choice.src, choice.copy ? null : options.bytes)) && choice.copy && !(await copyAgain() && await decode(choice.src))) {
+    copyMissing(scope, key);
+    src = url;
+    await decode(url, options.bytes);
+  }
   sameAccount();
   noteSource(source);
-  return { src: url, source };
+  noteCopy(src === choice.src && choice.copy ? 'copy' : 'original');
+  return { src, source };
 }
 
 // ---- picture sizes ---------------------------------------------------------------
@@ -770,6 +912,10 @@ export function prefetchPlan(): PrefetchPlan {
 }
 
 const ESTIMATE_BYTES = 700 * 1024;
+/** A display copy is usually 100–400 KB. */
+const COPY_ESTIMATE_BYTES = 250 * 1024;
+/** How long start-up preparation waits for the server to make missing display copies before going on without them. */
+const COPY_WAIT_MS = 9000;
 /** What a slow link (or 3G) gets: every screen's top picture, then this much more. */
 const SLOW_BUDGET = 5 * 1024 * 1024;
 /** Below this, as preparation's own downloads measured it (bytes per ms: about 3 Mbit/s), the link is slow. */
@@ -882,6 +1028,20 @@ export async function prefetchMedia(items: PrefetchItem[], plan: PrefetchPlan, s
   const urls = await Promise.all(rest.map(item => signedUrl(item.scope, item.key).catch(() => null)));
   if (!plan.fetchBytes || stopped()) return;
 
+  // Pictures whose display copy is not known yet: the server makes any missing ones first (bounded), so what is
+  // downloaded ahead is the copy, never a full-size original.
+  const unknown = rest.filter((item, i) => urls[i] && knownSigned(item.scope, item.key)?.display && !copies.has(id(item.scope, item.key)));
+  if (unknown.length) {
+    await Promise.race([
+      Promise.all((['post', 'chat'] as MediaScope[]).map(scope => {
+        const keys = unknown.filter(item => item.scope === scope).map(item => item.key);
+        return keys.length ? requestCopies(scope, keys) : Promise.resolve();
+      })),
+      new Promise(resolve => setTimeout(resolve, COPY_WAIT_MS)),
+    ]);
+    if (stopped()) return;
+  }
+
   const store = await device;
   const always = Math.max(1, plan.alwaysFirst ?? 1);
   let spent = 0;
@@ -889,9 +1049,14 @@ export async function prefetchMedia(items: PrefetchItem[], plan: PrefetchPlan, s
   let widened = false;
 
   const prepare = async (item: PrefetchItem, url: string): Promise<void> => {
-    let src = url;
-    let expiresAt = knownSigned(item.scope, item.key)?.expiresAt ?? Date.now() + 5 * 60_000;
-    let bytes = item.bytes && item.bytes > 0 ? item.bytes : null;
+    const signedEntry = knownSigned(item.scope, item.key);
+    const choice = pictureAddress(item.scope, item.key, signedEntry, url);
+    // A still picture without its display copy yet is left to its screen: never a full-size original in the background.
+    if (signedEntry?.display && !(choice.copy && copies.get(id(item.scope, item.key)) === 'ready')) return;
+    let src = choice.src;
+    let expiresAt = signedEntry?.expiresAt ?? Date.now() + 5 * 60_000;
+    // (A copy's size is not the original's: only an original's known size measures the link.)
+    let bytes = !choice.copy && item.bytes && item.bytes > 0 ? item.bytes : null;
     // Community pictures go into this device's store where the bucket allows this site. Until that is known, the
     // first one fetched finds out (the answer comes with its first bytes) and the others wait for that round trip.
     if (item.scope === 'post' && store && cors !== 'blocked') {
@@ -899,13 +1064,15 @@ export async function prefetchMedia(items: PrefetchItem[], plan: PrefetchPlan, s
       if (stopped()) return;
       // (Read again: the answer may have just arrived.)
       if (corsRule() !== 'blocked') {
-        const blob = await fetchForDevice(item.key, url, true).catch(() => null);
+        const blob = await fetchForDevice(item.key, choice.src, true).catch(() => null);
         if (stopped()) return;
         if (blob) { src = objectUrlFor(id(item.scope, item.key), blob); expiresAt = Infinity; bytes = blob.size; }
       }
     }
     // (A copy read into this device was measured as it arrived; a download through its address is measured here.)
-    if (await decodeInto(item.scope, item.key, src, expiresAt, 'low', src === url ? bytes : null)) notePrefetched(bytes ?? ESTIMATE_BYTES);
+    const ok = await decodeInto(item.scope, item.key, src, expiresAt, 'low', src === choice.src ? bytes : null);
+    if (ok) notePrefetched(bytes ?? (choice.copy ? COPY_ESTIMATE_BYTES : ESTIMATE_BYTES));
+    else if (choice.copy && !src.startsWith('blob:')) copyMissing(item.scope, item.key);
   };
 
   await new Promise<void>(finished => {
@@ -937,7 +1104,8 @@ export async function prefetchMedia(items: PrefetchItem[], plan: PrefetchPlan, s
           if (ahead) await ahead.catch(() => {});
           continue;
         }
-        const estimate = item.bytes && item.bytes > 0 ? item.bytes : ESTIMATE_BYTES;
+        // What the download will cost: a display copy is a fraction of its original.
+        const estimate = knownSigned(item.scope, item.key)?.display ? COPY_ESTIMATE_BYTES : item.bytes && item.bytes > 0 ? item.bytes : ESTIMATE_BYTES;
         const budget = slowLink() ? Math.min(plan.budgetBytes, SLOW_BUDGET) : plan.budgetBytes;
         if (index >= always && spent + estimate > budget) { next = rest.length; return; }
         spent += estimate;

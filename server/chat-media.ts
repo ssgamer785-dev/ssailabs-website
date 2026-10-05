@@ -14,17 +14,23 @@
 
 import { Router, type Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { GetObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
-import { asyncRoute, authenticate, batchKeys, bucket, deleteObjects, getAdmin, getS3, MAX_BATCH_KEYS, servedAs, signedPutUrl, type Caller } from './r2.js';
+import { asyncRoute, authenticate, batchKeys, bucket, deleteObjects, getAdmin, getS3, MAX_BATCH_KEYS, servedAs, signedPutUrl, signStableGet, type Caller } from './r2.js';
 import { recordUploadGrant } from './upload-grants.js';
+import { displayCopiesOffered, displayVariantKey, ensureDisplayVariants, isDisplayable } from './media-variants.js';
 
 /** Hard cap on stored chat media per user, enforced oldest-first. */
 export const MEDIA_QUOTA_BYTES = 100 * 1024 * 1024;
 
 const PUT_URL_TTL_SECONDS = 300;
-const GET_URL_TTL_SECONDS = 900;
+/**
+ * Private media: addresses are signed per 15-minute window and live two
+ * windows (signStableGet), so a thread reopened within a window reuses what
+ * the browser already has; the browser keeps a copy only while its address
+ * lives, and none of it is ever kept by the app on the device.
+ */
+const READ_WINDOW_SECONDS = 900;
+const DISPLAY_SERVED = servedAs({ mimeType: 'image/jpeg', allowed: true, download: false });
 
 /** Per-file ceilings, checked before a PUT URL is issued. */
 const MAX_BYTES: Record<string, number> = {
@@ -127,8 +133,17 @@ function servedForChatObject(found: { from: 'object' | 'poster'; row: ChatObject
   });
 }
 
-function signChatGet(key: string, served: ReturnType<typeof servedAs>): Promise<string> {
-  return getSignedUrl(getS3()!, new GetObjectCommand({ Bucket: bucket()!, Key: key, ...served }), { expiresIn: GET_URL_TTL_SECONDS });
+/** The type of a still picture this chat object is (a photo message); null for anything else, posters included. */
+function displayableChatMime(found: { from: 'object' | 'poster'; row: ChatObjectRow }): string | null {
+  return found.from === 'object' && found.row.kind === 'image' && isDisplayable(found.row.mime_type) ? found.row.mime_type : null;
+}
+
+/** The signed original, and for a photo also its display copy, under the same check (the copy's key is derived here). */
+async function signChatObject(key: string, found: { from: 'object' | 'poster'; row: ChatObjectRow }): Promise<{ url: string; expiresIn: number; display?: string }> {
+  const original = await signStableGet(key, servedForChatObject(found), { windowSeconds: READ_WINDOW_SECONDS, keepPrivateCopyShort: true });
+  if (!displayableChatMime(found) || !displayCopiesOffered()) return original;
+  const display = await signStableGet(displayVariantKey(key), DISPLAY_SERVED, { windowSeconds: READ_WINDOW_SECONDS, keepPrivateCopyShort: true });
+  return { ...original, display: display.url, expiresIn: Math.min(original.expiresIn, display.expiresIn) };
 }
 
 export interface PurgeVictim {
@@ -574,8 +589,7 @@ export function chatMediaRouter(): Router {
 
     const found = (await findChatObjects(getAdmin()!, [{ key: storageKey, conversationId }])).get(storageKey);
     if (!found) return res.status(404).json({ error: 'Attachment unavailable.' });
-    const url = await signChatGet(storageKey, servedForChatObject(found));
-    res.json({ url, expiresIn: GET_URL_TTL_SECONDS });
+    res.json(await signChatObject(storageKey, found));
   }));
 
   /**
@@ -593,7 +607,7 @@ export function chatMediaRouter(): Router {
     const keys = batchKeys(req.body?.keys);
     if (!keys) return res.status(400).json({ error: `Send 1 to ${MAX_BATCH_KEYS} media keys.` });
 
-    const urls: Record<string, { url: string; expiresIn: number }> = {};
+    const urls: Record<string, { url: string; expiresIn: number; display?: string }> = {};
     const failed: Record<string, number> = {};
     const wanted: { key: string; conversationId: string }[] = [];
     for (const key of keys) {
@@ -611,9 +625,49 @@ export function chatMediaRouter(): Router {
     await Promise.all(allowed.map(async ({ key }) => {
       const hit = found.get(key);
       if (!hit) { failed[key] = 404; return; }
-      urls[key] = { url: await signChatGet(key, servedForChatObject(hit)), expiresIn: GET_URL_TTL_SECONDS };
+      urls[key] = await signChatObject(key, hit);
     }));
     res.json({ urls, failed });
+  }));
+
+  /**
+   * Makes the display copies of photos that do not have one yet (right after
+   * they are sent, or when a member's app finds one without). Every key passes
+   * exactly the checks /media-url makes — a conversation the caller may read,
+   * a live message of it — and the copy's key is derived here, never taken
+   * from the caller.
+   */
+  router.post('/media-variants', asyncRoute(async (req, res) => {
+    if (!requireConfigured(res)) return;
+    const caller = await authenticate(req);
+    if (!caller) return res.status(401).json({ error: 'Not authenticated.' });
+    const keys = batchKeys(req.body?.keys);
+    if (!keys) return res.status(400).json({ error: `Send 1 to ${MAX_BATCH_KEYS} media keys.` });
+
+    const failed: Record<string, number> = {};
+    const skipped: string[] = [];
+    const wanted: { key: string; conversationId: string }[] = [];
+    for (const key of keys) {
+      const conversationId = conversationFromKey(key);
+      if (conversationId) wanted.push({ key, conversationId }); else failed[key] = 400;
+    }
+    const readable = await readableConversations(caller, wanted.map(w => w.conversationId));
+    const allowed = wanted.filter(w => {
+      if (readable.has(w.conversationId.toLowerCase())) return true;
+      failed[w.key] = 403;
+      return false;
+    });
+    const found = await findChatObjects(getAdmin()!, allowed);
+    const work: { key: string; mimeType: string }[] = [];
+    for (const { key } of allowed) {
+      const hit = found.get(key);
+      if (!hit) { failed[key] = 404; continue; }
+      const mimeType = displayableChatMime(hit);
+      if (mimeType) work.push({ key, mimeType }); else skipped.push(key);
+    }
+    const done = await ensureDisplayVariants(getS3()!, bucket()!, work);
+    for (const key of done.failed) failed[key] = 503;
+    res.json({ ready: done.ready, pending: done.pending, skipped: [...skipped, ...done.skipped], failed });
   }));
 
   /**

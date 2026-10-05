@@ -27,7 +27,7 @@ export function mediaErrorFor(status: number): string {
 }
 
 /** One session refresh after an expired token; never retry a denied media key. */
-export async function fetchSignedUrl(path: string): Promise<{ url: string; expiresIn: number }> {
+export async function fetchSignedUrl(path: string): Promise<{ url: string; expiresIn: number; display?: string }> {
   const response = await authorizedFetch(path);
   if (!response.ok) throw new Error(mediaErrorFor(response.status));
   return response.json();

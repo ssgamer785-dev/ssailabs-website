@@ -7,6 +7,7 @@ import { officialHeadline } from '../lib/community/display-body';
 import { useAuth } from '../lib/auth-context';
 import type { PostMediaKind } from '../lib/community/media-api';
 import { multiMediaSupported, publishPostWithMedia, uploadDraftAttachment, type DraftAttachment, type UploadedAttachment } from '../lib/community/multi-media';
+import { requestCopies } from '../lib/media/media-cache';
 import { UploadQueue, type UploadItem } from '../lib/media/upload-queue';
 import { measureImage } from '../lib/media/dimensions';
 import { AttachmentTray } from '../components/community/AttachmentTray';
@@ -312,6 +313,8 @@ export function CreatePostScreen() {
         if (insError) throw new Error(insError.message);
       }
 
+      // The new pictures' display copies are made now, so every member's feed draws those rather than the originals.
+      if (!editId) void requestCopies('post', uploads.filter(u => u.kind === 'image').map(u => u.storageKey));
       navigate('/community', { replace: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not publish the post.');

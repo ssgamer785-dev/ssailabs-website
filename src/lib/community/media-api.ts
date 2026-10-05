@@ -5,7 +5,7 @@
  */
 
 import { supabase } from '../supabase';
-import { peekMedia, signedUrl } from '../media/media-cache';
+import { peekMedia, peekSignedUrl, signedUrl } from '../media/media-cache';
 
 export type PostMediaKind = 'image' | 'video' | 'pdf' | 'file' | 'voice';
 
@@ -97,8 +97,12 @@ export async function deletePostMedia(postId: string): Promise<void> {
  */
 export const getPostMediaUrl = Object.assign(
   (storageKey: string, force = false): Promise<string> => signedUrl('post', storageKey, force),
-  /** What can be shown at once without asking anyone (a prepared picture, or a valid address). */
-  { peek: (storageKey: string) => peekMedia('post', storageKey)?.src ?? null },
+  {
+    /** A still-valid address of the original itself, known without asking anyone (viewers, players, downloads). */
+    peek: (storageKey: string) => peekSignedUrl('post', storageKey),
+    /** The picture already prepared for lists (its display copy): drawn at once while the original loads. */
+    prepared: (storageKey: string) => peekMedia('post', storageKey)?.src ?? null,
+  },
 );
 
 export async function resumePostUploadUrl(ticket: PostUploadTicket, args: {

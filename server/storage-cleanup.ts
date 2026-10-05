@@ -12,16 +12,18 @@
  *   - unused: everything else.
  *
  * A dry run reports the piles; a delete (with the typed confirmation) removes
- * the unused pile and nothing else. Only chat/, posts/ and avatars/ are ever
- * listed, and a listed key outside the requested prefix is ignored, so files
- * that belong to anything other than this app are never touched.
+ * the unused pile and nothing else. Only chat/, posts/, avatars/ and variants/
+ * are ever listed, and a listed key outside the requested prefix is ignored,
+ * so files that belong to anything other than this app are never touched.
+ * A display copy (variants/) is in use exactly while its original is.
  */
 import { ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { Router } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { asyncRoute, authenticate, bucket, deleteObjects, getAdmin, getS3 } from './r2.js';
+import { displayVariantKey, mayHaveVariant, VARIANT_PREFIX } from './media-variants.js';
 
-export const CLEANUP_PREFIXES = ['chat/', 'posts/', 'avatars/'] as const;
+export const CLEANUP_PREFIXES = ['chat/', 'posts/', 'avatars/', VARIANT_PREFIX] as const;
 export type CleanupPrefix = typeof CLEANUP_PREFIXES[number];
 export const CLEANUP_CONFIRM_WORD = 'DELETE';
 /** Longer than any upload URL lives (5 minutes) plus the moment its row takes to write. */
@@ -78,6 +80,8 @@ async function columnValues(db: SupabaseClient, table: string, column: string): 
 export interface References {
   keys: Set<string>;
   links: string[];
+  /** The display copies of every key in use (worked out the first time a copy is checked). */
+  variants?: Set<string>;
 }
 
 /** What the database names right now, read after the listing so nothing listed can be missed. */
@@ -88,6 +92,10 @@ export async function loadReferences(db: SupabaseClient): Promise<References> {
 }
 
 export function isReferenced(key: string, refs: References): boolean {
+  if (key.startsWith(VARIANT_PREFIX)) {
+    refs.variants ??= new Set([...refs.keys].filter(mayHaveVariant).map(displayVariantKey));
+    return refs.variants.has(key);
+  }
   return refs.keys.has(key) || refs.links.some(link => link.includes(key));
 }
 
