@@ -8,22 +8,28 @@ const visual = (m: ChatMessage) => (m.kind === 'image' || m.kind === 'video') &&
 
 /**
  * Photos and videos sent together are shown as one album; everything else
- * (text, voice, documents, a deleted item) stays its own bubble. Only items
- * that sit next to each other in the thread are grouped, so nothing is ever
- * moved out of the order it was sent in. An album of one (the rest deleted)
- * is an ordinary bubble again.
+ * (text, voice, documents, a deleted item) stays its own bubble. An album
+ * stands where its first item is and holds every item of it, even when other
+ * messages arrived between them — a reply written while a long album was
+ * still uploading must not cut it into pieces. Only one sender's items form
+ * an album: an album id is chosen by the sender's app, so it never pulls in
+ * someone else's message. An album of one (the rest deleted) is an ordinary
+ * bubble again.
  */
 export function groupAlbums(messages: ChatMessage[]): ThreadEntry[] {
   const out: ThreadEntry[] = [];
+  const albums = new Map<string, Extract<ThreadEntry, { type: 'album' }>>();
   for (const message of messages) {
-    const last = out[out.length - 1];
-    if (message.albumId && visual(message) && last?.type === 'album' && last.albumId === message.albumId
-        && last.messages[0].senderId === message.senderId) {
-      last.messages.push(message);
-      continue;
-    }
     if (message.albumId && visual(message)) {
-      out.push({ type: 'album', key: `album:${message.albumId}:${message.clientId}`, albumId: message.albumId, messages: [message] });
+      const id = `${message.senderId}\u0000${message.albumId}`;
+      const album = albums.get(id);
+      if (album) {
+        album.messages.push(message);
+        continue;
+      }
+      const entry = { type: 'album' as const, key: `album:${message.albumId}:${message.clientId}`, albumId: message.albumId, messages: [message] };
+      albums.set(id, entry);
+      out.push(entry);
       continue;
     }
     out.push({ type: 'single', key: message.clientId, message });

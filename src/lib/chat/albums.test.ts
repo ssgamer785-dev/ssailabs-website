@@ -29,12 +29,39 @@ describe('chat albums', () => {
     ]);
     expect(entries.map(e => e.type)).toEqual(['single', 'single', 'single', 'single']);
   });
-  it('never pulls a message out of its place: a message in between splits the album', () => {
+  it('a reply that arrives while the album is still uploading does not cut it: one album, where it started', () => {
     const entries = groupAlbums([
       m('a', { albumId: 'A', albumIndex: 0 }),
       m('x', { kind: 'text', storageKey: null, senderId: 'other' }),
       m('b', { albumId: 'A', albumIndex: 1 }),
+      m('c', { albumId: 'A', albumIndex: 2 }),
     ]);
-    expect(entries.map(e => e.type)).toEqual(['single', 'single', 'single']);
+    expect(entries.map(e => e.type)).toEqual(['album', 'single']);
+    expect(entries[0].type === 'album' && entries[0].messages.map(x => x.id)).toEqual(['a', 'b', 'c']);
+    expect(entries[1].type === 'single' && entries[1].message.id).toBe('x');
+  });
+  it('a document sent in the same batch stays its own bubble after the album; the album stays whole', () => {
+    const entries = groupAlbums([
+      m('a', { albumId: 'A', albumIndex: 0 }),
+      m('d', { albumId: 'A', albumIndex: 2, kind: 'pdf' }),
+      m('b', { albumId: 'A', albumIndex: 1 }),
+    ]);
+    expect(entries.map(e => e.type)).toEqual(['album', 'single']);
+    expect(entries[0].type === 'album' && entries[0].messages.map(x => x.id)).toEqual(['a', 'b']);
+  });
+  it("only the sender's own items form an album: the same album id from someone else is never pulled in", () => {
+    const entries = groupAlbums([
+      m('a', { albumId: 'A', albumIndex: 0 }),
+      m('b', { albumId: 'A', albumIndex: 1 }),
+      m('z', { albumId: 'A', albumIndex: 2, senderId: 'other' }),
+    ]);
+    expect(entries.map(e => e.type)).toEqual(['album', 'single']);
+    expect(entries[0].type === 'album' && entries[0].messages.map(x => x.id)).toEqual(['a', 'b']);
+  });
+  it('twelve photos stay one album of twelve, in the order picked', () => {
+    const photos = Array.from({ length: 12 }, (_, i) => m(`p${i}`, { albumId: 'A', albumIndex: (i * 7) % 12 }));
+    const entries = groupAlbums(photos);
+    expect(entries.length).toBe(1);
+    expect(entries[0].type === 'album' && entries[0].messages.map(x => x.albumIndex)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   });
 });

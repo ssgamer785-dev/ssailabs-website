@@ -57,6 +57,20 @@ const SELECT_COLUMNS =
 const RC5_COLUMNS = `${SELECT_COLUMNS}, album_id, album_index, album_size, album_kind, media_width, media_height`;
 /** Learned from the first page load: does the database have the RC5 columns? */
 let albumSchema: boolean | undefined;
+/** Whether a send of several files becomes one album (true), separate messages (false), or not known yet. */
+export function chatAlbumsAvailable(): boolean | undefined {
+  return albumSchema;
+}
+
+/**
+ * The order a batch is sent in: its photos and videos first (they form the
+ * album's mosaic, in the order picked), then its documents (their own file
+ * bubbles, in the order picked). Mixed types are never forced into a mosaic.
+ */
+export function batchOrder<T extends { kind: MediaKind }>(files: T[]): T[] {
+  const isVisual = (f: T) => f.kind === 'image' || f.kind === 'video';
+  return [...files.filter(isVisual), ...files.filter(f => !isVisual(f))];
+}
 // Typed as the legacy list: the query builder's column parser does not need to know the extras.
 const columns = () => (albumSchema === false ? SELECT_COLUMNS : RC5_COLUMNS) as typeof SELECT_COLUMNS;
 const isMissingColumn = (error: { code?: string; message?: string } | null) =>
@@ -67,8 +81,41 @@ const ALBUM_CONCURRENCY = 3;
 /** A thread's latest page as last read, per account (memory only), so opening it renders at once. */
 export const threadViewKey = (userId: string, conversationId: string) => `chat:${userId}:${conversationId}`;
 
+/**
+ * A page of the thread ends somewhere in its past. When that edge cuts through an album, the page is extended
+ * back to the album's first item — with anything sent in between, so loading older messages later skips
+ * nothing — and the album shows whole, never "5 photos" of twelve. Bounded: a page is never stretched by more
+ * than 200 messages (then it stays as it was, and the rest of the album arrives with the older page).
+ */
+async function extendToWholeAlbum(conversationId: string, rows: MessageRow[]): Promise<MessageRow[]> {
+  if (albumSchema !== true || !rows.length) return rows;
+  const edge = rows[rows.length - 1];   // pages are read newest first
+  if (!edge.album_id || !edge.album_size || rows.filter(r => r.album_id === edge.album_id).length >= edge.album_size) return rows;
+  const { data: first } = await supabase
+    .from('messages')
+    .select('created_at')
+    .eq('conversation_id', conversationId)
+    .eq('album_id' as never, edge.album_id as never)
+    .order('created_at', { ascending: true })
+    .limit(1);
+  const start = (first as { created_at: string }[] | null)?.[0]?.created_at;
+  if (!start || start >= edge.created_at) return rows;
+  const { data, error } = await supabase
+    .from('messages')
+    .select(columns())
+    .eq('conversation_id', conversationId)
+    .gte('created_at', start)
+    .lt('created_at', edge.created_at)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(200);
+  if (error || !data || data.length >= 200) return rows;
+  const seen = new Set(rows.map(r => r.id));
+  return [...rows, ...(data as MessageRow[]).filter(r => !seen.has(r.id))];
+}
+
 /** The newest page of a thread, oldest first. Falls back to the pre-RC5 columns on a database without them. */
-async function queryLatest(conversationId: string): Promise<{ rows: ChatMessage[]; error: { code?: string; message?: string } | null }> {
+async function queryLatest(conversationId: string): Promise<{ rows: ChatMessage[]; more: boolean; error: { code?: string; message?: string } | null }> {
   // Which columns this read asks for. Several threads can be read at the same moment (an admin's recent threads,
   // or a thread being prepared while another is opened): each read that asked for the RC5 columns and found them
   // missing tries again without them — even when another read has just found that out.
@@ -85,9 +132,11 @@ async function queryLatest(conversationId: string): Promise<{ rows: ChatMessage[
     albumSchema = false;
     return queryLatest(conversationId);
   }
-  if (error) return { rows: [], error };
+  if (error) return { rows: [], more: false, error };
   if (albumSchema === undefined) albumSchema = true;
-  return { rows: sortByTime(((data ?? []) as MessageRow[]).map(toMessage)), error: null };
+  const page = (data ?? []) as MessageRow[];
+  const rows = await extendToWholeAlbum(conversationId, page);
+  return { rows: sortByTime(rows.map(toMessage)), more: page.length === PAGE_SIZE, error: null };
 }
 
 /** Reads a thread's latest page in the background (after sign-in, or when a member is about to open it). */
@@ -246,12 +295,12 @@ export function useConversation(explicitConversationId?: string): UseConversatio
   // ---- initial page -------------------------------------------------------
 
   const loadLatest = useCallback(async (id: string) => {
-    const { rows: ordered, error: qErr } = await queryLatest(id);
+    const { rows: ordered, more, error: qErr } = await queryLatest(id);
     if (qErr) {
       setError(friendlyError(qErr, 'Could not load messages.'));
       return;
     }
-    setHasMore(ordered.length === PAGE_SIZE);
+    setHasMore(more);
     newestAt.current = ordered.length ? ordered[ordered.length - 1].createdAt : null;
     if (userId) writeView(threadViewKey(userId, id), ordered);
     // Preserve any in-flight optimistic messages across a refetch.
@@ -292,8 +341,9 @@ export function useConversation(explicitConversationId?: string): UseConversatio
       setError(friendlyError(qErr, 'Could not load messages.'));
       return;
     }
-    const rows = ((data ?? []) as MessageRow[]).map(toMessage);
-    setHasMore(rows.length === PAGE_SIZE);
+    const page = (data ?? []) as MessageRow[];
+    const rows = (await extendToWholeAlbum(conversationId, page)).map(toMessage);
+    setHasMore(page.length === PAGE_SIZE);
     if (rows.length) setMessages(prev => rows.reduce(upsert, prev));
   }, [conversationId, hasMore, loadingOlder, messages]);
 
@@ -644,8 +694,9 @@ export function useConversation(explicitConversationId?: string): UseConversatio
    * progress, retry and cancel, and the other side gets one notification for
    * the whole album. Before the RC5 migration they are sent one by one.
    */
-  const sendMediaBatch = useCallback(async (files: { file: Blob; kind: MediaKind; fileName: string }[]) => {
-    if (!conversationId || !userId || !files.length) return;
+  const sendMediaBatch = useCallback(async (picked: { file: Blob; kind: MediaKind; fileName: string }[]) => {
+    if (!conversationId || !userId || !picked.length) return;
+    const files = batchOrder(picked);
     if (files.length === 1) {
       const [only] = files;
       const draft = await prepareDraft(conversationId, userId, only.file, only.kind, only.fileName, undefined, null);

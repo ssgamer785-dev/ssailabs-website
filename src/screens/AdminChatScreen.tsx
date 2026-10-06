@@ -6,7 +6,8 @@ import { makeRand } from '../lib/rng';
 import { useAuth } from '../lib/auth-context';
 import { supabase } from '../lib/supabase';
 import { useKeyboardInset } from '../lib/useKeyboardInset';
-import { useConversation } from '../lib/chat/useConversation';
+import { chatAlbumsAvailable, useConversation } from '../lib/chat/useConversation';
+import { batchTooLarge } from '../lib/chat/limits';
 import type { AdminConversation } from '../lib/chat/useAdminConversations';
 import { readView } from '../lib/view-cache';
 import { noteText } from '../lib/media/media-metrics';
@@ -191,9 +192,13 @@ export function AdminChatScreen() {
     const chosen = Array.from(e.target.files ?? []);
     e.target.value = '';
     if (!chosen.length || !chatReady) return;
-    const ready: { id: string; file: File; kind: MediaKind; previewUrl: string | null }[] = [];
+    const batch = chosen.slice(0, MAX_ALBUM - picked.length);
+    // One file goes straight out, as it always did; several are shown first, each as soon as it is ready
+    // (an iPhone photo is converted from HEIC first: twelve of them fill the tray one by one, not all at the end).
+    const straightOut = !picked.length && batch.length === 1;
     const problems: string[] = [];
-    for (const raw of chosen.slice(0, MAX_ALBUM - picked.length)) {
+    if (chosen.length > batch.length) problems.push(`Up to ${MAX_ALBUM} at a time; the rest were not added.`);
+    for (const raw of batch) {
       let file = normalizePickedFile(raw);
       try { file = await toPortableImage(file); }
       catch (error) {
@@ -202,20 +207,16 @@ export function AdminChatScreen() {
       }
       const kind = kindForFile(file);
       if (!kind) { problems.push(`${raw.name}: that file type cannot be attached.`); continue; }
-      ready.push({ id: crypto.randomUUID(), file, kind, previewUrl: kind === 'image' ? URL.createObjectURL(file) : null });
+      if (straightOut) {
+        setNotice(null);
+        atBottom.current = true;
+        await chat.sendMedia(file, kind, file.name);
+        return;
+      }
+      const item = { id: crypto.randomUUID(), file, kind, previewUrl: kind === 'image' ? URL.createObjectURL(file) : null };
+      setPicked(prev => [...prev, item]);
     }
-    if (chosen.length > MAX_ALBUM - picked.length) problems.push(`Up to ${MAX_ALBUM} at a time; the rest were not added.`);
     setNotice(problems.length ? problems.join(' ') : null);
-    if (!ready.length) return;
-    // One file goes straight out, as it always did; several are shown first.
-    if (!picked.length && ready.length === 1) {
-      const [only] = ready;
-      if (only.previewUrl) URL.revokeObjectURL(only.previewUrl);
-      atBottom.current = true;
-      await chat.sendMedia(only.file, only.kind, only.file.name);
-      return;
-    }
-    setPicked(prev => [...prev, ...ready]);
   }
 
   function discardPicked(id?: string) {
@@ -239,6 +240,10 @@ export function AdminChatScreen() {
 
   async function sendPicked() {
     if (!picked.length || !chatReady) return;
+    // A batch bigger than the member's whole chat allowance would lose its own first files: say so, send nothing.
+    const tooLarge = batchTooLarge(picked.map(item => item.file.size));
+    if (tooLarge) { setNotice(tooLarge); return; }
+    setNotice(null);
     const batch = picked.map(item => ({ file: item.file as Blob, kind: item.kind, fileName: item.file.name }));
     // The previews are not needed once the bubbles (with their own previews) exist.
     discardPicked();
@@ -394,7 +399,14 @@ export function AdminChatScreen() {
                 <div style={css('position:relative;width:76px;height:76px;border-radius:10px;overflow:hidden;background:var(--surface-sunken-2)')}>
                   {item.previewUrl
                     ? <img src={item.previewUrl} alt="" style={css('width:100%;height:100%;object-fit:cover')} />
-                    : <div style={css('width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:6px;font-size:9.5px;color:var(--text-faint);text-align:center;word-break:break-word')}>{item.kind === 'video' ? '🎬 ' : ''}{item.file.name}</div>}
+                    : (
+                      <div style={css('width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:6px')}>
+                        {item.kind === 'video'
+                          ? <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.7} strokeLinejoin="round" aria-hidden="true"><rect x="3.2" y="6.6" width="12" height="10.8" rx="2.6" /><path d="M15.2 11.2 20.4 8.2v7.6l-5.2-3z" /></svg>
+                          : <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={item.kind === 'pdf' ? 'var(--danger-ink)' : 'var(--text-faint)'} strokeWidth={1.7} strokeLinejoin="round" aria-hidden="true"><path d="M7 3.6h7L18.4 8v12.4H7z" /><path d="M9.6 14.2h4.8" /></svg>}
+                        <div style={css('font-size:9px;color:var(--text-faint);text-align:center;line-height:1.25;word-break:break-word;max-height:23px;overflow:hidden')}>{item.file.name}</div>
+                      </div>
+                    )}
                   <button type="button" onClick={() => discardPicked(item.id)} aria-label={`Remove ${item.file.name}`}
                     style={css('position:absolute;top:4px;right:4px;width:22px;height:22px;border-radius:50%;background:var(--ink-chip);display:flex;align-items:center;justify-content:center;cursor:pointer')}>
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--on-accent)" strokeWidth={2.8} strokeLinecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
@@ -407,6 +419,11 @@ export function AdminChatScreen() {
               </div>
             ))}
           </div>
+          {picked.length > 1 && chatAlbumsAvailable() === false && (
+            <div role="note" style={css('font-size:11px;color:var(--text-muted);line-height:1.4')}>
+              Until the RC5 database update is applied, these go as {picked.length} separate messages. After it, as one album with one notification.
+            </div>
+          )}
           <div style={css('display:flex;align-items:center;gap:10px')}>
             <button type="button" onClick={() => fileInput.current?.click()} style={css('font-size:12px;font-weight:700;color:var(--accent-ink)')}>+ Add more</button>
             <div style={css('flex:1')} />
@@ -427,9 +444,14 @@ export function AdminChatScreen() {
         </div>
       ) : !recorder.recording ? (
         <div style={{ ...css('flex:none;display:flex;align-items:center;gap:9px;background:var(--surface)'), padding: '12px 18px', paddingBottom: `calc(24px + env(safe-area-inset-bottom, 0px) + ${keyboardInset}px)` }}>
-          <div onClick={chatReady ? () => fileInput.current?.click() : undefined} aria-disabled={!chatReady} style={css(`width:38px;height:38px;border-radius:50%;background:var(--surface-secondary);display:flex;align-items:center;justify-content:center;cursor:${chatReady ? 'pointer' : 'default'};opacity:${chatReady ? 1 : .45};flex:none`)}>
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth={2.1} strokeLinecap="round"><path d="M12 6v12M6 12h12" /></svg>
-          </div>
+          {/* One press picks as many photos, videos and files as the member likes (never `capture`, which would
+              open the camera alone and allow one shot): iPhone offers Photo Library, Take Photo and Choose Files,
+              Android its photo picker, camera and files, a computer its file dialog. */}
+          <button type="button" onClick={chatReady ? () => fileInput.current?.click() : undefined} disabled={!chatReady}
+            aria-label="Attach photos, videos or files"
+            style={css(`width:38px;height:38px;border-radius:50%;background:var(--surface-secondary);display:flex;align-items:center;justify-content:center;cursor:${chatReady ? 'pointer' : 'default'};opacity:${chatReady ? 1 : .45};flex:none`)}>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth={2.1} strokeLinecap="round" aria-hidden="true"><path d="M12 6v12M6 12h12" /></svg>
+          </button>
           <div style={css('flex:1;min-width:0;height:44px;border-radius:999px;background:var(--surface-secondary);display:flex;align-items:center;padding:0 16px')}>
             <input
               placeholder="Type a message..."

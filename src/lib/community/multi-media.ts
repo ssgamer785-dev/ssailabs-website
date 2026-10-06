@@ -4,8 +4,8 @@
  * The first attachment stays on the post row (so older apps still show it);
  * the rest are post_media items, read through post_media_for() which applies
  * the same anonymity rules as the feed. Before the database has the RC5
- * migration none of this exists, and the app quietly behaves as before: one
- * attachment per post.
+ * migration none of this exists: a post holds one attachment, and the
+ * composer says so (it never pretends to take several).
  */
 import { supabase } from '../supabase';
 import { requestPostUploadUrl, resumePostUploadUrl, uploadPostMedia, type PostMediaKind, type PostUploadTicket } from './media-api';
@@ -36,17 +36,46 @@ function isMissing(error: { code?: string; message?: string } | null): boolean {
   return !!error && (['PGRST202', '42883', 'PGRST205', '42P01'].includes(error.code ?? '') || /could not find|does not exist/i.test(error.message ?? ''));
 }
 
-let support: Promise<boolean> | null = null;
+/**
+ * Whether the database can hold several attachments per post: 'yes' or 'no'
+ * once it has answered, 'unknown' while it has not (not asked yet, or the ask
+ * failed — offline, a dropped connection). Only a database that really lacks
+ * the RC5 functions is 'no'.
+ */
+export type MultiMediaSupport = 'yes' | 'no' | 'unknown';
 
-/** Whether the database can hold several attachments per post. Asked once per page load. */
-export function multiMediaSupported(): Promise<boolean> {
-  support ??= (async () => {
-    const { error } = await supabase.rpc('post_media_for' as never, { p_post_ids: [] } as never);
-    if (!error) return true;
-    if (!isMissing(error)) support = null;   // a network blip: ask again next time
-    return false;
+let known: 'yes' | 'no' | null = null;
+let asking: Promise<MultiMediaSupport> | null = null;
+
+/** The answer already in hand, without asking: a screen can open with it in its first frame. */
+export function knownMultiMediaSupport(): MultiMediaSupport {
+  return known ?? 'unknown';
+}
+
+/** Asks the database once per page load; a failed ask is asked again next time. */
+export function multiMediaSupport(): Promise<MultiMediaSupport> {
+  if (known) return Promise.resolve(known);
+  asking ??= (async () => {
+    try {
+      const { error } = await supabase.rpc('post_media_for' as never, { p_post_ids: [] } as never);
+      if (!error) known = 'yes';
+      else if (isMissing(error)) known = 'no';
+    } catch { /* unknown: asked again next time */ }
+    asking = null;
+    return known ?? 'unknown';
   })();
-  return support;
+  return asking;
+}
+
+/** True only once the database has said it holds several attachments per post. */
+export async function multiMediaSupported(): Promise<boolean> {
+  return (await multiMediaSupport()) === 'yes';
+}
+
+/** For tests: forget the answer. */
+export function resetMultiMediaSupportForTests(): void {
+  known = null;
+  asking = null;
 }
 
 export interface PostMediaInfo {

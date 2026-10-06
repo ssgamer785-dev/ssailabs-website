@@ -11,14 +11,17 @@ function sizeLabel(n: number): string {
 
 /**
  * The attachments picked for a post, before and while it is sent: each one's
- * preview, its own progress, a retry when it failed, remove, and move left /
- * right to choose the order (the first is the one older apps show).
+ * preview, its own progress, a retry when it failed, remove (or cancel, while
+ * it uploads), and move left / right to choose the order (the first is the
+ * one older apps show).
  */
-export function AttachmentTray({ items, busy, overall, onRemove, onRetry, onMove, onCancelAll }: {
+export function AttachmentTray({ items, busy, overall, onRemove, onCancel, onRetry, onMove, onCancelAll }: {
   items: Item[];
   busy: boolean;
   overall: { total: number; done: number; failed: number; fraction: number };
   onRemove: (id: string) => void;
+  /** Stops one item's upload and takes it out of the post; the others carry on. */
+  onCancel: (id: string) => void;
   onRetry: (id: string) => void;
   onMove: (id: string, to: number) => void;
   onCancelAll: () => void;
@@ -49,6 +52,7 @@ export function AttachmentTray({ items, busy, overall, onRemove, onRetry, onMove
         {items.map((item, index) => {
           const { payload } = item;
           const failed = item.state === 'failed';
+          const inFlight = item.state === 'uploading' || (busy && item.state === 'queued');
           const label = `${payload.kind === 'image' ? 'Photo' : payload.kind === 'video' ? 'Video' : payload.kind === 'voice' ? 'Voice message' : 'Document'} ${index + 1}: ${payload.file.name}`;
           return (
             <div role="listitem" key={item.id} aria-label={label}
@@ -84,8 +88,8 @@ export function AttachmentTray({ items, busy, overall, onRemove, onRetry, onMove
                     Retry
                   </button>
                 )}
-                {!busy && item.state !== 'uploading' && (
-                  <button type="button" onClick={() => onRemove(item.id)} aria-label={`Remove ${label}`}
+                {(inFlight || !busy) && (
+                  <button type="button" onClick={() => (inFlight ? onCancel : onRemove)(item.id)} aria-label={`${inFlight ? 'Cancel' : 'Remove'} ${label}`}
                     style={css('position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;background:var(--ink-chip);display:flex;align-items:center;justify-content:center;cursor:pointer')}>
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--on-accent)" strokeWidth={2.8} strokeLinecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
                   </button>

@@ -55,12 +55,12 @@ export function FailedNote({ message, onRetry }: { message: ChatMessage; onRetry
   if (message.status !== 'failed') return null;
   return (
     <div style={css('display:flex;flex-direction:column;gap:3px')}>
-      <div onClick={onRetry} style={css('display:flex;align-items:center;gap:5px;cursor:pointer')}>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--danger-ink)" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+      <button type="button" onClick={onRetry} style={css('display:flex;align-items:center;gap:5px;cursor:pointer;background:none;border:0;padding:0')}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--danger-ink)" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M20 11.5a8 8 0 1 1-2.4-5.7M20 4.2v4.6h-4.6" />
         </svg>
-        <div style={css('font-size:10.5px;font-weight:600;color:var(--danger-ink);white-space:nowrap')}>Tap to retry</div>
-      </div>
+        <span style={css('font-size:10.5px;font-weight:600;color:var(--danger-ink);white-space:nowrap')}>Tap to retry</span>
+      </button>
       {message.error && (
         <div style={css('font-size:10px;color:var(--text-faint);line-height:1.35')}>{message.error}</div>
       )}

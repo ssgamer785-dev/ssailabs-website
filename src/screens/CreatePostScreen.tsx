@@ -6,7 +6,7 @@ import { useAppState } from '../lib/app-state';
 import { officialHeadline } from '../lib/community/display-body';
 import { useAuth } from '../lib/auth-context';
 import type { PostMediaKind } from '../lib/community/media-api';
-import { multiMediaSupported, publishPostWithMedia, uploadDraftAttachment, type DraftAttachment, type UploadedAttachment } from '../lib/community/multi-media';
+import { knownMultiMediaSupport, multiMediaSupport, publishPostWithMedia, uploadDraftAttachment, type DraftAttachment, type MultiMediaSupport, type UploadedAttachment } from '../lib/community/multi-media';
 import { requestCopies } from '../lib/media/media-cache';
 import { UploadQueue, type UploadItem } from '../lib/media/upload-queue';
 import { measureImage } from '../lib/media/dimensions';
@@ -73,6 +73,8 @@ const ACCEPT: Record<'image' | 'video' | 'pdf' | 'file', string> = {
 const MAX_POLL_OPTIONS = 10;
 /** Attachments in one post (the database allows 50; a post is not an album dump). */
 const MAX_ATTACHMENTS = 30;
+/** Said whenever the database cannot hold several attachments in one post (before the RC5 migration). */
+const ONE_PER_POST = 'until the RC5 database update is applied, a post holds one attachment.';
 
 /** One picked attachment, with what its tile shows. */
 interface Attachment extends DraftAttachment { previewUrl: string | null }
@@ -113,8 +115,15 @@ export function CreatePostScreen() {
     onChange: next => setItems([...next]),
   });
   const queue = queueRef.current;
-  const [multi, setMulti] = useState(false);
-  useEffect(() => { void multiMediaSupported().then(setMulti); }, []);
+  // Several attachments per post need the RC5 database. The picker takes many unless the database has said it
+  // cannot hold them: a slow or failed answer must never turn a member's pick into a single file.
+  const [support, setSupport] = useState<MultiMediaSupport>(knownMultiMediaSupport);
+  useEffect(() => {
+    let live = true;
+    void multiMediaSupport().then(answer => { if (live) setSupport(answer); });
+    return () => { live = false; };
+  }, []);
+  const oneOnly = support === 'no';
   const overall = queue.overall();
   const failedCount = items.filter(i => i.state === 'failed').length;
   const hasVoice = items.some(i => i.payload.kind === 'voice');
@@ -176,12 +185,14 @@ export function CreatePostScreen() {
     const picked = Array.from(e.target.files ?? []);
     e.target.value = '';
     if (!picked.length) return;
-    // Before the database can hold several attachments, a post keeps one: a
-    // new pick replaces the old, as it always did.
-    if (!multi || hasVoice) clearAttachments();
-    const room = multi ? MAX_ATTACHMENTS - (hasVoice ? 0 : queue.list().length) : 1;
+    // Every picked file is kept, after the ones already picked — unless the database cannot hold several
+    // attachments per post yet (asked now when it has not answered): then a post keeps one, and says so.
+    const answer = support === 'unknown' ? await multiMediaSupport() : support;
+    if (answer !== support) setSupport(answer);
+    const many = answer !== 'no';
+    if (!many || hasVoice) clearAttachments();
+    const room = many ? MAX_ATTACHMENTS - (hasVoice ? 0 : queue.list().length) : 1;
     const chosen = picked.slice(0, Math.max(0, room));
-    const ready: Attachment[] = [];
     const problems: string[] = [];
     for (const raw of chosen) {
       let file = normalizePickedFile(raw);
@@ -205,11 +216,15 @@ export function CreatePostScreen() {
           size = { width: probe.poster.width, height: probe.poster.height };
         }
       }
-      ready.push({ file, kind, poster, size, previewUrl });
+      // Into the tray as soon as it is ready, in the order picked: twelve photos fill it one by one, not all at the end.
+      queue.add([{ file, kind, poster, size, previewUrl }], false);
     }
-    if (picked.length > chosen.length) problems.push(`A post holds up to ${MAX_ATTACHMENTS} attachments; the rest were not added.`);
+    if (picked.length > chosen.length) {
+      problems.push(many
+        ? `A post holds up to ${MAX_ATTACHMENTS} attachments; the rest were not added.`
+        : `Only the first of the ${picked.length} files was added: ${ONE_PER_POST}`);
+    }
     setError(problems.length ? problems.join(' ') : null);
-    if (ready.length) queue.add(ready, false);
   }
 
   async function stopVoice() {
@@ -275,6 +290,18 @@ export function CreatePostScreen() {
         return;
       }
       const uploads = all.filter(i => i.state === 'done' && i.result).map(i => i.result!);
+      // Every attachment may have been cancelled while it uploaded: never publish an empty post.
+      if (!postText.trim() && !uploads.length) {
+        setError('Write something or attach a file first.');
+        return;
+      }
+      // What the database can hold, asked again if it had not answered yet.
+      const answer = support === 'unknown' ? await multiMediaSupport() : support;
+      if (answer !== support) setSupport(answer);
+      if (uploads.length > 1 && answer === 'no') {
+        setError(`This post has ${uploads.length} attachments: ${ONE_PER_POST} Remove all but one to post now.`);
+        return;
+      }
 
       if (editId) {
         // An Official headline is the first line, as when the post was made;
@@ -284,7 +311,7 @@ export function CreatePostScreen() {
           .update(editChannel === 'official' ? { body: postText.trim() || null, title: headline } : { body: postText.trim() || null })
           .eq('id', editId);
         if (upError) throw new Error(upError.message);
-      } else if (multi && !uploads.some(u => u.kind === 'voice')) {
+      } else if (answer !== 'no' && (answer === 'yes' || uploads.length > 1) && !uploads.some(u => u.kind === 'voice')) {
         // The post and all its attachments in one transaction: nobody ever sees half a post.
         await publishPostWithMedia({
           authorId: user.id,
@@ -337,7 +364,10 @@ export function CreatePostScreen() {
         <textarea placeholder={pollMode ? 'Ask your question…' : "What's on your mind?"} value={postText} onChange={e => setPostText(e.target.value)} style={css('width:100%;height:196px;font-size:15px;line-height:1.55')} />
       </div>
 
-      <input ref={fileInput} type="file" accept={accept} multiple={multi} onChange={pickFile} style={{ display: 'none' }} />
+      {/* One press of Image, Video, PDF or File picks as many as the member likes (never `capture`, which would
+          open the camera alone and allow one shot): iPhone offers Photo Library, Take Photo and Choose Files,
+          Android its photo picker, camera and files, a computer its file dialog. */}
+      <input ref={fileInput} type="file" accept={accept} multiple={!oneOnly} onChange={pickFile} style={{ display: 'none' }} />
 
       {!editId && <div style={css(isAdmin
         ? 'flex:none;padding:6px 20px 0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));justify-items:center;row-gap:14px'
@@ -390,6 +420,12 @@ export function CreatePostScreen() {
           <span style={attachLabel}>{recorder.recording ? formatDuration(recorder.seconds) : 'Voice'}</span>
         </button>}
       </div>}
+
+      {oneOnly && !editId && (
+        <div role="note" style={css('flex:none;margin:10px 20px 0;padding:9px 12px;border-radius:10px;background:var(--surface-secondary);font-size:11.5px;color:var(--text-muted);line-height:1.45')}>
+          One attachment per post until the RC5 database update is applied. After it, several photos, videos and files in one post switch on by themselves.
+        </div>
+      )}
 
       {recorder.recording && <div style={css('display:flex;align-items:center;justify-content:space-between;margin:12px 20px;color:var(--danger-ink);font-size:12px')}>
         <span>Recording · {formatDuration(recorder.seconds)}</span>
@@ -478,6 +514,7 @@ export function CreatePostScreen() {
           busy={busy}
           overall={overall}
           onRemove={removeAttachment}
+          onCancel={removeAttachment}
           onRetry={id => queue.retry(id)}
           onMove={(id, to) => queue.move(id, to)}
           onCancelAll={() => queue.cancelAll()}

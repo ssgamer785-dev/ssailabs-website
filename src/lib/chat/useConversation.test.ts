@@ -39,3 +39,15 @@ test('threads read at the same moment on a database without the RC5 columns each
   expect(second.map(m => m.storageKey)).toEqual(['chat/thread-b/photo.bin']);
   expect(reads.filter(r => r === 'legacy').length).toBe(2);
 });
+
+test('a mixed batch keeps its photos and videos together (the album), then its documents, each in the order picked', async () => {
+  const { batchOrder } = await import('./useConversation');
+  const picked = [
+    { kind: 'image' as const, name: 'p1' }, { kind: 'pdf' as const, name: 'd1' }, { kind: 'video' as const, name: 'v1' },
+    { kind: 'file' as const, name: 'd2' }, { kind: 'image' as const, name: 'p2' },
+  ];
+  expect(batchOrder(picked).map(f => f.name)).toEqual(['p1', 'v1', 'p2', 'd1', 'd2']);
+  // Twelve photos stay exactly as picked.
+  const photos = Array.from({ length: 12 }, (_, i) => ({ kind: 'image' as const, name: `p${i}` }));
+  expect(batchOrder(photos).map(f => f.name)).toEqual(photos.map(f => f.name));
+});
