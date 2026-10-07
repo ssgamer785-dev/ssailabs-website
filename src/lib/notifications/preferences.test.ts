@@ -15,7 +15,13 @@ describe('saved preferences', () => {
     expect(merged.likes).toBe(true);
     expect(merged.direct_messages).toBe(false);
     expect(merged.comments).toBe(true);
-    expect(merged.community_posts).toBe(false);
+    expect(merged.community_posts).toBe(true);
+  });
+  it('Students Community posts: no row is ON, a saved ON stays ON, a saved OFF stays OFF', () => {
+    expect(mergePreferences(null).community_posts).toBe(true);
+    expect(mergePreferences({ likes: true }).community_posts).toBe(true);
+    expect(mergePreferences({ community_posts: true }).community_posts).toBe(true);
+    expect(mergePreferences({ community_posts: false }).community_posts).toBe(false);
   });
   it('ignores anything that is not a boolean', () => {
     expect(mergePreferences({ likes: 'yes', system: 0, comments: null })).toEqual(DEFAULT_PREFERENCES);

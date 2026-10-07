@@ -2,9 +2,9 @@ import { describe, expect, it } from 'bun:test';
 import { DEFAULT_PREFERENCES, INBOX_FILTERS, NOTIFICATION_SETTINGS, categoryOfNotification, inFilter } from './categories';
 
 describe('notification categories', () => {
-  it('start with messages, announcements, comments and system on, and the busy ones off', () => {
+  it('start with everything on except likes (Students Community posts are on for a member who never chose)', () => {
     expect(DEFAULT_PREFERENCES).toEqual({
-      direct_messages: true, official_announcements: true, comments: true, replies: true, system: true, community_posts: false, likes: false,
+      direct_messages: true, official_announcements: true, comments: true, replies: true, system: true, community_posts: true, likes: false,
     });
   });
 

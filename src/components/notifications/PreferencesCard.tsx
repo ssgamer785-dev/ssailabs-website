@@ -24,7 +24,9 @@ function SettingRow({ label, description, checked, disabled, onToggle }: {
  * What the member wants to hear about. One switch per kind of event, kept in
  * Supabase for the account (so it follows them to every device). A switch
  * governs both the in-app list and push; each device is enabled separately
- * in the card above. Busy kinds (likes, Students Community posts) start off.
+ * in the card above. Everything starts on except likes; a saved choice is
+ * always kept. Opening this card never saves anything: a switch saves only
+ * when it is tapped.
  */
 export function PreferencesCard() {
   const { preferences, state, error, saving, setPreference } = useNotificationPreferences();

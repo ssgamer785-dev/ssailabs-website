@@ -70,9 +70,9 @@ select pg_temp.check(
   and public.notification_wanted('7b000000-0000-4000-8000-000000000001', 'official_announcements')
   and public.notification_wanted('7b000000-0000-4000-8000-000000000001', 'comments')
   and public.notification_wanted('7b000000-0000-4000-8000-000000000001', 'system')
-  and not public.notification_wanted('7b000000-0000-4000-8000-000000000001', 'community_posts')
+  and public.notification_wanted('7b000000-0000-4000-8000-000000000001', 'community_posts')
   and not public.notification_wanted('7b000000-0000-4000-8000-000000000001', 'likes'),
-  'A1. with no row: messages, announcements, comments and system ON; community posts and likes OFF');
+  'A1. with no row: messages, announcements, Students Community posts, comments and system ON; likes OFF');
 select pg_temp.check(not public.notification_wanted('7b000000-0000-4000-8000-000000000001', 'nonsense'),
   'A1b. an unknown category is never "wanted"');
 
@@ -80,8 +80,8 @@ begin;
 set local role authenticated;
 set local app.current_user_id = '7b000000-0000-4000-8000-000000000001';
 insert into public.notification_preferences (user_id, likes) values ('7b000000-0000-4000-8000-000000000001', true);
-select pg_temp.check((select count(*) = 1 and bool_and(likes) and bool_and(direct_messages) and not bool_or(community_posts) from public.notification_preferences),
-  'A2. a member can create their own row; unset columns take the defaults');
+select pg_temp.check((select count(*) = 1 and bool_and(likes) and bool_and(direct_messages) and bool_and(community_posts) from public.notification_preferences),
+  'A2. a member can create their own row; unset columns take the defaults (Students Community posts ON)');
 update public.notification_preferences set likes = false, direct_messages = false where user_id = '7b000000-0000-4000-8000-000000000001';
 select pg_temp.check((select not likes and not direct_messages and updated_at is not null from public.notification_preferences),
   'A3. and change it');
@@ -197,31 +197,56 @@ select pg_temp.check(
   'C5. one per post per student (kind stays "signal" for older clients)');
 
 -- ---------------------------------------------------------------------------
-\echo '--- D. Students Community posts are opt-in'
+\echo '--- D. Students Community posts reach the Admin and every activated Student (no row = ON)'
+-- Uma already has a preferences row from section C (made by changing another switch): it took the default, ON.
+select pg_temp.check((select community_posts from public.notification_preferences where user_id = '7b000000-0000-4000-8000-000000000003'),
+  'D0. a preferences row made by changing another switch starts with Students Community posts ON');
 insert into public.posts (id, author_id, channel, title, body) values
   ('7f000000-0000-4000-8000-000000000010', '7b000000-0000-4000-8000-000000000001', 'students', 'Gold idea', 'long above 2300');
-select pg_temp.check((select count(*) = 0 from public.notifications where category = 'community_posts'),
-  'D1. by default nobody is notified about a student post');
-insert into public.notification_preferences (user_id, community_posts) values
-  ('7b000000-0000-4000-8000-000000000002', true), ('7a000000-0000-4000-8000-000000000001', true),
-  ('7b000000-0000-4000-8000-000000000001', true), ('7d000000-0000-4000-8000-000000000001', true)
-  on conflict (user_id) do update set community_posts = true;
+select pg_temp.check(
+  (select array_agg(user_id::text order by user_id) from public.notifications
+    where category = 'community_posts' and related_post_id = '7f000000-0000-4000-8000-000000000010' and user_id::text like '7%')
+  = array['7a000000-0000-4000-8000-000000000001', '7a000000-0000-4000-8000-000000000002', '7b000000-0000-4000-8000-000000000002', '7b000000-0000-4000-8000-000000000003'],
+  'D1. with no preferences row: both admins and the other activated students are told; not the author; not the unactivated account');
+select pg_temp.check(
+  (select count(*) from public.notifications where category = 'community_posts' and related_post_id = '7f000000-0000-4000-8000-000000000010')
+  = (select count(*) from public.profiles p left join public.notification_preferences np on np.user_id = p.id
+      where p.id <> '7b000000-0000-4000-8000-000000000001' and (p.role = 'admin' or p.activated_at is not null)
+        and (np.user_id is null or np.community_posts)),
+  'D1b. exactly every admin and activated member in the database except the author and members who turned it off');
+select pg_temp.check(
+  (select count(*) = count(distinct user_id) from public.notifications where related_post_id = '7f000000-0000-4000-8000-000000000010'),
+  'D1c. one notification per person per post');
+
+begin;
+set local role authenticated;
+set local app.current_user_id = '7b000000-0000-4000-8000-000000000002';
+insert into public.notification_preferences (user_id, community_posts) values ('7b000000-0000-4000-8000-000000000002', false)
+  on conflict (user_id) do update set community_posts = excluded.community_posts;
+commit;
 insert into public.posts (id, author_id, channel, title, body) values
   ('7f000000-0000-4000-8000-000000000011', '7b000000-0000-4000-8000-000000000001', 'students', 'Silver idea', 'short');
 select pg_temp.check(
-  (select array_agg(user_id::text order by user_id) from public.notifications where category = 'community_posts' and related_post_id = '7f000000-0000-4000-8000-000000000011')
-  = array['7a000000-0000-4000-8000-000000000001', '7b000000-0000-4000-8000-000000000002'],
-  'D2. opted-in members (a student and an admin) are notified; not the author; not an unactivated account; not members who did not opt in');
+  (select array_agg(user_id::text order by user_id) from public.notifications
+    where category = 'community_posts' and related_post_id = '7f000000-0000-4000-8000-000000000011' and user_id::text like '7%')
+  = array['7a000000-0000-4000-8000-000000000001', '7a000000-0000-4000-8000-000000000002', '7b000000-0000-4000-8000-000000000003'],
+  'D2. a member who turned Students Community posts OFF is not told; everyone else still is');
 select pg_temp.check(
-  (select title = 'Sam Seventy posted in the Students Community' and body = 'Silver idea' from public.notifications
-    where user_id = '7b000000-0000-4000-8000-000000000002' and related_post_id = '7f000000-0000-4000-8000-000000000011'),
+  (select title = 'Sam Seventy posted in the Students Community' and body = 'Silver idea' and actor_id is null from public.notifications
+    where user_id = '7b000000-0000-4000-8000-000000000003' and related_post_id = '7f000000-0000-4000-8000-000000000011'),
   'D3. it names the poster, and the in-app row shows the post');
 insert into public.posts (id, author_id, channel, title, body, is_anonymous) values
   ('7f000000-0000-4000-8000-000000000012', '7b000000-0000-4000-8000-000000000001', 'students', 'Hidden hand', 'x', true);
 select pg_temp.check(
-  (select title = 'Unknown User posted in the Students Community' and actor_id is null from public.notifications
-    where user_id = '7b000000-0000-4000-8000-000000000002' and related_post_id = '7f000000-0000-4000-8000-000000000012'),
-  'D4. an anonymous post never reveals its author, not even to admins'' notification rows');
+  (select count(*) > 0 and bool_and(title = 'Unknown User posted in the Students Community' and actor_id is null and body = 'Hidden hand')
+     from public.notifications where related_post_id = '7f000000-0000-4000-8000-000000000012'),
+  'D4. an anonymous post never reveals its author, not even in admins'' notification rows');
+select pg_temp.check(
+  (select count(*) = 0 from public.notifications where related_post_id = '7f000000-0000-4000-8000-000000000012'
+     and user_id in ('7b000000-0000-4000-8000-000000000001', '7b000000-0000-4000-8000-000000000002', '7d000000-0000-4000-8000-000000000001')),
+  'D5. the anonymous author, the member who turned it off and the unactivated account are not told either');
+-- Tia turns them back ON for the sections below
+update public.notification_preferences set community_posts = true where user_id = '7b000000-0000-4000-8000-000000000002';
 
 -- ---------------------------------------------------------------------------
 \echo '--- E. Comments on my post'

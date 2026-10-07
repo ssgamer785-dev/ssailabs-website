@@ -15,7 +15,7 @@ action.
 | A message, photo, voice message, video message, PDF or file in a chat | The other side: the student for an admin's message, every admin for a student's | Direct messages | on | That message in the conversation |
 | An official post (text, image, video, voice, PDF, file) | Activated students (not the admin who wrote it) | Official announcements | on | The post |
 | A comment on my post | The post's author | Comments on my posts | on | The post, at the comment |
-| A new post in the Students Community | Activated students, except the author | Students Community posts | **off** | The post |
+| A new post in the Students Community | The admin and every activated student, except the author | Students Community posts | on (a saved OFF is kept) | The post |
 | A like on my post | The post's author, once per person per post | Likes | **off** | The post |
 | An admin removes my post or comment | Its author | System and account | on | The community |
 | A new membership request | Every admin | System and account | on | Membership requests |

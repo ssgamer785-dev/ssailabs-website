@@ -16,7 +16,7 @@ export const NOTIFICATION_SETTINGS: readonly {
   { key: 'comments', label: 'Comments on my posts', description: 'When someone comments on a post you made.', defaultOn: true },
   { key: 'replies', label: 'Replies to my comments', description: 'When someone replies to a comment you wrote.', defaultOn: true },
   { key: 'system', label: 'System and account', description: 'Moderation of your content, and for admins, new membership requests.', defaultOn: true },
-  { key: 'community_posts', label: 'Students Community posts', description: 'Every new post in the Students Community. Can be frequent.', defaultOn: false },
+  { key: 'community_posts', label: 'Students Community posts', description: 'Every new post in the Students Community. Can be frequent.', defaultOn: true },
   { key: 'likes', label: 'Likes', description: 'When someone likes a post you made. Can be frequent.', defaultOn: false },
 ];
 
