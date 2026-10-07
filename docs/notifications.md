@@ -55,6 +55,13 @@ are flat), mentions, and student-to-student messages.
 - Rapid events about one thing share a tag, so a new banner replaces the old
   one and says how many are waiting; a `Topic` header lets the push service
   drop superseded ones.
+- Urgency and lifetime: direct messages `high`, kept 24 hours; likes `low`,
+  kept 1 hour; everything else, Students Community posts included, `normal`,
+  kept 24 hours (the same as Official posts). A push service may hold a `low`
+  message until the phone is charging or on Wi-Fi and drops it when its
+  lifetime runs out, so `low` is used only for likes (off by default). The
+  test push is `high`, kept 5 minutes, so a working test does not prove that
+  `normal` or `low` pushes arrive.
 - 404/410 from the push service removes that device. 429, 5xx and network
   errors are retried (bounded); a definite failure releases the claim so a
   later replay can try again. Configuration errors (401/403/400) are logged

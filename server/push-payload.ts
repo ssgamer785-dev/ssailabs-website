@@ -159,12 +159,19 @@ export function buildPayload(row: NotificationRow, unread: readonly UnreadRow[])
   };
 }
 
-/** How long a push service may hold the message, and how urgently it wakes the device. */
+/**
+ * How long a push service may hold the message, and how urgently it wakes the device.
+ * "low" lets the push service hold a message until the phone is charging or on
+ * Wi-Fi (RFC 8030 §5.3; Apple favours battery for anything below "high"), and
+ * with a one-hour lifetime it can then be dropped unseen. Only likes, which
+ * are off by default, take that; a Students Community post is sent like an
+ * Official one.
+ */
 export function deliveryOptions(row: NotificationRow): { TTL: number; urgency: 'very-low' | 'low' | 'normal' | 'high'; topic?: string } {
   const category = categoryOf(row);
   const { tag, grouped } = groupOf(row);
   const base = category === 'direct_messages' ? { TTL: 24 * 3600, urgency: 'high' as const }
-    : category === 'likes' || category === 'community_posts' ? { TTL: 3600, urgency: 'low' as const }
+    : category === 'likes' ? { TTL: 3600, urgency: 'low' as const }
     : { TTL: 24 * 3600, urgency: 'normal' as const };
   // Topic must be URL-safe base64 of at most 32 characters: a hash of the group.
   return grouped ? { ...base, topic: createHash('sha256').update(tag).digest('base64url').slice(0, 30) } : base;

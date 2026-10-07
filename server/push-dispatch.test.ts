@@ -203,7 +203,29 @@ describe('grouping and the badge number', () => {
     expect(deliveryOptions(note(u(36), ADMIN) as never)).toMatchObject({ TTL: 86400, urgency: 'high' });
     expect(deliveryOptions({ ...note(u(37), STUDENT), kind: 'signal', category: 'official_announcements' } as never)).toMatchObject({ TTL: 86400, urgency: 'normal' });
     expect(deliveryOptions({ ...note(u(38), STUDENT), kind: 'like', category: 'likes', related_conversation_id: null, related_post_id: POST } as never)).toMatchObject({ TTL: 3600, urgency: 'low' });
-    expect(deliveryOptions({ ...note(u(39), STUDENT), kind: 'signal', category: 'community_posts' } as never)).toMatchObject({ TTL: 3600, urgency: 'low' });
+    // A Students Community post is never "low": push services may hold low-urgency messages until the phone is
+    // charging or on Wi-Fi, and drop them when their hour runs out.
+    expect(deliveryOptions({ ...note(u(39), STUDENT), kind: 'signal', category: 'community_posts' } as never)).toEqual({ TTL: 86400, urgency: 'normal' });
+  });
+
+  test('a Students Community post goes out with exactly the delivery options of an Official post', async () => {
+    fake.tables.push_subscriptions.push(device(u(130), ADMIN), device(u(131), OTHER));
+    const post = { kind: 'signal', related_conversation_id: null, related_message_id: null, related_post_id: POST };
+    fake.tables.notifications.push(
+      note(u(132), ADMIN, { ...post, category: 'community_posts', title: 'Tia Sharma posted in the Students Community', body: 'long gold' }),
+      note(u(133), OTHER, { ...post, category: 'official_announcements', title: 'New official announcement: Weekly plan', body: 'x' }),
+    );
+    expect((await dispatch(u(132))).body).toMatchObject({ ok: true, attempted: 1, sent: 1 });
+    expect((await dispatch(u(133))).body).toMatchObject({ ok: true, attempted: 1, sent: 1 });
+    const [community, official] = sent;
+    expect(community.options).toEqual(official.options);
+    expect(community.options).toMatchObject({ TTL: 86400, urgency: 'normal' });
+    expect(community.options.topic).toBeUndefined();
+    expect(community.payload).toMatchObject({
+      v: 2, kind: 'signal', category: 'community_posts', title: 'The Traders Planet',
+      body: 'Tia Sharma posted in the Students Community', url: `/post?post=${POST}`, tag: `tp-${u(132)}`, count: 1,
+    });
+    expect(community.raw).not.toContain('long gold');
   });
 });
 
