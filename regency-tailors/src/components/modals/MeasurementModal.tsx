@@ -30,6 +30,7 @@ import {
 } from '../../types';
 import { sectionFields, MeasurementSection } from '../../utils/garmentMeasurements';
 import { useMeasurementEnter, measurementInputProps } from '../../utils/measurementFocus';
+import { stepMeasurementValue } from '../../utils/measurementValue';
 
 interface MeasurementModalProps {
   isOpen: boolean;
@@ -504,12 +505,8 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
     field: string,
     delta: number
   ) => {
-    const currentVal = parseFloat(String(getter[field])) || 0;
-    const nextVal = Math.max(0, currentVal + delta);
-    setter({
-      ...getter,
-      [field]: Number.isInteger(nextVal) ? nextVal.toString() : nextVal.toFixed(2).replace(/\.?0+$/, '')
-    });
+    // Keeps any letters after the number (`40 L` -> `40.25 L`); see measurementValue.ts.
+    setter({ ...getter, [field]: stepMeasurementValue(getter[field], delta) });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -575,33 +572,16 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
       fitPreference,
       postureNotes: postureNotes.trim(),
       fittingNotes: fittingNotes.trim(),
-      lastUpdated: new Date().toISOString().split('T')[0],
-      // Compatibility structures
-      jacket: selectedGarments.includes('Coat') ? {
-        chest: parseFloat(String(coat.chest)) || 40,
-        waist: parseFloat(String(coat.stomach)) || 36,
-        hip: parseFloat(String(coat.hip)) || 41,
-        shoulderWidth: parseFloat(String(coat.shoulder)) || 18.5,
-        sleeveLength: parseFloat(String(coat.sleeve)) || 25,
-        jacketLength: parseFloat(String(coat.length)) || 30,
-        crossBack: parseFloat(String(coat.xBack)) || 17.5,
-        neck: 16.5,
-        crossFront: 16,
-        armhole: 20,
-        bicep: 14.5
-      } : undefined,
-      trouser: selectedGarments.includes('Pant') ? {
-        waist: parseFloat(String(pant.waist)) || 34,
-        hip: parseFloat(String(pant.hip)) || 40.5,
-        inseam: parseFloat(String(pant.inLeg)) || 31,
-        outseam: parseFloat(String(pant.length)) || 40,
-        thigh: parseFloat(String(pant.thigh)) || 24.5,
-        bottomOpening: parseFloat(String(pant.bottom)) || 15,
-        rise: parseFloat(String(pant.body)) || 11,
-        knee: 18
-      } : undefined
+      lastUpdated: new Date().toISOString().split('T')[0]
+      // No `jacket` / `trouser` compatibility block any more. It re-derived the
+      // coat and pant through parseFloat — so `40 L` was stored as 40 — and
+      // filled every box left empty with an invented number (chest 40, waist
+      // 36, neck 16.5, knee 18). Nothing reads it ahead of the real `coat` and
+      // `pant` objects above, which hold exactly what was typed; records saved
+      // before this change keep theirs, and are still read as a fallback.
     };
 
+    onSave(record);
     onSave(record);
     onClose();
   };
@@ -630,11 +610,9 @@ export const MeasurementModal: React.FC<MeasurementModalProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5">
-          {/* Main Number Input */}
+          {/* Main measurement input — free text: 38, 40 L, 15.5 R, XL */}
           <div className="relative flex-1">
             <input
-              type="number"
-              step="0.25"
               {...measurementInputProps}
               value={val}
               onChange={(e) => setter({ ...stateObj, [field.key]: e.target.value })}

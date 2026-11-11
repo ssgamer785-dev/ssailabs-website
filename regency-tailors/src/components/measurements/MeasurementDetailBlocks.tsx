@@ -5,6 +5,7 @@ import {
   measurementDisplayValue,
   MeasurementSection
 } from '../../utils/garmentMeasurements';
+import { measurementWithUnit } from '../../utils/measurementValue';
 
 const SECTION_ICONS: Record<MeasurementSection, string> = {
   coat: '🧥',
@@ -51,7 +52,6 @@ export const MeasurementDetailBlocks: React.FC<MeasurementDetailBlocksProps> = (
   columns = 4,
   layout = 'stack'
 }) => {
-  const unitSuffix = record.unit === 'cm' ? 'cm' : '"';
   const wide = columns === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-4';
 
   return (
@@ -77,7 +77,7 @@ export const MeasurementDetailBlocks: React.FC<MeasurementDetailBlocksProps> = (
               >
                 <div className="text-[10px] text-[#8C7E6A] font-bold">{field.label}</div>
                 <div className="text-sm font-black text-[#071426]">
-                  {measurementDisplayValue(field.value)} {unitSuffix}
+                  {measurementWithUnit(measurementDisplayValue(field.value), field.value, record.unit)}
                 </div>
               </div>
             ))}

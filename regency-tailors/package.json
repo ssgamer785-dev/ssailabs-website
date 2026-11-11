@@ -24,7 +24,10 @@
     "electron:build:win": "npm run build && electron-builder --win nsis --x64",
     "electron:verify": "npm run build && electron electron/verify.cjs",
     "test:new-garments": "node e2e/new-garments.mjs",
-    "test:order-edit": "node e2e/order-edit-number.mjs"
+    "test:order-edit": "node e2e/order-edit-number.mjs",
+    "test:ipad": "node e2e/ipad-wizard.mjs",
+    "test:alphanumeric": "node e2e/alphanumeric-measurements.mjs",
+    "test:slip-dates": "node e2e/slip-item-dates.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

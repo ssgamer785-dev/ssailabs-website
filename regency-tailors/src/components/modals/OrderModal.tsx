@@ -23,6 +23,8 @@ import {
   ReceiptText
 } from 'lucide-react';
 import { peekNextOrderNumber, allocateOrderNumber } from '../../utils/orderNumbering';
+import { stepMeasurementValue } from '../../utils/measurementValue';
+import { useVisualViewportFit } from '../../utils/viewportFit';
 import { 
   Order, 
   GarmentType, 
@@ -876,14 +878,10 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     field: string,
     delta: number
   ) => {
-    setter((prev: any) => {
-      const cur = parseFloat(prev[field]) || 0;
-      const next = Math.max(0, cur + delta);
-      return {
-        ...prev,
-        [field]: Number.isInteger(next) ? next.toString() : next.toFixed(2).replace(/\.?0+$/, '')
-      };
-    });
+    // Steps the number and keeps whatever the tailor wrote after it: `40 L`
+    // becomes `40.25 L`, and `XL` is left alone. parseFloat here used to turn
+    // `40 L` into `40.25`, quietly dropping the letter.
+    setter((prev: any) => ({ ...prev, [field]: stepMeasurementValue(prev[field], delta) }));
   };
 
   const handleCloseAttempt = () => {
@@ -1123,15 +1121,28 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     }
   };
 
+  // While an on-screen keyboard is up, the overlay is sized to the part of the
+  // screen that is actually visible, so the footer sits above the keyboard.
+  // Called ahead of the early return below: a hook may not come after one.
+  const viewportFit = useVisualViewportFit(isOpen);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#F7F3EA] text-[#071426] flex flex-col h-screen w-screen overflow-hidden select-none print-app-shell">
+    // Sized by `inset-0` (via `fixed`), deliberately not `h-screen`/`w-screen`:
+    // on iPad Safari 100vh is the viewport with the browser chrome retracted,
+    // which is taller than what is on screen, so the footer — the last thing in
+    // this column — landed below the fold and Back/Continue became unreachable.
+    <div
+      data-order-wizard
+      style={viewportFit}
+      className="wizard-shell fixed inset-0 z-50 bg-[#F7F3EA] text-[#071426] flex flex-col overflow-hidden select-none print-app-shell"
+    >
       
       {/* ======================================================== */}
       {/* FULL-SCREEN TOP BAR */}
       {/* ======================================================== */}
-      <header className="shrink-0 bg-[#071426] text-white px-6 md:px-10 py-4 border-b border-[#1E2D42] flex items-center justify-between shadow-md z-20">
+      <header className="shrink-0 bg-[#071426] text-white px-4 sm:px-6 md:px-10 pt-[max(1rem,var(--safe-top))] pb-4 [@media(max-height:560px)]:pt-[max(0.5rem,var(--safe-top))] [@media(max-height:560px)]:pb-2 border-b border-[#1E2D42] flex items-center justify-between gap-3 shadow-md z-20">
         <div className="flex items-center gap-3.5">
           <div className="w-10 h-10 rounded-xl bg-[#132338] border border-[#C9A24A]/40 text-[#C9A24A] flex items-center justify-center font-bold shadow-inner">
             {isSuccessScreen ? <Check className="w-5 h-5 text-emerald-400 stroke-[3]" /> : <Scissors className="w-5 h-5" />}
@@ -1145,7 +1156,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 Order #{isSuccessScreen && createdOrderSummary ? (createdOrderSummary.orderNumber || createdOrderSummary.id) : displayOrderNumber}
               </span>
             </div>
-            <p className="text-[11px] text-[#A39682]">
+            <p className="wizard-header-sub text-[11px] text-[#A39682]">
               {isSuccessScreen ? 'Tailoring order has been successfully recorded' : 'Create a new tailoring order'}
             </p>
           </div>
@@ -1239,7 +1250,14 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       {/* ======================================================== */}
       {/* MAIN CONTENT AREA */}
       {/* ======================================================== */}
-      <main ref={modalMainRef} className="flex-1 overflow-y-auto bg-chevron-pattern overscroll-contain">
+      <main
+        ref={modalMainRef}
+        data-wizard-scroll
+        // min-h-0 lets this shrink below its content inside the flex column, so
+        // the footer below it is never pushed out of the overlay; scroll-py
+        // stops a focused field being scrolled flush against either edge.
+        className="flex-1 min-h-0 overflow-y-auto bg-chevron-pattern overscroll-contain scroll-py-4"
+      >
         <div className="max-w-6xl mx-auto px-4 py-6 md:px-8 md:py-8">
 
           {/* Error Banner */}
@@ -2217,13 +2235,19 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       {/* BOTTOM ACTION BAR */}
       {/* ======================================================== */}
       {!isSuccessScreen && (
-        <footer className="shrink-0 bg-white border-t border-[#E6E1D7] px-6 md:px-12 py-4 flex items-center justify-between shadow-lg z-20">
+        // A flex sibling of the scroll area, not an overlay on it: the footer
+        // owns its own band of the screen, so it can never sit on top of a
+        // measurement box, and the scroll area ends exactly where it begins.
+        <footer
+          data-wizard-footer
+          className="shrink-0 bg-white border-t border-[#E6E1D7] px-4 sm:px-6 md:px-12 pt-3 sm:pt-4 pb-[max(0.75rem,var(--safe-bottom))] sm:pb-[max(1rem,var(--safe-bottom))] [@media(max-height:560px)]:pt-2 [@media(max-height:560px)]:pb-[max(0.5rem,var(--safe-bottom))] flex items-center justify-between gap-3 shadow-lg z-20"
+        >
           <div>
             {currentStep > 1 ? (
               <button
                 type="button"
                 onClick={handlePrevStep}
-                className="px-5 py-3 bg-[#FAF8F5] hover:bg-[#E6E1D7] text-[#071426] font-bold text-xs md:text-sm rounded-xl border border-[#E0D8CB] transition-all flex items-center gap-2 cursor-pointer"
+                className="min-h-[44px] px-5 py-3 bg-[#FAF8F5] hover:bg-[#E6E1D7] text-[#071426] font-bold text-xs md:text-sm rounded-xl border border-[#E0D8CB] transition-all flex items-center gap-2 cursor-pointer"
               >
                 <ArrowLeft className="w-4 h-4" />
                 <span>Back</span>
@@ -2232,7 +2256,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
               <button
                 type="button"
                 onClick={handleCloseAttempt}
-                className="px-4 py-2.5 text-[#7A7060] hover:text-[#071426] font-bold text-xs transition-colors cursor-pointer"
+                className="min-h-[44px] px-5 py-3 text-[#7A7060] hover:text-[#071426] font-bold text-xs md:text-sm transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -2244,7 +2268,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
               <button
                 type="button"
                 onClick={handleNextStep}
-                className="px-8 py-3.5 bg-[#071426] hover:bg-[#0E2038] text-[#D4AF5A] font-extrabold text-xs md:text-sm rounded-2xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                className="min-h-[44px] px-8 py-3.5 bg-[#071426] hover:bg-[#0E2038] text-[#D4AF5A] font-extrabold text-xs md:text-sm rounded-2xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
               >
                 <span>Continue</span>
                 <ArrowRight className="w-4 h-4 text-[#C9A24A]" />
@@ -2254,7 +2278,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 type="button"
                 onClick={handleFinalPlaceOrder}
                 disabled={isSubmitting}
-                className="px-10 py-4 bg-[#C9A24A] hover:bg-[#B8913B] text-[#071426] font-black text-sm md:text-base rounded-2xl shadow-lg transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                className="min-h-[44px] px-6 sm:px-10 py-3.5 sm:py-4 bg-[#C9A24A] hover:bg-[#B8913B] text-[#071426] font-black text-sm md:text-base rounded-2xl shadow-lg transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 <Check className="w-5 h-5 stroke-[3]" />
                 <span>{isSubmitting ? 'Placing Order...' : 'PLACE ORDER'}</span>

@@ -4,6 +4,7 @@ import { ProductionSlipProductCard } from './ProductionSlipProductCard';
 import { ProductionSlipPageData } from '../../utils/productionSlipPagination';
 import { SlipDensity, slipDensityTokens } from '../../utils/productionSlipLayout';
 import { summariseOrderItems } from '../../utils/productionSlipSummary';
+import { itemDeliveryDate } from '../../utils/itemDelivery';
 import { SHOWROOM_ADDRESS_LINE1, SHOWROOM_ADDRESS_LINE2 } from '../bills/PrintableRegencyBill';
 
 interface ProductionSlipPageProps {
@@ -61,6 +62,7 @@ export const ProductionSlipPage: React.FC<ProductionSlipPageProps> = ({
   const fitPreference = (snapshot.fitPreference || '').trim();
   const fittingNotes = (snapshot.fittingNotes || order.fittingNotes || '').trim();
   const showroomAddress = `${SHOWROOM_ADDRESS_LINE1} ${SHOWROOM_ADDRESS_LINE2}`;
+  const orderDeliveryDate = itemDeliveryDate(order);
   const tokens = slipDensityTokens(density);
   // Counted from the whole order, not this sheet's slice, and printed once at
   // the very end — it is the tally the workshop checks the finished pile
@@ -137,7 +139,14 @@ export const ProductionSlipPage: React.FC<ProductionSlipPageProps> = ({
               {meta('Customer', order.customerName)}
               {meta('Mobile', order.customerPhone)}
               {meta('Order Date', order.orderDate)}
-              {meta('Delivery Date', `${order.deliveryDate}${isOverdue ? '  (OVERDUE)' : ''}`, isOverdue)}
+              {/* From the same helper as each garment's date, so an old order with
+                  no date prints a dash here too, not the word "undefined" — and a
+                  dateless order is never labelled overdue. */}
+              {meta(
+                'Delivery Date',
+                orderDeliveryDate ? `${orderDeliveryDate}${isOverdue ? '  (OVERDUE)' : ''}` : '',
+                isOverdue && Boolean(orderDeliveryDate)
+              )}
               {meta('Unit', `${snapshot.unit || 'Inches'}${fitPreference ? ` · ${fitPreference}` : ''}`)}
             </div>
           </div>
@@ -171,6 +180,7 @@ export const ProductionSlipPage: React.FC<ProductionSlipPageProps> = ({
               item={item}
               orderNumber={orderNum}
               snapshot={snapshot}
+              deliveryDate={itemDeliveryDate(order, item)}
               tokens={tokens}
             />
           ))}

@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { Order, ProductionStatus } from '../../types';
 import { ProductionSlipProductCard } from '../production/ProductionSlipProductCard';
+import { itemDeliveryDate } from '../../utils/itemDelivery';
 
 interface ProductionSlipDetailModalProps {
   isOpen: boolean;
@@ -53,7 +54,10 @@ const SlipDossier: React.FC<Omit<ProductionSlipDetailModalProps, 'isOpen'> & { o
   const items = order.items || [];
 
   const todayStr = new Date().toISOString().split('T')[0];
-  const isOverdue = order.deliveryDate < todayStr && status !== 'Completed';
+  // An old order may carry no delivery date; it is shown as a dash and is never
+  // "overdue" (an empty string sorts before every date, so it would be).
+  const orderDelivery = itemDeliveryDate(order);
+  const isOverdue = Boolean(orderDelivery) && order.deliveryDate < todayStr && status !== 'Completed';
 
   /**
    * "Notes Saved" now means the database said so.
@@ -162,7 +166,7 @@ const SlipDossier: React.FC<Omit<ProductionSlipDetailModalProps, 'isOpen'> & { o
               <span className="text-[10px] font-bold text-[#8C7E6A] uppercase block">Delivery Date</span>
               <div className="flex items-center gap-1 mt-0.5">
                 <span className={`font-extrabold text-xs ${isOverdue ? 'text-red-600' : 'text-[#071426]'}`}>
-                  {order.deliveryDate}
+                  {orderDelivery || '—'}
                 </span>
                 {isOverdue && (
                   <span className="px-1.5 py-0.2 bg-red-100 text-red-700 font-bold text-[9px] rounded">
@@ -182,6 +186,7 @@ const SlipDossier: React.FC<Omit<ProductionSlipDetailModalProps, 'isOpen'> & { o
                 item={item}
                 orderNumber={orderNum}
                 snapshot={snapshot}
+                deliveryDate={itemDeliveryDate(order, item)}
               />
             ))}
           </div>

@@ -14,6 +14,12 @@ interface ProductionSlipProductCardProps {
    */
   orderNumber: string;
   snapshot: Partial<MeasurementRecord>;
+  /**
+   * This garment's delivery date, printed beside its name. `undefined` means
+   * the caller has none to offer and nothing is printed; an empty string means
+   * the order carries no date, and a dash is printed rather than a blank.
+   */
+  deliveryDate?: string;
   /** Resolved by the sheet's measured auto-fit; defaults to the floor tier. */
   tokens?: SlipDensityTokens;
 }
@@ -49,6 +55,7 @@ export const ProductionSlipProductCard: React.FC<ProductionSlipProductCardProps>
   item,
   orderNumber,
   snapshot,
+  deliveryDate,
   tokens = slipDensityTokens('dense')
 }) => {
   // Shared with the customer bill so both documents read the same rules.
@@ -72,12 +79,27 @@ export const ProductionSlipProductCard: React.FC<ProductionSlipProductCardProps>
           className="flex-1 flex items-center justify-between gap-2 px-2 min-w-0"
           style={{ paddingTop: tokens.headPadY, paddingBottom: tokens.headPadY }}
         >
-          <span
-            className="font-black leading-tight uppercase tracking-wide truncate"
-            style={{ fontSize: `${tokens.headPx}px` }}
-          >
-            {item.garmentType || '—'}
-          </span>
+          {/* Name and delivery date share the left of the bar. The name is the
+              one that gives way (it truncates) so the date, which the cutter
+              plans the day around, can never be the thing that is clipped.
+              Same row, same line: the bar costs the sheet no extra height. */}
+          <div className="flex items-baseline gap-2 min-w-0">
+            <span
+              className="font-black leading-tight uppercase tracking-wide truncate"
+              style={{ fontSize: `${tokens.headPx}px` }}
+            >
+              {item.garmentType || '—'}
+            </span>
+            {deliveryDate !== undefined && (
+              <span
+                className="production-item-delivery font-bold leading-tight uppercase whitespace-nowrap shrink-0"
+                style={{ fontSize: `${tokens.qtyPx}px` }}
+                data-item-delivery={deliveryDate || ''}
+              >
+                Delivery <span className="font-black">{deliveryDate || '—'}</span>
+              </span>
+            )}
+          </div>
           <span
             className="font-black leading-tight uppercase shrink-0"
             style={{ fontSize: `${tokens.qtyPx}px` }}

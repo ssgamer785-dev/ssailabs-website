@@ -334,9 +334,15 @@ export function toMeasurementRecord(row: MeasurementRow, customer?: Customer | n
     if (category) byCategory[category] = v.data || {};
   });
 
-  const selected = MEASUREMENT_CATEGORIES.filter(c => byCategory[c]).map(
-    c => CATEGORY_LABEL[c] || c.charAt(0).toUpperCase() + c.slice(1)
-  );
+  const held = MEASUREMENT_CATEGORIES.filter(c => byCategory[c]);
+  const selected = held.map(c => CATEGORY_LABEL[c] || c.charAt(0).toUpperCase() + c.slice(1));
+
+  // Every section the customer has, by the record's own keys. This used to name
+  // coat, pant, shirt, kurta and pajama and return only those, while the
+  // `selected` list above was already built from all eight: a waistcoat,
+  // jacket or sherwani saved to the database came back listed as measured but
+  // with nothing in it, so what the tailor entered was gone on the next load.
+  const sections = Object.fromEntries(held.map(c => [c, byCategory[c]])) as Partial<MeasurementRecord>;
 
   return {
     id: row.id,
@@ -351,11 +357,7 @@ export function toMeasurementRecord(row: MeasurementRow, customer?: Customer | n
     fittingNotes: str(row.fitting_notes) || undefined,
     garmentRemarks: row.garment_remarks || undefined,
     lastUpdated: dateOnly(row.last_updated),
-    coat: byCategory.coat as MeasurementRecord['coat'],
-    pant: byCategory.pant as MeasurementRecord['pant'],
-    shirt: byCategory.shirt as MeasurementRecord['shirt'],
-    kurta: byCategory.kurta as MeasurementRecord['kurta'],
-    pajama: byCategory.pajama as MeasurementRecord['pajama']
+    ...sections
   };
 }
 

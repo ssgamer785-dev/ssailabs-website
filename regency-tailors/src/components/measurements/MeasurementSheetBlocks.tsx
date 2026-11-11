@@ -5,6 +5,7 @@ import {
   measurementDisplayValue,
   MeasurementSection
 } from '../../utils/garmentMeasurements';
+import { measurementWithUnit } from '../../utils/measurementValue';
 
 /** Decoration for the section headers. The fields themselves come from the
  *  canonical definitions, so the sheet cannot drift from the workshop slip. */
@@ -39,8 +40,6 @@ interface MeasurementSheetBlocksProps {
  * neither.
  */
 export const MeasurementSheetBlocks: React.FC<MeasurementSheetBlocksProps> = ({ record }) => {
-  const unitSuffix = record.unit === 'cm' ? 'cm' : '"';
-
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {recordMeasurementBlocks(record).map(block => (
@@ -66,7 +65,7 @@ export const MeasurementSheetBlocks: React.FC<MeasurementSheetBlocksProps> = ({ 
                   {idx + 1}. {field.label}
                 </div>
                 <div className="text-sm font-extrabold text-[#071426]">
-                  {measurementDisplayValue(field.value)} {unitSuffix}
+                  {measurementWithUnit(measurementDisplayValue(field.value), field.value, record.unit)}
                 </div>
               </div>
             ))}

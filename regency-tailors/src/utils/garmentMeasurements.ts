@@ -339,10 +339,15 @@ export function garmentRemarkFor(item: OrderItem, snapshot: Partial<MeasurementR
   const lower = type.toLowerCase();
   const remarks = snapshot?.garmentRemarks;
 
+  // "Waistcoat" contains "coat", so a bare substring test hands a waistcoat the
+  // coat's remark whenever it has none of its own — "surgeon cuffs, peak lapel"
+  // printed on a waistcoat's cutting sheet. The waistcoat is its own garment.
+  const isWaistcoat = /waist\s*-?\s*coat/.test(lower);
+
   const candidate =
     item?.remarks ||
     remarks?.[type] ||
-    (lower.includes('coat') ? remarks?.['Coat'] : undefined) ||
+    (lower.includes('coat') && !isWaistcoat ? remarks?.['Coat'] : undefined) ||
     (lower.includes('shirt') ? remarks?.['Shirt'] : undefined) ||
     (lower.includes('kurta') ? remarks?.['Kurta Pajama'] : undefined) ||
     '';

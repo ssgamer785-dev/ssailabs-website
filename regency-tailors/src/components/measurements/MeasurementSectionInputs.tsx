@@ -52,12 +52,11 @@ export const MeasurementSectionInputs: React.FC<MeasurementSectionInputsProps> =
         <div className="relative">
           <input
             id={`m-${section}-${f.key}`}
-            type="text"
-            inputMode="decimal"
             disabled={disabled}
-            // Marks this as part of the Enter run. Without it the handler
-            // leaves the field alone, which is what keeps notes and customer
-            // boxes behaving normally inside the same form.
+            // Marks this as part of the Enter run, and makes it free text
+            // (no numeric keypad, no autocorrect). Without the marker the
+            // handler leaves the field alone, which is what keeps notes and
+            // customer boxes behaving normally inside the same form.
             {...measurementInputProps}
             value={(values[f.key] as string | number | undefined) ?? ''}
             onChange={e => onChange(f.key, e.target.value)}

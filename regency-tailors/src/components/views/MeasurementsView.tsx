@@ -25,6 +25,17 @@ import { MeasurementRecord, Customer } from '../../types';
 import { MeasurementSheetBlocks } from '../measurements/MeasurementSheetBlocks';
 import { MeasurementSection } from '../../utils/garmentMeasurements';
 import { downloadElementAsPdf } from '../../utils/documentExport';
+import { hasLetters } from '../../utils/measurementValue';
+
+/**
+ * One value in the compact preview, as it has always printed: a number carries
+ * an inch mark, an unrecorded value is a dash. A value with letters in it
+ * (`40 L`, `XL`, `38 Tight`) is shown exactly as written — `XL"` is not inches.
+ */
+const preview = (value: unknown): string => {
+  const shown = value !== undefined && value !== null && value !== '' ? String(value) : '—';
+  return hasLetters(shown) ? shown : `${shown}"`;
+};
 
 interface MeasurementsViewProps {
   measurements: MeasurementRecord[];
@@ -316,7 +327,7 @@ export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
                             <span>Coat (L / C / S)</span>
                           </div>
                           <div className="font-extrabold text-[#071426]">
-                            {record.coat?.length || record.jacket?.jacketLength || '—'}" / {record.coat?.chest || record.jacket?.chest || '—'}" / {record.coat?.stomach || record.jacket?.waist || '—'}"
+                            {preview(record.coat?.length || record.jacket?.jacketLength)} / {preview(record.coat?.chest || record.jacket?.chest)} / {preview(record.coat?.stomach || record.jacket?.waist)}
                           </div>
                         </div>
                       )}
@@ -327,7 +338,7 @@ export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
                             <span>Pant (L / W / Thigh)</span>
                           </div>
                           <div className="font-extrabold text-[#071426]">
-                            {record.pant?.length || record.trouser?.outseam || '—'}" / {record.pant?.waist || record.trouser?.waist || '—'}" / {record.pant?.thigh || record.trouser?.thigh || '—'}"
+                            {preview(record.pant?.length || record.trouser?.outseam)} / {preview(record.pant?.waist || record.trouser?.waist)} / {preview(record.pant?.thigh || record.trouser?.thigh)}
                           </div>
                         </div>
                       )}
@@ -338,7 +349,7 @@ export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
                             Shirt (L / C / Collar)
                           </div>
                           <div className="font-extrabold text-[#071426]">
-                            {record.shirt.length || '—'}" / {record.shirt.chest || '—'}" / {record.shirt.collar || '—'}"
+                            {preview(record.shirt.length)} / {preview(record.shirt.chest)} / {preview(record.shirt.collar)}
                           </div>
                         </div>
                       )}
@@ -349,7 +360,7 @@ export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
                             Kurta (L / C / Slv)
                           </div>
                           <div className="font-extrabold text-[#071426]">
-                            {record.kurta.length || '—'}" / {record.kurta.chest || '—'}" / {record.kurta.sleeve || '—'}"
+                            {preview(record.kurta.length)} / {preview(record.kurta.chest)} / {preview(record.kurta.sleeve)}
                           </div>
                         </div>
                       )}
@@ -360,7 +371,40 @@ export const MeasurementsView: React.FC<MeasurementsViewProps> = ({
                             Pajama (L / W / Bottom)
                           </div>
                           <div className="font-extrabold text-[#071426]">
-                            {record.pajama.length || '—'}" / {record.pajama.waist || '—'}" / {record.pajama.bottom || '—'}"
+                            {preview(record.pajama.length)} / {preview(record.pajama.waist)} / {preview(record.pajama.bottom)}
+                          </div>
+                        </div>
+                      )}
+
+                      {record.waistcoat && (
+                        <div>
+                          <div className="text-[10px] font-bold text-[#8C7E6A] uppercase">
+                            Waistcoat (L / C / S)
+                          </div>
+                          <div className="font-extrabold text-[#071426]">
+                            {preview(record.waistcoat.length)} / {preview(record.waistcoat.chest)} / {preview(record.waistcoat.stomach)}
+                          </div>
+                        </div>
+                      )}
+
+                      {record.jacketGarment && (
+                        <div>
+                          <div className="text-[10px] font-bold text-[#8C7E6A] uppercase">
+                            Jacket (L / C / Collar)
+                          </div>
+                          <div className="font-extrabold text-[#071426]">
+                            {preview(record.jacketGarment.length)} / {preview(record.jacketGarment.chest)} / {preview(record.jacketGarment.collar)}
+                          </div>
+                        </div>
+                      )}
+
+                      {record.sherwani && (
+                        <div>
+                          <div className="text-[10px] font-bold text-[#8C7E6A] uppercase">
+                            Sherwani (L / C / Slv)
+                          </div>
+                          <div className="font-extrabold text-[#071426]">
+                            {preview(record.sherwani.length)} / {preview(record.sherwani.chest)} / {preview(record.sherwani.sleeve)}
                           </div>
                         </div>
                       )}

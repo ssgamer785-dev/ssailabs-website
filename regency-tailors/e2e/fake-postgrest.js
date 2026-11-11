@@ -240,7 +240,24 @@
     if (method === 'POST') {
       const list = Array.isArray(body) ? body : [body];
       const made = [];
+      // `.upsert(rows, { onConflict })` arrives as `?on_conflict=a,b`. PostgREST
+      // updates the row that already holds that key instead of inserting a
+      // second one — which is what keeps `measurement_values` at one row per
+      // (measurement, garment) however many times an order is edited.
+      const conflictCols = (u.searchParams.get('on_conflict') || '').split(',').filter(Boolean);
       for (const raw of list) {
+        if (conflictCols.length) {
+          const held = (db[table] || []).find(r => conflictCols.every(c => String(r[c]) === String(raw[c])));
+          if (held) {
+            const { id: _ignored, ...rest } = raw;
+            const next = { ...held, ...rest };
+            const badUpsert = checkUuids(table, next);
+            if (badUpsert) return err('22P02', badUpsert);
+            Object.assign(held, next);
+            made.push(held);
+            continue;
+          }
+        }
         const row = defaults(table, raw);
         const bad = checkUuids(table, row);
         if (bad) return err('22P02', bad);

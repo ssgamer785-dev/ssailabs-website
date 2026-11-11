@@ -28,8 +28,31 @@ import React, { useCallback } from 'react';
 /** Marks an input as part of the measurement run. */
 export const MEASUREMENT_INPUT_ATTR = 'data-measurement-input';
 
-/** Put this on every measurement input: `{...measurementInputProps}`. */
-export const measurementInputProps = { [MEASUREMENT_INPUT_ATTR]: 'true' } as const;
+/**
+ * Put this on every measurement input: `{...measurementInputProps}`.
+ *
+ * It marks the input as part of the Enter run, and it makes the input free
+ * text. A measurement is whatever the tailor wrote on the tape card — `38`,
+ * `40 L`, `15.5 R`, `XL` — so these inputs are never `type="number"` (a browser
+ * refuses letters there and silently empties the box on a stray character) and
+ * never ask for a numeric keypad. On an iPad `inputMode="decimal"` shows digits
+ * only, which would make a letter impossible to type however permissive the
+ * handler behind it was.
+ *
+ * The rest keep iOS from "helping": autocorrect turns `XL` into a word,
+ * auto-capitalise turns `tight` into `Tight`, and either changes what was
+ * typed. The stored value is exactly what the tailor entered.
+ */
+export const measurementInputProps = {
+  [MEASUREMENT_INPUT_ATTR]: 'true',
+  type: 'text',
+  inputMode: 'text',
+  autoComplete: 'off',
+  autoCorrect: 'off',
+  autoCapitalize: 'off',
+  spellCheck: false,
+  enterKeyHint: 'next'
+} as const;
 
 const SELECTOR = `input[${MEASUREMENT_INPUT_ATTR}]`;
 

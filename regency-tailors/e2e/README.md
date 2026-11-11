@@ -39,10 +39,20 @@ VITE_SUPABASE_ANON_KEY=sb_publishable_TESTKEY_0000000000000000 npx vite --port=3
 npm run test:consistency
 npm run test:integrity
 npm run test:order-edit
+npm run test:alphanumeric
 
 # or against the built bundle
 npx vite build --outDir dist-e2e && npx vite preview --outDir dist-e2e --port 4180
 E2E_BASE_URL=http://localhost:4180/ npm run test:consistency
+```
+
+The responsive-wizard and production-slip-date suites run against the ordinary
+browser-storage build (`VITE_PERSISTENCE=local npx vite --port=3000`), and the
+slip suite also needs `pdftotext` (poppler) to read the PDF it prints:
+
+```bash
+npm run test:ipad
+npm run test:slip-dates
 ```
 
 Set `CHROME_PATH` if Playwright's bundled Chromium is not where the harness
@@ -72,6 +82,9 @@ CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e
 | Data consistency (`consistency.mjs`) | One journey — new customer, four garments, all 41 measurements, PLACE ORDER — then every screen is compared against the rows the database actually holds: ledger, profile, orders, dossier, measurements, production slip, customer bill, and again after a hard refresh |
 | Trash permanent delete (`integrity.mjs`) | The red bin button removes the whole tree the record owns and nothing else: a customer takes their orders, garment lines, payments, fittings, measurements and measurement values with them; an order takes its own children but never its customer; a refused purge deletes nothing and says so; and none of it comes back on a refresh |
 | Order edit / number immutability (`order-edit-number.mjs`) | In Supabase mode, against the real repository: the first order is #1; editing it three times leaves it #1, one row, the same uuid, three UPDATEs and no second INSERT; it survives a reload as #1; the next new order is #2, not #4; editing #1 again leaves #1 and #2 alone; the one after that is #3; the client never sends an order number; and an UPDATE that tries to change `order_number` is refused by the database |
+| New Order on tablets (`ipad-wizard.mjs`) | The wizard at 24 sizes — every iPad portrait and landscape, with and without Safari's bars, Android tablet, laptops, desktop, a short window — through all five steps with every garment selected: Back/Continue (Cancel on step 1) are fully on screen, uncovered, at least 44px tall, and actually advance when tapped at their coordinates; the scroll area ends exactly where the footer begins; no measurement box is ever under the footer or header; nothing scrolls sideways. Also: a model of Safari's `100vh` overshoot (the original defect fails it), a stub on-screen keyboard (footer rides above it; the focused box is scrolled into view), safe-area insets, 16px touch inputs so iOS does not zoom the page away from the footer, and free-text measurement boxes |
+| Alphanumeric measurements (`alphanumeric-measurements.mjs`) | In Supabase mode, through the real repository: letters, numbers and combinations typed into all 60 fields of all eight garments are stored in `orders.measurements_snapshot` and `measurement_values` exactly as typed (strings stay strings); an edit after a reload shows them unchanged and saves them unchanged; the ±¼ buttons keep letters (`40 L` → `40.25 L`) and leave `XL` and `15 1/2` alone; an old all-numeric order keeps its numbers value for value; Order Details, Customer Profile, the measurement sheet, the Measurements list and the Production Slip show every value with no inch mark after letters; the Customer Bill carries none; Enter walks letter-filled boxes and never places the order; the Measurement Entry screen takes letters |
+| Slip delivery dates (`slip-item-dates.mjs`) | Every garment on the production slip shows `Delivery <date>` beside its name — on a nine-garment, two-sheet order, on screen and in the printed PDF (text extracted with `pdftotext`): one line, never clipped, black only, and the garment bar exactly as tall as without it; editing the order's date moves every garment; an old order with an empty, missing or null date prints dashes (never `undefined`) and is not labelled overdue; a waistcoat does not print the coat's remark |
 | Data integrity (`integrity.mjs`) | The edges: a customer edit reaching every screen, an open dossier showing the status the database now holds, a refused write never reported as saved, a returning phone number not opening a second ledger row, a refused order never announced as placed, delete → trash → restore returning the same logical row, rapid and double clicks not duplicating an order, the client portal's blanks and zeroes, the backup file's contents, and sign out → sign in |
 
 ## The database suites
