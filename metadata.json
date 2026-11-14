@@ -1,6 +1,6 @@
 {
-  "name": "Dark Portfolio Landing",
-  "description": "A single-page dark portfolio landing page using React, GSAP, and Framer Motion.",
+  "name": "The Traders Planet App",
+  "description": "A trading education & signals community mobile app: splash, login, home dashboard, official/students community, risk calculator, market news, chat with admin, profile, and notifications.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }
