@@ -15,7 +15,7 @@ import { MediaActions } from '../media/MediaActions';
 import { ImageViewer } from '../media/ImageViewer';
 import { DocumentViewer } from '../media/DocumentViewer';
 import { linkifiedText } from '../ui/LinkifiedText';
-import { ReplyButton, ReplyQuote, SwipeReplyIcon, useSwipeToReply, type QuoteInfo } from './ReplyParts';
+import { ReplyButton, ReplyQuote, SwipeReplyIcon, useSwipeToReply, type QuoteInfo, type ReplyRequest } from './ReplyParts';
 
 /** Static waveform, seeded off the message id so a clip always looks the same. */
 function Wave({ bars, color, height, gap, seed, progress = 0 }: {
@@ -174,8 +174,8 @@ export function MessageBubble({ message, out, incomingIsAdmin, incomingName, inc
   quote?: QuoteInfo | null;
   onRetry: () => void;
   onDelete: () => Promise<void>;
-  /** Makes this message the reply target (swipe right, or the Reply button). */
-  onReply?: () => void;
+  /** Makes this message the reply target: 'select' as a swipe reaches its threshold, 'compose' to also open the keyboard. */
+  onReply?: (request: ReplyRequest) => void;
   /** Goes to a quoted message. */
   onJump?: (id: string) => void;
 }) {
@@ -197,7 +197,7 @@ export function MessageBubble({ message, out, incomingIsAdmin, incomingName, inc
 
   // A message can be answered once it exists on the server and still shows something.
   const canReply = !!onReply && message.status === 'sent' && !deleted && message.uploadStatus !== 'pending';
-  const swipe = useSwipeToReply({ enabled: canReply, onReply: () => onReply?.(), onStart: cancelPress });
+  const swipe = useSwipeToReply({ enabled: canReply, onReply: request => onReply?.(request), onStart: cancelPress });
 
   const body = deleted
     ? <TextBubble message={message} out={out} onRetry={onRetry} />
@@ -213,24 +213,21 @@ export function MessageBubble({ message, out, incomingIsAdmin, incomingName, inc
 
   return (
     <div
+      ref={swipe.rowRef}
       id={`message-${message.id}`}
       data-testid="message-row"
       className={`msg-row${canReply ? ' msg-swipe' : ''}${flash ? ' msg-jump-flash' : ''}`}
       style={{ position: 'relative', ...(highlighted ? css('outline:2px solid var(--accent);border-radius:12px') : {}) }}
-      onPointerDown={event => { swipe.handlers.onPointerDown(event); startPress(); }}
-      onPointerMove={swipe.handlers.onPointerMove}
-      onPointerUp={event => { cancelPress(); swipe.handlers.onPointerUp(event); }}
-      onPointerCancel={event => { cancelPress(); swipe.handlers.onPointerCancel(event); }}
+      onPointerDown={startPress}
+      onPointerUp={cancelPress}
+      onPointerCancel={cancelPress}
       onPointerLeave={cancelPress}
       onContextMenu={e => { if (canDelete) { e.preventDefault(); setConfirming(true); } }}
     >
-      <SwipeReplyIcon offset={swipe.offset} armed={swipe.armed} />
-      <div style={{
-        ...(out ? css('display:flex;justify-content:flex-end;align-items:flex-end;gap:6px') : css('display:flex;align-items:flex-end;gap:9px')),
-        transform: swipe.offset ? `translateX(${swipe.offset}px)` : undefined,
-        transition: swipe.dragging ? 'none' : 'transform 180ms ease',
-      }}>
-      {out && canReply && <ReplyButton onReply={() => onReply?.()} />}
+      <SwipeReplyIcon ref={swipe.iconRef} />
+      {/* Moved by the swipe (useSwipeToReply writes its transform): no transform or transition in this style. */}
+      <div ref={swipe.moveRef} style={out ? css('display:flex;justify-content:flex-end;align-items:flex-end;gap:6px') : css('display:flex;align-items:flex-end;gap:9px')}>
+      {out && canReply && <ReplyButton onReply={() => onReply?.('compose')} />}
       {!out && (incomingIsAdmin
         ? <div style={{...AVATAR,background:'var(--ink-chip)'}}><img src={logo} alt="Admin" style={css('width:24px;height:24px;object-fit:contain')} /></div>
         : <Avatar name={incomingName} avatarKey={incomingAvatarKey} size={30} fontSize={12} />)}
@@ -251,7 +248,7 @@ export function MessageBubble({ message, out, incomingIsAdmin, incomingName, inc
         )}
         {actionError && <span role="alert" style={css('max-width:210px;font-size:10.5px;color:var(--danger-ink);text-align:right')}>{actionError}</span>}
       </div>
-      {!out && canReply && <ReplyButton onReply={() => onReply?.()} />}
+      {!out && canReply && <ReplyButton onReply={() => onReply?.('compose')} />}
       </div>
     </div>
   );

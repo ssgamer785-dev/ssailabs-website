@@ -9,7 +9,7 @@ import { MediaCarousel, type CarouselItem } from '../media/MediaCarousel';
 import { MetaRow } from './bubble-parts';
 import { Avatar } from '../ui/Avatar';
 import logo from '../../assets/traders-planet-mark.png';
-import { ReplyButton, ReplyQuote, SwipeReplyIcon, useSwipeToReply, type QuoteInfo } from './ReplyParts';
+import { ReplyButton, ReplyQuote, SwipeReplyIcon, useSwipeToReply, type QuoteInfo, type ReplyRequest } from './ReplyParts';
 
 function AlbumTile({ message, more, onOpen, onRetry, onCancel, out, label }: {
   message: ChatMessage; more: number; onOpen: () => void; onRetry: () => void; onCancel: () => void; out: boolean; label: string;
@@ -85,15 +85,15 @@ export function AlbumBubble({ messages, out, incomingIsAdmin, incomingName, inco
   onRetry: (clientId: string) => void;
   onCancel: (clientId: string) => void;
   onDeleteAll: () => Promise<void>;
-  /** Makes the album (its first item) the reply target. */
-  onReply?: () => void;
+  /** Makes the album (its first item) the reply target: 'select' as a swipe reaches its threshold, 'compose' to also open the keyboard. */
+  onReply?: (request: ReplyRequest) => void;
   onJump?: (id: string) => void;
 }) {
   const [viewerAt, setViewerAt] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const canReply = !!onReply && messages.every(m => m.status === 'sent' && !m.deletedAt && m.uploadStatus !== 'pending');
-  const swipe = useSwipeToReply({ enabled: canReply, onReply: () => onReply?.() });
+  const swipe = useSwipeToReply({ enabled: canReply, onReply: request => onReply?.(request) });
   const layout = mosaicLayout(messages.length)!;
   const last = messages[messages.length - 1];
   const viewable: CarouselItem[] = messages.filter(m => m.storageKey && !m.mediaPurged && m.status === 'sent')
@@ -101,14 +101,11 @@ export function AlbumBubble({ messages, out, incomingIsAdmin, incomingName, inco
   const kindLabel = messages.every(m => m.kind === 'image') ? 'photos' : messages.every(m => m.kind === 'video') ? 'videos' : 'photos and videos';
 
   return (
-    <div className={`msg-row${canReply ? ' msg-swipe' : ''}${flash ? ' msg-jump-flash' : ''}`} style={{ position: 'relative' }} {...swipe.handlers}>
-      <SwipeReplyIcon offset={swipe.offset} armed={swipe.armed} />
-      <div style={{
-        ...(out ? css('display:flex;justify-content:flex-end;align-items:flex-end;gap:6px') : css('display:flex;align-items:flex-end;gap:9px')),
-        transform: swipe.offset ? `translateX(${swipe.offset}px)` : undefined,
-        transition: swipe.dragging ? 'none' : 'transform 180ms ease',
-      }}>
-      {out && canReply && <ReplyButton onReply={() => onReply?.()} />}
+    <div ref={swipe.rowRef} className={`msg-row${canReply ? ' msg-swipe' : ''}${flash ? ' msg-jump-flash' : ''}`} style={{ position: 'relative' }}>
+      <SwipeReplyIcon ref={swipe.iconRef} />
+      {/* Moved by the swipe (useSwipeToReply writes its transform): no transform or transition in this style. */}
+      <div ref={swipe.moveRef} style={out ? css('display:flex;justify-content:flex-end;align-items:flex-end;gap:6px') : css('display:flex;align-items:flex-end;gap:9px')}>
+      {out && canReply && <ReplyButton onReply={() => onReply?.('compose')} />}
       {!out && (incomingIsAdmin
         ? <div style={css('width:30px;height:30px;border-radius:50%;background:var(--ink-chip);display:flex;align-items:center;justify-content:center;flex:none')}><img src={logo} alt="Admin" style={css('width:24px;height:24px;object-fit:contain')} /></div>
         : <Avatar name={incomingName} avatarKey={incomingAvatarKey} size={30} fontSize={12} />)}
@@ -146,7 +143,7 @@ export function AlbumBubble({ messages, out, incomingIsAdmin, incomingName, inco
           </div>
         )}
       </div>
-      {!out && canReply && <ReplyButton onReply={() => onReply?.()} />}
+      {!out && canReply && <ReplyButton onReply={() => onReply?.('compose')} />}
       </div>
       {viewerAt !== null && viewable.length > 0 && (
         <MediaCarousel items={viewable} start={viewerAt} getUrl={getMediaUrl} onClose={() => setViewerAt(null)} />

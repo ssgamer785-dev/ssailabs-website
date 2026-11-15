@@ -33,14 +33,21 @@ describe('reading a swipe', () => {
   it('waits until the finger has really moved', () => {
     expect(swipeIntent(3, 2)).toBe('undecided');
     expect(swipeIntent(-5, 6)).toBe('undecided');
+    // A thumb's first pixels wobble: not judged yet (this used to be thrown away as a scroll).
+    expect(swipeIntent(9, 7)).toBe('undecided');
   });
   it('a clear rightward pull is a reply', () => {
     expect(swipeIntent(20, 4)).toBe('reply');
     expect(swipeIntent(40, 25)).toBe('reply');
   });
+  it('a thumb swipe that starts on a slight arc is still a reply', () => {
+    expect(swipeIntent(13, 9)).toBe('reply');
+    expect(swipeIntent(12, -10)).toBe('reply');
+  });
   it('scrolling, a diagonal and a leftward swipe are left to the page', () => {
     expect(swipeIntent(4, 30)).toBe('ignore');
     expect(swipeIntent(20, 20)).toBe('ignore');
+    expect(swipeIntent(11, 11)).toBe('ignore');
     expect(swipeIntent(-30, 2)).toBe('ignore');
   });
   it('follows the finger, then resists, and never moves left', () => {

@@ -179,12 +179,22 @@ export function AdminChatScreen() {
       canJump: !(target.deletedAt && target.senderId !== user?.id),
     };
   };
-  const startReply = (message: ChatMessage) => {
+  /**
+   * Makes a message the reply target. A swipe calls this twice: as it crosses its threshold
+   * (focus false: the quote appears straight away) and as the finger lifts (focus true). The
+   * focus is synchronous on purpose: iOS only opens the keyboard from inside the touch or click.
+   */
+  const startReply = (message: ChatMessage, focus = true) => {
     if (!chat.repliesAvailable || !chatReady) return;
     setReplyTo(message);
-    window.requestAnimationFrame(() => msgInput.current?.focus());
+    if (focus) msgInput.current?.focus();
   };
   const replyId = replyTo?.id ?? null;
+  // The reply bar takes room from the thread: if the newest message was in view, keep it in view.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (replyId && el && atBottom.current) el.scrollTop = el.scrollHeight;
+  }, [replyId]);
   // Escape cancels a reply wherever the focus is (after a swipe or the Reply button, it may not be in the box yet).
   useEffect(() => {
     if (!replyTo) return;
@@ -377,7 +387,7 @@ export function AdminChatScreen() {
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        style={css('flex:1;min-height:0;padding:16px 18px 0;display:flex;flex-direction:column;gap:14px;overflow-y:auto;background:var(--surface-2);overscroll-behavior:contain;-webkit-overflow-scrolling:touch')}
+        style={css('flex:1;min-height:0;padding:16px 18px 0;display:flex;flex-direction:column;gap:14px;overflow-y:auto;overflow-x:hidden;background:var(--surface-2);overscroll-behavior:contain;-webkit-overflow-scrolling:touch')}
       >
         {loadingOlder && (
           <div style={css('flex:none;text-align:center;font-size:11px;color:var(--text-faint);padding:2px 0')}>Loading earlier messages…</div>
@@ -404,7 +414,7 @@ export function AdminChatScreen() {
               messages={entry.messages}
               quote={quoteFor(entry.messages[0])}
               flash={entry.messages.some(m => m.id === flashId)}
-              onReply={chat.repliesAvailable ? () => startReply(entry.messages[0]) : undefined}
+              onReply={chat.repliesAvailable ? request => startReply(entry.messages[0], request === 'compose') : undefined}
               onJump={setJumpTo}
               out={entry.messages[0].senderId === user?.id}
               incomingIsAdmin={!isAdmin}
@@ -420,7 +430,7 @@ export function AdminChatScreen() {
               message={entry.message}
               quote={quoteFor(entry.message)}
               flash={entry.message.id === flashId}
-              onReply={chat.repliesAvailable ? () => startReply(entry.message) : undefined}
+              onReply={chat.repliesAvailable ? request => startReply(entry.message, request === 'compose') : undefined}
               onJump={setJumpTo}
               highlighted={entry.message.id === targetMessageId}
               out={entry.message.senderId === user?.id}

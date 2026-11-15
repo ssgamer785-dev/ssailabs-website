@@ -102,6 +102,24 @@ export function CreatePostScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const formScroll = useRef<HTMLDivElement>(null);
+
+  // The on-screen keyboard shrinks the visible area (the visual viewport) without resizing the
+  // page. Browsers normally bring the field being typed in above it; if one has not, the form
+  // scrolls just far enough to. A no-op whenever the field is already visible.
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const box = formScroll.current;
+    if (!viewport || !box) return;
+    const reveal = () => {
+      const field = document.activeElement;
+      if (!(field instanceof HTMLElement) || !box.contains(field)) return;
+      const hidden = field.getBoundingClientRect().bottom - (viewport.offsetTop + viewport.height) + 16;
+      if (hidden > 0) box.scrollBy({ top: hidden });
+    };
+    viewport.addEventListener('resize', reveal);
+    return () => viewport.removeEventListener('resize', reveal);
+  }, []);
 
   // Attachments upload through one queue: a few at a time, each with its own
   // progress, retry and cancel. A finished item keeps its upload, so posting
@@ -417,6 +435,14 @@ export function CreatePostScreen() {
           {busy ? 'Posting…' : editId ? 'Save' : pollMode ? 'Create poll' : 'Post'}
         </div>
       </div>
+
+      {/* Everything under the header scrolls. The screen sits in the fixed-height app frame, which
+          clips (overflow: hidden): without this area a poll with a picture pushed its options below
+          the bottom edge where no finger could reach them, and the browser's own focus scrolling
+          could push the header off the top for good. The header stays put; the bottom padding
+          clears the iPhone home indicator. */}
+      <div ref={formScroll} data-testid="create-post-form"
+        style={css('flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scroll-padding:12px 0 24px;display:flex;flex-direction:column;padding-bottom:calc(28px + env(safe-area-inset-bottom, 0px))')}>
       <div style={css('flex:none;padding:14px 20px 0')}>
         <textarea placeholder={pollMode ? 'Ask your question…' : "What's on your mind?"} value={postText} onChange={e => setPostText(e.target.value)} style={css('width:100%;height:196px;font-size:15px;line-height:1.55')} />
       </div>
@@ -507,7 +533,7 @@ export function CreatePostScreen() {
             <div style={css('display:flex;flex-direction:column;gap:7px')}>
               <div style={css('position:relative;border-radius:12px;overflow:hidden;background:var(--surface-sunken-2);border:1px solid var(--border-4)')}>
                 <img src={pollImage.previewUrl} alt="Poll picture preview" data-testid="poll-image-preview"
-                  style={css('display:block;width:100%;max-height:240px;object-fit:contain;background:var(--surface-sunken-2)')} />
+                  style={css('display:block;width:100%;max-height:min(240px, 34vh);object-fit:contain;background:var(--surface-sunken-2)')} />
                 {pollImageProgress !== null && busy && (
                   <div role="status" style={css('position:absolute;inset:0;background:rgba(var(--shadow-rgb),.38);display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;color:var(--on-accent)')}>
                     Uploading {Math.round(pollImageProgress * 100)}%
@@ -612,7 +638,7 @@ export function CreatePostScreen() {
           onCancelAll={() => queue.cancelAll()}
         />
       )}
-      <div style={css('flex:1')} />
+      </div>
     </PhoneShell>
   );
 }
