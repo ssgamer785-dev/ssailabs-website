@@ -49,17 +49,31 @@ type MessageRow = {
   upload_status: UploadStatus | null;
   album_id?: string | null; album_index?: number | null; album_size?: number | null;
   album_kind?: ChatMessage['albumKind']; media_width?: number | null; media_height?: number | null;
+  reply_to_id?: string | null;
 };
 
 const SELECT_COLUMNS =
   'id, conversation_id, sender_id, kind, body, storage_key, poster_key, poster_size_bytes, mime_type, size_bytes, file_name, voice_duration_seconds, read_at, created_at, client_id, deleted_at, media_purged, upload_status';
 /** RC5 adds albums and picture sizes; read only once the database has them. */
 const RC5_COLUMNS = `${SELECT_COLUMNS}, album_id, album_index, album_size, album_kind, media_width, media_height`;
+/** RC6 adds replies; read only once the database has them. */
+const REPLY_COLUMNS = `${RC5_COLUMNS}, reply_to_id`;
 /** Learned from the first page load: does the database have the RC5 columns? */
 let albumSchema: boolean | undefined;
+/** Learned the same way: does the database have messages.reply_to_id? */
+let replySchema: boolean | undefined;
 /** Whether a send of several files becomes one album (true), separate messages (false), or not known yet. */
 export function chatAlbumsAvailable(): boolean | undefined {
   return albumSchema;
+}
+/** Whether a message can be sent as a reply: false only once the database has said it lacks replies. */
+export function chatRepliesAvailable(): boolean {
+  return albumSchema !== false && replySchema !== false;
+}
+/** Only for tests: forget what the database was found to have. */
+export function resetChatSchemaForTests(): void {
+  albumSchema = undefined;
+  replySchema = undefined;
 }
 
 /**
@@ -72,7 +86,18 @@ export function batchOrder<T extends { kind: MediaKind }>(files: T[]): T[] {
   return [...files.filter(isVisual), ...files.filter(f => !isVisual(f))];
 }
 // Typed as the legacy list: the query builder's column parser does not need to know the extras.
-const columns = () => (albumSchema === false ? SELECT_COLUMNS : RC5_COLUMNS) as typeof SELECT_COLUMNS;
+const columns = () => (albumSchema === false ? SELECT_COLUMNS : replySchema === false ? RC5_COLUMNS : REPLY_COLUMNS) as typeof SELECT_COLUMNS;
+/**
+ * After a read refused an unknown column: the newest set of columns that read
+ * asked for is not there, so the retry asks for less. Decided by what THIS read
+ * asked for, not by what another read in flight has already learned, so every
+ * read retries until it reaches the columns the database has.
+ */
+function learnMissingColumns(asked: string): boolean {
+  if (asked === REPLY_COLUMNS) { replySchema = false; return true; }
+  if (asked === RC5_COLUMNS) { albumSchema = false; return true; }
+  return false;
+}
 const isMissingColumn = (error: { code?: string; message?: string } | null) =>
   !!error && (error.code === '42703' || error.code === 'PGRST204' || /column .* does not exist|Could not find .* column/i.test(error.message ?? ''));
 /** Items of an album uploading at the same time. */
@@ -119,21 +144,21 @@ async function queryLatest(conversationId: string): Promise<{ rows: ChatMessage[
   // Which columns this read asks for. Several threads can be read at the same moment (an admin's recent threads,
   // or a thread being prepared while another is opened): each read that asked for the RC5 columns and found them
   // missing tries again without them — even when another read has just found that out.
-  const askedForRc5 = albumSchema !== false;
+  const asked: string = columns();
   const { data, error } = await supabase
     .from('messages')
-    .select(columns())
+    .select(asked as typeof SELECT_COLUMNS)
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: false })
     .order('id', { ascending: false })
     .limit(PAGE_SIZE);
-  if (error && askedForRc5 && isMissingColumn(error)) {
-    // A database the RC5 migration has not reached: read what it has.
-    albumSchema = false;
+  if (error && isMissingColumn(error) && learnMissingColumns(asked)) {
+    // A database the RC5 or RC6 migration has not reached: read what it has.
     return queryLatest(conversationId);
   }
   if (error) return { rows: [], more: false, error };
   if (albumSchema === undefined) albumSchema = true;
+  if (replySchema === undefined && asked === REPLY_COLUMNS) replySchema = true;
   const page = (data ?? []) as MessageRow[];
   const rows = await extendToWholeAlbum(conversationId, page);
   return { rows: sortByTime(rows.map(toMessage)), more: page.length === PAGE_SIZE, error: null };
@@ -181,6 +206,7 @@ function toMessage(row: MessageRow): ChatMessage {
     albumKind: row.album_kind ?? null,
     mediaWidth: row.media_width ?? null,
     mediaHeight: row.media_height ?? null,
+    replyToId: row.reply_to_id ?? null,
     status: abandoned ? 'failed' : 'sent',
     error: abandoned ? "This upload didn't finish." : undefined,
   };
@@ -199,10 +225,19 @@ export interface UseConversation {
   storageNotice: string | null;
   dismissStorageNotice: () => void;
   loadOlder: () => Promise<void>;
-  sendText: (body: string) => Promise<void>;
-  sendMedia: (file: Blob, kind: MediaKind, fileName: string, durationSeconds?: number) => Promise<void>;
-  /** Several attachments as one album (RC5). */
-  sendMediaBatch: (files: { file: Blob; kind: MediaKind; fileName: string }[]) => Promise<void>;
+  /** replyToId: the message this one answers (RC6). */
+  sendText: (body: string, replyToId?: string | null) => Promise<void>;
+  sendMedia: (file: Blob, kind: MediaKind, fileName: string, durationSeconds?: number, replyToId?: string | null) => Promise<void>;
+  /** Several attachments as one album (RC5); a reply is carried by its first item. */
+  sendMediaBatch: (files: { file: Blob; kind: MediaKind; fileName: string }[], replyToId?: string | null) => Promise<void>;
+  /**
+   * The message a reply quotes: the message, null when it is no longer
+   * available (removed, or never in this conversation), undefined while it is
+   * still being looked up.
+   */
+  replyTarget: (id: string) => ChatMessage | null | undefined;
+  /** Whether replies can be sent (false before the RC6 database update). */
+  repliesAvailable: boolean;
   /** Stops one item mid-upload and removes it. */
   cancelUpload: (clientId: string) => Promise<void>;
   retryOpen: () => void;
@@ -465,6 +500,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
           album_id: draft.albumId, album_index: draft.albumIndex, album_size: draft.albumSize, album_kind: draft.albumKind,
         } : {}),
         ...(albumSchema && draft.mediaWidth && draft.mediaHeight ? { media_width: draft.mediaWidth, media_height: draft.mediaHeight } : {}),
+        ...(chatRepliesAvailable() && draft.replyToId ? { reply_to_id: draft.replyToId } : {}),
       } as never)
       .select(columns())
       .single();
@@ -619,11 +655,11 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     status: 'sending',
   }), []);
 
-  const sendText = useCallback(async (body: string) => {
+  const sendText = useCallback(async (body: string, replyToId?: string | null) => {
     const trimmed = body.trim();
     if (!trimmed || !conversationId || !userId) return;
 
-    const draft: ChatMessage = { ...blankDraft(conversationId, userId), body: trimmed };
+    const draft: ChatMessage = { ...blankDraft(conversationId, userId), body: trimmed, replyToId: replyToId ?? null };
     setMessages(prev => sortByTime([...prev, draft]));
     await sendTextRow(draft);
   }, [conversationId, userId, blankDraft, sendTextRow]);
@@ -638,11 +674,13 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     durationSeconds: number | undefined,
     album: Pick<ChatMessage, 'albumId' | 'albumIndex' | 'albumSize' | 'albumKind'> | null,
     createdAt?: string,
+    replyToId?: string | null,
   ): Promise<ChatMessage> => {
     let draft: ChatMessage = {
       ...blankDraft(conversation, sender),
       ...(album ?? {}),
       ...(createdAt ? { createdAt } : {}),
+      replyToId: replyToId ?? null,
       kind,
       mimeType: file.type || 'application/octet-stream',
       sizeBytes: file.size,
@@ -694,12 +732,12 @@ export function useConversation(explicitConversationId?: string): UseConversatio
    * progress, retry and cancel, and the other side gets one notification for
    * the whole album. Before the RC5 migration they are sent one by one.
    */
-  const sendMediaBatch = useCallback(async (picked: { file: Blob; kind: MediaKind; fileName: string }[]) => {
+  const sendMediaBatch = useCallback(async (picked: { file: Blob; kind: MediaKind; fileName: string }[], replyToId?: string | null) => {
     if (!conversationId || !userId || !picked.length) return;
     const files = batchOrder(picked);
     if (files.length === 1) {
       const [only] = files;
-      const draft = await prepareDraft(conversationId, userId, only.file, only.kind, only.fileName, undefined, null);
+      const draft = await prepareDraft(conversationId, userId, only.file, only.kind, only.fileName, undefined, null, undefined, replyToId);
       await sendMediaRow(draft);
       return;
     }
@@ -713,6 +751,7 @@ export function useConversation(explicitConversationId?: string): UseConversatio
       conversationId, userId, f.file, f.kind, f.fileName, undefined,
       albumId ? { albumId, albumIndex: index, albumSize: files.length, albumKind } : null,
       new Date(base + index).toISOString(),
+      index === 0 ? replyToId : null,
     )));
     let next = 0;
     const worker = async () => {
@@ -746,11 +785,13 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     kind: MediaKind,
     fileName: string,
     durationSeconds?: number,
+    replyToId?: string | null,
   ) => {
     if (!conversationId || !userId) return;
 
     let draft: ChatMessage = {
       ...blankDraft(conversationId, userId),
+      replyToId: replyToId ?? null,
       kind,
       mimeType: file.type || 'application/octet-stream',
       sizeBytes: file.size,
@@ -901,6 +942,37 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     objectUrls.current = [];
   }, []);
 
+  // ---- replies --------------------------------------------------------------
+
+  // A quoted message not among the loaded ones (an older page) is looked up by
+  // id, in this conversation only; RLS lets a participant read nothing else.
+  const [quoted, setQuoted] = useState<Map<string, ChatMessage | null>>(() => new Map());
+  useEffect(() => { setQuoted(new Map()); }, [conversationId]);
+  useEffect(() => {
+    if (!conversationId || !chatRepliesAvailable()) return;
+    const loaded = new Set(messages.map(m => m.id));
+    const wanted = [...new Set(messages.map(m => m.replyToId).filter((id): id is string => !!id && !loaded.has(id) && !quoted.has(id)))].slice(0, 40);
+    if (!wanted.length) return;
+    let active = true;
+    void Promise.resolve(supabase.from('messages').select(columns()).eq('conversation_id', conversationId).in('id', wanted))
+      .then(({ data, error: qErr }) => {
+        if (!active || qErr) return;
+        const found = new Map(((data ?? []) as MessageRow[]).map(row => [row.id, toMessage(row)] as const));
+        setQuoted(prev => {
+          const next = new Map(prev);
+          for (const id of wanted) next.set(id, found.get(id) ?? null);
+          return next;
+        });
+      });
+    return () => { active = false; };
+  }, [conversationId, messages, quoted]);
+
+  const replyTarget = useCallback((id: string): ChatMessage | null | undefined => {
+    const loaded = messages.find(m => m.id === id);
+    if (loaded) return loaded;
+    return quoted.has(id) ? quoted.get(id)! : undefined;
+  }, [messages, quoted]);
+
   const visible = useMemo(
     () => messages.filter(m => {
       // A deleted message the other side sent leaves nothing to show.
@@ -926,6 +998,8 @@ export function useConversation(explicitConversationId?: string): UseConversatio
     sendText,
     sendMedia,
     sendMediaBatch,
+    replyTarget,
+    repliesAvailable: chatRepliesAvailable(),
     cancelUpload,
     retryOpen,
     retry,

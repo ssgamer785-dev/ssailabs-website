@@ -9,6 +9,7 @@ import { MediaCarousel, type CarouselItem } from '../media/MediaCarousel';
 import { MetaRow } from './bubble-parts';
 import { Avatar } from '../ui/Avatar';
 import logo from '../../assets/traders-planet-mark.png';
+import { ReplyButton, ReplyQuote, SwipeReplyIcon, useSwipeToReply, type QuoteInfo } from './ReplyParts';
 
 function AlbumTile({ message, more, onOpen, onRetry, onCancel, out, label }: {
   message: ChatMessage; more: number; onOpen: () => void; onRetry: () => void; onCancel: () => void; out: boolean; label: string;
@@ -71,19 +72,28 @@ function AlbumTile({ message, more, onOpen, onRetry, onCancel, out, label }: {
  * each item with its own upload progress, cancel and retry, and the
  * full-screen swipe viewer on tap.
  */
-export function AlbumBubble({ messages, out, incomingIsAdmin, incomingName, incomingAvatarKey, onRetry, onCancel, onDeleteAll }: {
+export function AlbumBubble({ messages, out, incomingIsAdmin, incomingName, incomingAvatarKey, quote, flash, onRetry, onCancel, onDeleteAll, onReply, onJump }: {
   messages: ChatMessage[];
   out: boolean;
   incomingIsAdmin: boolean;
   incomingName: string;
   incomingAvatarKey: string | null;
+  /** The message this album replies to (carried by its first item). */
+  quote?: QuoteInfo | null;
+  /** Briefly marked: the original a quote just led to. */
+  flash?: boolean;
   onRetry: (clientId: string) => void;
   onCancel: (clientId: string) => void;
   onDeleteAll: () => Promise<void>;
+  /** Makes the album (its first item) the reply target. */
+  onReply?: () => void;
+  onJump?: (id: string) => void;
 }) {
   const [viewerAt, setViewerAt] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const canReply = !!onReply && messages.every(m => m.status === 'sent' && !m.deletedAt && m.uploadStatus !== 'pending');
+  const swipe = useSwipeToReply({ enabled: canReply, onReply: () => onReply?.() });
   const layout = mosaicLayout(messages.length)!;
   const last = messages[messages.length - 1];
   const viewable: CarouselItem[] = messages.filter(m => m.storageKey && !m.mediaPurged && m.status === 'sent')
@@ -91,11 +101,19 @@ export function AlbumBubble({ messages, out, incomingIsAdmin, incomingName, inco
   const kindLabel = messages.every(m => m.kind === 'image') ? 'photos' : messages.every(m => m.kind === 'video') ? 'videos' : 'photos and videos';
 
   return (
-    <div style={out ? css('display:flex;justify-content:flex-end') : css('display:flex;align-items:flex-end;gap:9px')}>
+    <div className={`msg-row${canReply ? ' msg-swipe' : ''}${flash ? ' msg-jump-flash' : ''}`} style={{ position: 'relative' }} {...swipe.handlers}>
+      <SwipeReplyIcon offset={swipe.offset} armed={swipe.armed} />
+      <div style={{
+        ...(out ? css('display:flex;justify-content:flex-end;align-items:flex-end;gap:6px') : css('display:flex;align-items:flex-end;gap:9px')),
+        transform: swipe.offset ? `translateX(${swipe.offset}px)` : undefined,
+        transition: swipe.dragging ? 'none' : 'transform 180ms ease',
+      }}>
+      {out && canReply && <ReplyButton onReply={() => onReply?.()} />}
       {!out && (incomingIsAdmin
         ? <div style={css('width:30px;height:30px;border-radius:50%;background:var(--ink-chip);display:flex;align-items:center;justify-content:center;flex:none')}><img src={logo} alt="Admin" style={css('width:24px;height:24px;object-fit:contain')} /></div>
         : <Avatar name={incomingName} avatarKey={incomingAvatarKey} size={30} fontSize={12} />)}
-      <div style={css('display:flex;flex-direction:column;gap:5px;align-items:flex-end')}>
+      <div style={css(`display:flex;flex-direction:column;gap:5px;align-items:${out ? 'flex-end' : 'flex-start'}`)}>
+        {quote && <ReplyQuote quote={quote} out={out} onJump={onJump} />}
         <div role="group" aria-label={`${messages.length} ${kindLabel}`}
           style={{ width: 236, display: 'grid', gridTemplateColumns: layout.columns, gridTemplateRows: layout.rows, gap: 2,
             aspectRatio: String(layout.aspectRatio), borderRadius: out ? '16px 16px 5px 16px' : '16px 16px 16px 5px', overflow: 'hidden',
@@ -127,6 +145,8 @@ export function AlbumBubble({ messages, out, incomingIsAdmin, incomingName, inco
             <button type="button" onClick={() => setConfirming(false)} style={css('font-size:11px;color:var(--text-muted)')}>Cancel</button>
           </div>
         )}
+      </div>
+      {!out && canReply && <ReplyButton onReply={() => onReply?.()} />}
       </div>
       {viewerAt !== null && viewable.length > 0 && (
         <MediaCarousel items={viewable} start={viewerAt} getUrl={getMediaUrl} onClose={() => setViewerAt(null)} />

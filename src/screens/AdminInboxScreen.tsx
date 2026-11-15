@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { css } from '../lib/css';
 import { Hoverable } from '../lib/Hoverable';
 import { formatTime } from '../lib/chat/types';
@@ -10,6 +10,7 @@ import { playMoneyRefreshSound } from '../lib/useMoneySound';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import { AuthenticatedBottomNav } from '../components/ui/AuthenticatedBottomNav';
 import { Avatar } from '../components/ui/Avatar';
+import { MemberActions, type ManagedMember } from '../components/admin/MemberActions';
 
 /**
  * The admin's inbox: every activated member, and the thread with each.
@@ -93,11 +94,12 @@ function Row({ item, presence, onOpen, opening }: {
   );
 }
 
-function VisibleRow({ item, onOpen, opening, divided }: {
+function VisibleRow({ item, onOpen, opening, divided, onDeleted }: {
   item: AdminConversation;
   onOpen: () => void;
   opening: boolean;
   divided: boolean;
+  onDeleted: (member: ManagedMember) => void;
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
   const [nearViewport, setNearViewport] = useState(false);
@@ -119,12 +121,17 @@ function VisibleRow({ item, onOpen, opening, divided }: {
   return (
     <div ref={rowRef}>
       {divided && <div style={css('height:1px;background:var(--surface-divider)')} />}
-      <Row
-        item={item}
-        presence={presence[item.studentId] ?? 'unknown'}
-        opening={opening}
-        onOpen={onOpen}
-      />
+      <div style={css('display:flex;align-items:center;gap:4px')}>
+        <div style={css('flex:1;min-width:0')}>
+          <Row
+            item={item}
+            presence={presence[item.studentId] ?? 'unknown'}
+            opening={opening}
+            onOpen={onOpen}
+          />
+        </div>
+        <MemberActions member={{ id: item.studentId, name: item.fullName, avatarKey: item.avatarKey }} onDeleted={onDeleted} />
+      </div>
     </div>
   );
 }
@@ -137,16 +144,28 @@ export function AdminInboxScreen() {
   const [search, setSearch] = useState('');
   const [opening, setOpening] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A deleted member leaves the list at once; the re-read behind confirms it.
+  // Deleting from a member's chat comes back here with who it was.
+  const arrivedFrom = (useLocation().state as { deleted?: ManagedMember } | null)?.deleted;
+  const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set(arrivedFrom ? [arrivedFrom.id] : []));
+  const [notice, setNotice] = useState<string | null>(() => (arrivedFrom ? `${arrivedFrom.name} was deleted. Their posts and comments now show as “Deleted member”.` : null));
+  const members = useMemo(() => conversations.filter(c => !removed.has(c.studentId)), [conversations, removed]);
+
+  const onDeleted = useCallback((member: ManagedMember) => {
+    setRemoved(prev => new Set(prev).add(member.id));
+    setNotice(`${member.name} was deleted. Their posts and comments now show as “Deleted member”.`);
+    void refresh();
+  }, [refresh]);
 
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return conversations;
-    return conversations.filter(c =>
+    if (!q) return members;
+    return members.filter(c =>
       c.fullName.toLowerCase().includes(q)
       || (c.lastMessagePreview ?? '').toLowerCase().includes(q));
-  }, [conversations, search]);
+  }, [members, search]);
 
-  const totalUnread = conversations.reduce((n, c) => n + c.unreadCount, 0);
+  const totalUnread = members.reduce((n, c) => n + c.unreadCount, 0);
 
   const open = useCallback(async (item: AdminConversation) => {
     if (opening) return;
@@ -202,6 +221,16 @@ export function AdminInboxScreen() {
           style={css('flex:1;min-width:0;font-size:14px;height:100%')}
         />
       </div>
+      {!loading && !loadFailed && (
+        <div aria-live="polite" data-testid="member-count" style={css('flex:none;margin:0 20px 6px;font-size:11.5px;font-weight:600;color:var(--text-faint)')}>
+          {members.length} {members.length === 1 ? 'member' : 'members'}
+        </div>
+      )}
+      {notice && (
+        <div role="status" onClick={() => setNotice(null)} style={css('flex:none;margin:0 20px 8px;padding:9px 12px;border-radius:11px;background:var(--success-soft);color:var(--success-ink);font-size:12px;line-height:1.45;cursor:pointer')}>
+          {notice}
+        </div>
+      )}
 
       <div className="nav-space" style={css('flex:1;min-height:0;padding:0 20px;display:flex;flex-direction:column;overflow-y:auto;overscroll-behavior:contain')}>
         {loading ? (
@@ -221,7 +250,7 @@ export function AdminInboxScreen() {
               Try again
             </Hoverable>
           </div>
-        ) : conversations.length === 0 ? (
+        ) : members.length === 0 ? (
           <div style={css('flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 24px;text-align:center')}>
             <div style={css('width:62px;height:62px;border-radius:20px;background:var(--accent-tint);border:1px solid var(--accent-border);display:flex;align-items:center;justify-content:center;flex:none')}>
               <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="var(--accent-ink)" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
@@ -247,6 +276,7 @@ export function AdminInboxScreen() {
                 divided={i > 0}
                 opening={opening === item.studentId}
                 onOpen={() => void open(item)}
+                onDeleted={onDeleted}
               />
             ))}
           </div>

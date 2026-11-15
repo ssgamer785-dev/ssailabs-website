@@ -15,6 +15,7 @@ import { MediaActions } from '../media/MediaActions';
 import { ImageViewer } from '../media/ImageViewer';
 import { DocumentViewer } from '../media/DocumentViewer';
 import { linkifiedText } from '../ui/LinkifiedText';
+import { ReplyButton, ReplyQuote, SwipeReplyIcon, useSwipeToReply, type QuoteInfo } from './ReplyParts';
 
 /** Static waveform, seeded off the message id so a clip always looks the same. */
 function Wave({ bars, color, height, gap, seed, progress = 0 }: {
@@ -160,15 +161,23 @@ function TextBubble({ message, out, onRetry }: { message: ChatMessage; out: bool
   );
 }
 
-export function MessageBubble({ message, out, incomingIsAdmin, incomingName, incomingAvatarKey, highlighted, onRetry, onDelete }: {
+export function MessageBubble({ message, out, incomingIsAdmin, incomingName, incomingAvatarKey, highlighted, flash, quote, onRetry, onDelete, onReply, onJump }: {
   message: ChatMessage;
   out: boolean;
   incomingIsAdmin: boolean;
   incomingName: string;
   incomingAvatarKey: string | null;
   highlighted?: boolean;
+  /** Briefly marked: the original a quote just led to. */
+  flash?: boolean;
+  /** The message this one replies to, as shown above the bubble. */
+  quote?: QuoteInfo | null;
   onRetry: () => void;
   onDelete: () => Promise<void>;
+  /** Makes this message the reply target (swipe right, or the Reply button). */
+  onReply?: () => void;
+  /** Goes to a quoted message. */
+  onJump?: (id: string) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -186,6 +195,10 @@ export function MessageBubble({ message, out, incomingIsAdmin, incomingName, inc
   };
   const cancelPress = () => clearTimeout(pressTimer.current);
 
+  // A message can be answered once it exists on the server and still shows something.
+  const canReply = !!onReply && message.status === 'sent' && !deleted && message.uploadStatus !== 'pending';
+  const swipe = useSwipeToReply({ enabled: canReply, onReply: () => onReply?.(), onStart: cancelPress });
+
   const body = deleted
     ? <TextBubble message={message} out={out} onRetry={onRetry} />
     : message.kind === 'voice'
@@ -201,16 +214,28 @@ export function MessageBubble({ message, out, incomingIsAdmin, incomingName, inc
   return (
     <div
       id={`message-${message.id}`}
-      style={out ? css(`display:flex;justify-content:flex-end;${highlighted ? 'outline:2px solid var(--accent);border-radius:12px' : ''}`) : css(`display:flex;align-items:flex-end;gap:9px;${highlighted ? 'outline:2px solid var(--accent);border-radius:12px' : ''}`)}
-      onPointerDown={startPress}
-      onPointerUp={cancelPress}
+      data-testid="message-row"
+      className={`msg-row${canReply ? ' msg-swipe' : ''}${flash ? ' msg-jump-flash' : ''}`}
+      style={{ position: 'relative', ...(highlighted ? css('outline:2px solid var(--accent);border-radius:12px') : {}) }}
+      onPointerDown={event => { swipe.handlers.onPointerDown(event); startPress(); }}
+      onPointerMove={swipe.handlers.onPointerMove}
+      onPointerUp={event => { cancelPress(); swipe.handlers.onPointerUp(event); }}
+      onPointerCancel={event => { cancelPress(); swipe.handlers.onPointerCancel(event); }}
       onPointerLeave={cancelPress}
       onContextMenu={e => { if (canDelete) { e.preventDefault(); setConfirming(true); } }}
     >
+      <SwipeReplyIcon offset={swipe.offset} armed={swipe.armed} />
+      <div style={{
+        ...(out ? css('display:flex;justify-content:flex-end;align-items:flex-end;gap:6px') : css('display:flex;align-items:flex-end;gap:9px')),
+        transform: swipe.offset ? `translateX(${swipe.offset}px)` : undefined,
+        transition: swipe.dragging ? 'none' : 'transform 180ms ease',
+      }}>
+      {out && canReply && <ReplyButton onReply={() => onReply?.()} />}
       {!out && (incomingIsAdmin
         ? <div style={{...AVATAR,background:'var(--ink-chip)'}}><img src={logo} alt="Admin" style={css('width:24px;height:24px;object-fit:contain')} /></div>
         : <Avatar name={incomingName} avatarKey={incomingAvatarKey} size={30} fontSize={12} />)}
-      <div style={css('display:flex;flex-direction:column;gap:5px;align-items:flex-end')}>
+      <div style={css(`display:flex;flex-direction:column;gap:5px;align-items:${out ? 'flex-end' : 'flex-start'}`)}>
+        {quote && <ReplyQuote quote={quote} out={out} onJump={onJump} />}
         {body}
         {canDelete && !confirming && <button type="button" aria-label="Message options" onClick={() => setConfirming(true)} style={css('color:var(--text-faint);font-size:15px;padding:0 5px;line-height:1')}>⋯</button>}
         {confirming && (
@@ -225,6 +250,8 @@ export function MessageBubble({ message, out, incomingIsAdmin, incomingName, inc
           </div>
         )}
         {actionError && <span role="alert" style={css('max-width:210px;font-size:10.5px;color:var(--danger-ink);text-align:right')}>{actionError}</span>}
+      </div>
+      {!out && canReply && <ReplyButton onReply={() => onReply?.()} />}
       </div>
     </div>
   );

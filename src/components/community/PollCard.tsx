@@ -4,6 +4,7 @@ import { Hoverable } from '../../lib/Hoverable';
 import { castPollVote, fetchPollResults, type PollOption } from '../../lib/community/polls';
 import { fetchPollVoters, type PollVoter } from '../../lib/community/poll-voters';
 import { formatDateTime } from '../../lib/format-date-time';
+import { barShare, participantLabel, voteLabel } from '../../lib/community/poll-format';
 
 /**
  * A poll attached to a post.
@@ -18,11 +19,11 @@ import { formatDateTime } from '../../lib/format-date-time';
  * Doing only the first would show a total that briefly exceeds the number of
  * people who voted, which is the sort of wrong number that makes a reader stop
  * trusting the rest of the screen.
+ *
+ * Each option says how many people chose it ("12 votes"), never a percentage:
+ * the bar behind it still shows the share at a glance, and the number is the
+ * one the group can check against itself (see poll-format.ts).
  */
-
-function percent(votes: number, total: number): number {
-  return total === 0 ? 0 : Math.round((votes / total) * 100);
-}
 
 /**
  * Admin only: who chose each option, with their real names and when. The list
@@ -196,14 +197,14 @@ export function PollCard({ postId, showVoters = false }: { postId: string; showV
   return (
     <div style={css('display:flex;flex-direction:column;gap:8px')}>
       {options.map(o => {
-        const share = percent(o.voteCount, total);
+        const share = barShare(o.voteCount, total);
         return (
           <Hoverable
             key={o.optionId}
             onClick={() => void vote(o.optionId)}
             role="button"
             aria-pressed={o.isMyVote}
-            aria-label={`${o.label} — ${o.voteCount} vote${o.voteCount === 1 ? '' : 's'}, ${share}%`}
+            aria-label={`${o.label} — ${voteLabel(o.voteCount)}${o.isMyVote ? ', your vote' : ''}`}
             className="pressable"
             style={{
               ...css('position:relative;width:100%;min-height:44px;border-radius:11px;overflow:hidden;' +
@@ -234,18 +235,18 @@ export function PollCard({ postId, showVoters = false }: { postId: string; showV
                 <path d="M8.2 12.3l2.6 2.6 5.1-5.4" fill="none" stroke="var(--on-accent)" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             )}
-            <div style={{
+            <div data-testid="poll-option-votes" style={{
               ...css('position:relative;flex:none;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap'),
               color: o.isMyVote ? 'var(--accent-ink)' : 'var(--text-muted)',
             }}>
-              {share}%
+              {voteLabel(o.voteCount)}
             </div>
           </Hoverable>
         );
       })}
 
       <div style={css('display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--text-faint)')}>
-        <span>{total} {total === 1 ? 'vote' : 'votes'}</span>
+        <span data-testid="poll-participants">{participantLabel(total)}</span>
         <span aria-hidden="true">·</span>
         <span>{voted ? 'Tap another option to change your vote' : 'Tap to vote'}</span>
       </div>

@@ -671,3 +671,14 @@ textarea {
 }
 @keyframes media-sheen { to { transform: translateX(100%); } }
 @media (prefers-reduced-motion: reduce) { .media-shimmer::after { animation: none; display: none; } }
+
+/* Chat replies: a pointer that can hover gets a Reply button beside a message;
+   touch devices swipe the message to the right instead. The swipe row keeps
+   every vertical scroll for the browser (pan-y). */
+.msg-swipe { touch-action: pan-y; }
+.msg-reply-btn { opacity: 0; transition: opacity .15s ease; }
+.msg-row:hover .msg-reply-btn, .msg-reply-btn:focus-visible { opacity: 1; }
+@media (hover: none) { .msg-reply-btn { display: none !important; } }
+.msg-jump-flash { animation: tp-msg-flash 1.6s ease-out; border-radius: 14px; }
+@keyframes tp-msg-flash { 0%, 35% { background-color: var(--accent-tint); } 100% { background-color: transparent; } }
+@media (prefers-reduced-motion: reduce) { .msg-jump-flash { animation: none; outline: 2px solid var(--accent); } }

@@ -30,9 +30,10 @@ mock.module('../supabase', () => ({
 }));
 mock.module('../auth-context', () => ({ useAuth: () => ({ user: null }) }));
 
-const { warmConversation } = await import('./useConversation');
+const { warmConversation, resetChatSchemaForTests } = await import('./useConversation');
 
 test('threads read at the same moment on a database without the RC5 columns each come back whole', async () => {
+  resetChatSchemaForTests();
   const [first, second] = await Promise.all([warmConversation('admin', 'thread-a'), warmConversation('admin', 'thread-b')]);
   // Before: whichever answer came second found the flag already flipped, skipped its retry, and its thread came back empty.
   expect(first.map(m => m.storageKey)).toEqual(['chat/thread-a/photo.bin']);

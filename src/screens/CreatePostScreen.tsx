@@ -11,7 +11,7 @@ import { requestCopies } from '../lib/media/media-cache';
 import { UploadQueue, type UploadItem } from '../lib/media/upload-queue';
 import { measureImage } from '../lib/media/dimensions';
 import { AttachmentTray } from '../components/community/AttachmentTray';
-import { createPollPost } from '../lib/community/polls';
+import { POLL_IMAGE_TYPES, createPollPost, pollImageProblem } from '../lib/community/polls';
 import { probeVideo } from '../lib/media/video-poster';
 import type { AttachmentKind, PostChannel } from '../lib/database.types';
 import { PhoneShell } from '../components/PhoneShell';
@@ -135,6 +135,42 @@ export function CreatePostScreen() {
   // poll can have and starting with one implies one is enough.
   const [pollMode, setPollMode] = useState(false);
   const [pollOptions, setPollOptions] = useState<string[]>(['', '']);
+  // One optional picture above the poll's options. It uploads when the poll is
+  // published, through the same server-issued upload as any post picture; a
+  // finished upload is kept, so publishing again after a failure does not send
+  // it twice.
+  const pollImageInput = useRef<HTMLInputElement>(null);
+  const [pollImage, setPollImage] = useState<{ draft: DraftAttachment; previewUrl: string } | null>(null);
+  const [pollImageProgress, setPollImageProgress] = useState<number | null>(null);
+  const pollImageUpload = useRef<{ draft: DraftAttachment; result: UploadedAttachment } | null>(null);
+  const pollImageUrl = useRef<string | null>(null);
+  pollImageUrl.current = pollImage?.previewUrl ?? null;
+  useEffect(() => () => { if (pollImageUrl.current) URL.revokeObjectURL(pollImageUrl.current); }, []);
+
+  function clearPollImage() {
+    setPollImage(prev => { if (prev) URL.revokeObjectURL(prev.previewUrl); return null; });
+    pollImageUpload.current = null;
+    setPollImageProgress(null);
+  }
+
+  async function pickPollImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const raw = e.target.files?.[0];
+    e.target.value = '';
+    if (!raw) return;
+    let file = normalizePickedFile(raw);
+    // An iPhone photo arrives as HEIC: it becomes a JPEG first, as for any post picture.
+    try { file = await toPortableImage(file); }
+    catch (error) {
+      if (error instanceof PortableImageError) { setError(error.message); return; }
+      throw error;
+    }
+    const problem = pollImageProblem(file);
+    if (problem) { setError(problem); return; }
+    const size = await measureImage(file);
+    clearPollImage();
+    setPollImage({ draft: { file, kind: 'image', poster: null, size }, previewUrl: URL.createObjectURL(file) });
+    setError(null);
+  }
 
   const myIdentity = reveal ? userName : 'Unknown User';
 
@@ -174,6 +210,7 @@ export function CreatePostScreen() {
     // A poll and an uploaded file are different posts; choosing one leaves the
     // other rather than trying to publish both.
     setPollMode(false);
+    clearPollImage();
     setAccept(ACCEPT[kind]);
     // The accept attribute is state, so the input has to re-render with the new
     // value before the dialog opens — otherwise the first press of a different
@@ -233,6 +270,7 @@ export function CreatePostScreen() {
     const extension = clip.mimeType.includes('mp4') ? 'm4a' : clip.mimeType.includes('aac') ? 'aac' : clip.mimeType.includes('ogg') ? 'ogg' : 'webm';
     const voiceFile = new File([clip.blob], `Voice message.${extension}`, { type: clip.mimeType });
     setPollMode(false);
+    clearPollImage();
     // A voice post is a voice note on its own.
     clearAttachments();
     queue.add([{ file: voiceFile, kind: 'voice', poster: null, size: null, previewUrl: URL.createObjectURL(voiceFile) }], false);
@@ -256,15 +294,34 @@ export function CreatePostScreen() {
       setBusy(true);
       setError(null);
       let result;
+      let image: UploadedAttachment | null = null;
       try {
+        if (pollImage) {
+          // Uploaded once: a retry after the poll itself failed reuses it.
+          if (pollImageUpload.current?.draft === pollImage.draft) image = pollImageUpload.current.result;
+          else {
+            setPollImageProgress(0);
+            try {
+              image = await uploadDraftAttachment(pollImage.draft, new AbortController().signal, fraction => setPollImageProgress(fraction));
+            } catch (e) {
+              setPollImageProgress(null);
+              setError(`The picture did not upload: ${e instanceof Error ? e.message : 'please try again'}. Tap Create poll to retry, or remove the picture.`);
+              return;
+            }
+            pollImageUpload.current = { draft: pollImage.draft, result: image };
+          }
+        }
         result = await createPollPost({
           channel,
           question: postText,
           options: pollOptions,
           isAnonymous: channel === 'students' ? !reveal : false,
+          image: image ? { storageKey: image.storageKey, width: image.width, height: image.height } : null,
         });
       } finally { submitRef.current = false; setBusy(false); }
       if (!result.ok) { setError(result.message ?? 'Could not create the poll.'); return; }
+      // The picture's display copy is made now, so every member's feed draws that rather than the original.
+      if (image) void requestCopies('post', [image.storageKey]);
       navigate(channel === 'official' ? '/community' : '/community?tab=students', { replace: true });
       return;
     }
@@ -392,8 +449,10 @@ export function CreatePostScreen() {
           type="button"
           onClick={() => {
             // Entering poll mode drops any picked file for the same reason
-            // openPicker drops the poll: one post, one attachment.
-            setPollMode(v => !v);
+            // openPicker drops the poll: one post, one attachment. Leaving it
+            // drops the poll's picture.
+            if (pollMode) clearPollImage();
+            setPollMode(!pollMode);
             clearAttachments();
             setError(null);
           }}
@@ -443,6 +502,39 @@ export function CreatePostScreen() {
             The text above is the question. Blank options are ignored, so you can
             leave the ones you do not need empty.
           </div>
+          <input ref={pollImageInput} type="file" accept={[...POLL_IMAGE_TYPES, 'image/heic', 'image/heif'].join(',')} onChange={e => void pickPollImage(e)} style={{ display: 'none' }} aria-hidden="true" tabIndex={-1} />
+          {pollImage ? (
+            <div style={css('display:flex;flex-direction:column;gap:7px')}>
+              <div style={css('position:relative;border-radius:12px;overflow:hidden;background:var(--surface-sunken-2);border:1px solid var(--border-4)')}>
+                <img src={pollImage.previewUrl} alt="Poll picture preview" data-testid="poll-image-preview"
+                  style={css('display:block;width:100%;max-height:240px;object-fit:contain;background:var(--surface-sunken-2)')} />
+                {pollImageProgress !== null && busy && (
+                  <div role="status" style={css('position:absolute;inset:0;background:rgba(var(--shadow-rgb),.38);display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;color:var(--on-accent)')}>
+                    Uploading {Math.round(pollImageProgress * 100)}%
+                  </div>
+                )}
+              </div>
+              <div style={css('display:flex;gap:8px')}>
+                <button type="button" disabled={busy} onClick={() => pollImageInput.current?.click()} className="pressable row-focus"
+                  style={css('height:34px;padding:0 13px;border-radius:9px;border:1px solid var(--accent-border);background:var(--surface);font-size:12.5px;font-weight:700;color:var(--accent-ink);cursor:pointer')}>
+                  Replace image
+                </button>
+                <button type="button" disabled={busy} onClick={clearPollImage} className="pressable row-focus"
+                  style={css('height:34px;padding:0 13px;border-radius:9px;border:1px solid var(--danger-border);background:var(--surface);font-size:12.5px;font-weight:700;color:var(--danger-ink);cursor:pointer')}>
+                  Remove image
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button type="button" onClick={() => pollImageInput.current?.click()} aria-label="Add an image to the poll" className="pressable row-focus"
+              style={css('display:flex;align-items:center;gap:10px;min-height:46px;padding:8px 12px;border-radius:11px;border:1px dashed var(--accent-border);background:var(--surface);cursor:pointer;text-align:left')}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--success-ink)" strokeWidth={1.7} strokeLinejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3.4" /><circle cx="9" cy="10" r="1.7" /><path d="M4.6 17.4l4.5-4.3 3.3 3.1 2.6-2.4 4.4 4" /></svg>
+              <span style={css('display:flex;flex-direction:column;gap:1px')}>
+                <span style={css('font-size:13px;font-weight:700;color:var(--accent-ink)')}>Add image</span>
+                <span style={css('font-size:11px;color:var(--text-muted)')}>Optional · JPEG, PNG or WebP, up to 10 MB · shown above the options</span>
+              </span>
+            </button>
+          )}
           {pollOptions.map((value, i) => (
             <div key={i} style={css('display:flex;align-items:center;gap:8px')}>
               <input

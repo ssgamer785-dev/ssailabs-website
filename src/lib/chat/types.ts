@@ -40,6 +40,8 @@ export interface ChatMessage {
   /** The picture's own size, so its space is reserved before it loads. */
   mediaWidth?: number | null;
   mediaHeight?: number | null;
+  /** The message this one replies to (same conversation), or null. */
+  replyToId?: string | null;
 
   status: SendStatus;
   /** 0..1 while the attachment uploads. */

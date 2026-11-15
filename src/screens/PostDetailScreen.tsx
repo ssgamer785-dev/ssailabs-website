@@ -9,6 +9,7 @@ import { useComments, type PostComment, type ReplyTarget } from '../lib/communit
 import { threadComments } from '../lib/community/comment-threads';
 import { PhoneShell } from '../components/PhoneShell';
 import { PostMedia, PdfRow } from '../components/community/PostMedia';
+import { PostGallery, hasGallery } from '../components/community/PostGallery';
 import { formatDateTime } from '../lib/format-date-time';
 import { displayPostBody } from '../lib/community/display-body';
 import { playMoneyRefreshSound } from '../lib/useMoneySound';
@@ -304,7 +305,9 @@ export function PostDetailScreen() {
 
         {/* ---- attachment ---- */}
         {post.attachment === 'poll' ? (
-          <div style={css('flex:none;margin-top:14px')}>
+          <div style={css('flex:none;margin-top:14px;display:flex;flex-direction:column;gap:10px')}>
+            {/* A poll's optional picture sits above its options. */}
+            {hasGallery(post) && <PostGallery post={post} priority="high" />}
             <PollCard postId={post.id} showVoters={isAdmin} />
           </div>
         ) : (post.attachment === 'pdf' || post.attachment === 'file') && !post.extraMedia?.length ? (

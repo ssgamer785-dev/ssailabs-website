@@ -7,6 +7,7 @@ import { useFeed, type FeedPost } from '../lib/community/useFeed';
 import { postComment } from '../lib/community/comments-api';
 import { useRefreshHandler } from './PhoneShell';
 import { PostMedia } from './community/PostMedia';
+import { PostGallery, hasGallery } from './community/PostGallery';
 import { formatDateTime } from '../lib/format-date-time';
 import { displayPostBody } from '../lib/community/display-body';
 import { linkifiedText } from './ui/LinkifiedText';
@@ -529,7 +530,11 @@ function PostCard({ post, first, official, admin, others, reveal, userName, onTo
           video component stops its own click before it reaches here. */}
       {hasAttachment && (
         isPoll ? (
-          <div style={css('padding:2px 18px 3px')}><PollCard postId={post.id} showVoters={admin} /></div>
+          <div style={css('padding:2px 18px 3px;display:flex;flex-direction:column;gap:9px')}>
+            {/* A poll's optional picture sits above its options. */}
+            {hasGallery(post) && <PostGallery post={post} priority={first ? 'high' : undefined} />}
+            <PollCard postId={post.id} showVoters={admin} />
+          </div>
         ) : hasInteractiveMedia ? (
           <div style={css('padding:0 18px')}><PostMedia post={post} height={150} priority={first ? 'high' : undefined} /></div>
         ) : (

@@ -92,20 +92,57 @@ export interface CreatePollResult {
   message?: string;
 }
 
+/** A poll's picture once its bytes are stored (an uploaded post image). */
+export interface PollImage {
+  storageKey: string;
+  width: number | null;
+  height: number | null;
+}
+
+/** The types a poll picture may be. The database checks the same list against the upload itself. */
+export const POLL_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+/** The same limit the server applies to every post image. */
+export const POLL_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
+/** Why a picked file cannot be a poll picture, or null when it can. */
+export function pollImageProblem(file: { type: string; size: number }): string | null {
+  if (!(POLL_IMAGE_TYPES as readonly string[]).includes(file.type.toLowerCase())) return 'A poll picture must be a JPEG, PNG or WebP image.';
+  if (file.size <= 0) return 'That picture is empty.';
+  if (file.size > POLL_IMAGE_MAX_BYTES) return 'That picture is larger than the 10 MB limit.';
+  return null;
+}
+
+function isMissingFunction(error: { code?: string; message?: string }): boolean {
+  return error.code === 'PGRST202' || error.code === '42883' || /could not find the function/i.test(error.message ?? '');
+}
+
 export async function createPollPost(args: {
   channel: PostChannel;
   question: string;
   options: string[];
   isAnonymous?: boolean;
+  /** One optional picture, shown above the options. */
+  image?: PollImage | null;
 }): Promise<CreatePollResult> {
-  const { data, error } = await supabase.rpc('create_poll_post', {
+  const common = {
     p_channel: args.channel,
     p_question: args.question,
     p_options: args.options,
     p_is_anonymous: args.isAnonymous ?? false,
-  });
+  };
+  // With a picture: the poll and its picture in one transaction, so nobody
+  // ever sees the poll without the picture it was published with.
+  const { data, error } = args.image
+    ? await supabase.rpc('create_poll_post_with_image' as never, {
+      ...common,
+      p_image: { storage_key: args.image.storageKey, width: args.image.width, height: args.image.height },
+    } as never)
+    : await supabase.rpc('create_poll_post', common);
   if (error) {
     console.error('[polls] create failed:', error);
+    if (args.image && isMissingFunction(error)) {
+      return { ok: false, message: 'Poll pictures need the latest database update. Remove the picture to publish the poll now.' };
+    }
     // The database's own messages here are written for a person ("A poll needs
     // at least two options"), so they are worth showing rather than replacing.
     return { ok: false, message: error.message || 'Could not create the poll.' };

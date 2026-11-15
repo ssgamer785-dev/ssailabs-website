@@ -12,7 +12,9 @@ import type { AdminConversation } from '../lib/chat/useAdminConversations';
 import { readView } from '../lib/view-cache';
 import { noteText } from '../lib/media/media-metrics';
 import { useVoiceRecorder, type VoiceRecording } from '../lib/chat/useVoiceRecorder';
-import { formatDuration, type MediaKind } from '../lib/chat/types';
+import { formatDuration, type ChatMessage, type MediaKind } from '../lib/chat/types';
+import { replySender, replySnippet } from '../lib/chat/reply';
+import type { QuoteInfo } from '../components/chat/ReplyParts';
 import { PhoneShell } from '../components/PhoneShell';
 import { MessageBubble } from '../components/chat/MessageBubble';
 import { AlbumBubble } from '../components/chat/AlbumBubble';
@@ -20,6 +22,7 @@ import { groupAlbums } from '../lib/chat/albums';
 import { AppBackButton } from '../components/ui/AppBackButton';
 import logo from '../assets/traders-planet-mark.png';
 import { Avatar } from '../components/ui/Avatar';
+import { MemberActions } from '../components/admin/MemberActions';
 import { normalizePickedFile } from '../lib/media/file-types';
 import { PortableImageError, toPortableImage } from '../lib/media/portable-image';
 import { PresenceIndicator, usePresence } from '../lib/presence/usePresence';
@@ -112,6 +115,13 @@ export function AdminChatScreen() {
 
   const [msg, setMsg] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
+  // Replying: the message the next send answers, a quote to go back to, and the original it led to (briefly marked).
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  const [jumpTo, setJumpTo] = useState<string | null>(null);
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const msgInput = useRef<HTMLInputElement>(null);
+  const jumpPages = useRef(0);
+  useEffect(() => { setReplyTo(null); setJumpTo(null); }, [chat.conversationId]);
   const [voicePreview, setVoicePreview] = useState<{ clip: VoiceRecording; url: string } | null>(null);
   const [sendingVoice, setSendingVoice] = useState(false);
   useEffect(() => () => { if (voicePreview) URL.revokeObjectURL(voicePreview.url); }, [voicePreview]);
@@ -133,6 +143,55 @@ export function AdminChatScreen() {
   const { messages, markRead, loadOlder, hasMore, loadingOlder, peerTyping } = chat;
 
   useEffect(() => { targetPages.current = 0; targetReached.current = false; }, [targetMessageId]);
+
+  // Tapping a quote: go to the original, reading older pages until it is there.
+  useEffect(() => { jumpPages.current = 0; }, [jumpTo]);
+  useEffect(() => {
+    if (!jumpTo || chat.loading) return;
+    if (messages.some(message => message.id === jumpTo)) {
+      document.getElementById(`message-${jumpTo}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      setFlashId(jumpTo);
+      setJumpTo(null);
+    } else if (hasMore && !loadingOlder && jumpPages.current < 25) {
+      jumpPages.current++;
+      void loadOlder();
+    } else if (!loadingOlder) {
+      setNotice('The original message is no longer available.');
+      setJumpTo(null);
+    }
+  }, [jumpTo, chat.loading, messages, hasMore, loadingOlder, loadOlder]);
+  useEffect(() => {
+    if (!flashId) return;
+    const timer = setTimeout(() => setFlashId(null), 1700);
+    return () => clearTimeout(timer);
+  }, [flashId]);
+
+  const peerName = peer?.name ?? 'Member';
+  const senderOf = (message: ChatMessage) => replySender(message.senderId, user?.id, isAdmin, peerName);
+  const quoteFor = (message: ChatMessage): QuoteInfo | null => {
+    if (!message.replyToId) return null;
+    const target = chat.replyTarget(message.replyToId);
+    if (target === undefined) return { targetId: message.replyToId, state: 'loading' };
+    if (target === null) return { targetId: message.replyToId, state: 'missing' };
+    return {
+      targetId: message.replyToId, state: 'ready', sender: senderOf(target), snippet: replySnippet(target),
+      // The other side's deleted messages are not shown in the thread, so there is nowhere to go.
+      canJump: !(target.deletedAt && target.senderId !== user?.id),
+    };
+  };
+  const startReply = (message: ChatMessage) => {
+    if (!chat.repliesAvailable || !chatReady) return;
+    setReplyTo(message);
+    window.requestAnimationFrame(() => msgInput.current?.focus());
+  };
+  const replyId = replyTo?.id ?? null;
+  // Escape cancels a reply wherever the focus is (after a swipe or the Reply button, it may not be in the box yet).
+  useEffect(() => {
+    if (!replyTo) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setReplyTo(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [replyTo]);
   useEffect(() => {
     if (!targetMessageId || chat.loading) return;
     if (messages.some(message => message.id === targetMessageId)) {
@@ -183,9 +242,10 @@ export function AdminChatScreen() {
     const body = msg.trim();
     if (!body || !chatReady) return;
     setMsg('');
+    setReplyTo(null);
     chat.stopTyping();
     atBottom.current = true;
-    await chat.sendText(body);
+    await chat.sendText(body, replyId);
   }
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -209,8 +269,9 @@ export function AdminChatScreen() {
       if (!kind) { problems.push(`${raw.name}: that file type cannot be attached.`); continue; }
       if (straightOut) {
         setNotice(null);
+        setReplyTo(null);
         atBottom.current = true;
-        await chat.sendMedia(file, kind, file.name);
+        await chat.sendMedia(file, kind, file.name, undefined, replyId);
         return;
       }
       const item = { id: crypto.randomUUID(), file, kind, previewUrl: kind === 'image' ? URL.createObjectURL(file) : null };
@@ -247,8 +308,9 @@ export function AdminChatScreen() {
     const batch = picked.map(item => ({ file: item.file as Blob, kind: item.kind, fileName: item.file.name }));
     // The previews are not needed once the bubbles (with their own previews) exist.
     discardPicked();
+    setReplyTo(null);
     atBottom.current = true;
-    await chat.sendMediaBatch(batch);
+    await chat.sendMediaBatch(batch, replyId);
   }
 
   async function handleMic() {
@@ -268,7 +330,8 @@ export function AdminChatScreen() {
     const extension = /mp4/i.test(voicePreview.clip.mimeType) ? 'm4a' : /aac/i.test(voicePreview.clip.mimeType) ? 'aac' : /ogg/i.test(voicePreview.clip.mimeType) ? 'ogg' : 'webm';
     try {
       atBottom.current = true;
-      await chat.sendMedia(voicePreview.clip.blob, 'voice', `voice-note.${extension}`, voicePreview.clip.durationSeconds);
+      setReplyTo(null);
+      await chat.sendMedia(voicePreview.clip.blob, 'voice', `voice-note.${extension}`, voicePreview.clip.durationSeconds, replyId);
       setVoicePreview(null);
     } finally { setSendingVoice(false); }
   }
@@ -305,6 +368,10 @@ export function AdminChatScreen() {
             ? <div style={{ fontSize: 11.5, fontWeight: 600, color: subtitleColor }}>typing…</div>
             : <PresenceIndicator status={peerPresence} />}
         </div>
+        {isAdmin && peer && (
+          <MemberActions member={{ id: peer.id, name: peer.name, avatarKey: peer.avatarKey }}
+            onDeleted={member => navigate('/admin-inbox', { replace: true, state: { deleted: { id: member.id, name: member.name } } })} />
+        )}
       </div>
 
       <div
@@ -335,6 +402,10 @@ export function AdminChatScreen() {
             <AlbumBubble
               key={entry.key}
               messages={entry.messages}
+              quote={quoteFor(entry.messages[0])}
+              flash={entry.messages.some(m => m.id === flashId)}
+              onReply={chat.repliesAvailable ? () => startReply(entry.messages[0]) : undefined}
+              onJump={setJumpTo}
               out={entry.messages[0].senderId === user?.id}
               incomingIsAdmin={!isAdmin}
               incomingName={peer?.name ?? 'Member'}
@@ -347,6 +418,10 @@ export function AdminChatScreen() {
             <MessageBubble
               key={entry.key}
               message={entry.message}
+              quote={quoteFor(entry.message)}
+              flash={entry.message.id === flashId}
+              onReply={chat.repliesAvailable ? () => startReply(entry.message) : undefined}
+              onJump={setJumpTo}
               highlighted={entry.message.id === targetMessageId}
               out={entry.message.senderId === user?.id}
               incomingIsAdmin={!isAdmin}
@@ -436,6 +511,19 @@ export function AdminChatScreen() {
         </div>
       )}
 
+      {replyTo && (
+        <div data-testid="reply-composer" style={css('flex:none;display:flex;align-items:center;gap:10px;padding:9px 18px 0;background:var(--surface);border-top:1px solid var(--border)')}>
+          <div style={css('flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;padding:6px 11px;border-radius:11px;border-left:3px solid var(--accent);background:var(--surface-secondary)')}>
+            <span style={css('font-size:11px;font-weight:700;color:var(--accent-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>Replying to {senderOf(replyTo)}</span>
+            <span style={css('font-size:12px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis')}>{replySnippet(replyTo)}</span>
+          </div>
+          <button type="button" aria-label="Cancel reply" onClick={() => setReplyTo(null)}
+            style={css('flex:none;width:32px;height:32px;border-radius:50%;border:0;background:var(--surface-secondary);display:flex;align-items:center;justify-content:center;cursor:pointer')}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth={2.6} strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+      )}
+
       {voicePreview ? (
         <div style={{ ...css('flex:none;display:flex;align-items:center;gap:8px;padding:12px 18px;background:var(--surface)'), paddingBottom: `calc(24px + env(safe-area-inset-bottom, 0px) + ${keyboardInset}px)` }}>
           <button type="button" onClick={() => setVoicePreview(null)} disabled={sendingVoice} style={css('color:var(--danger-ink);font-size:12px;font-weight:700')}>Cancel</button>
@@ -454,11 +542,16 @@ export function AdminChatScreen() {
           </button>
           <div style={css('flex:1;min-width:0;height:44px;border-radius:999px;background:var(--surface-secondary);display:flex;align-items:center;padding:0 16px')}>
             <input
-              placeholder="Type a message..."
+              ref={msgInput}
+              placeholder={replyTo ? 'Type your reply...' : 'Type a message...'}
+              aria-label={replyTo ? `Reply to ${senderOf(replyTo)}` : 'Message'}
               disabled={!chatReady}
               value={msg}
               onChange={e => { setMsg(e.target.value); chat.notifyTyping(); }}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void handleSendText(); } }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') { e.preventDefault(); void handleSendText(); }
+                else if (e.key === 'Escape' && replyTo) { e.preventDefault(); setReplyTo(null); }
+              }}
               onBlur={() => chat.stopTyping()}
               style={css('flex:1;min-width:0;font-size:14px;height:100%')}
             />
