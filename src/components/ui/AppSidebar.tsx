@@ -29,6 +29,10 @@ const ITEMS: { route: string; label: string; icon: ReactNode }[] = [
     icon: <g><rect x="4.2" y="4.2" width="15.6" height="15.6" rx="3.4" /><path d="M4.4 10h15.2M10 4.4v15.2" /></g>,
   },
   {
+    route: '/journal', label: 'Trading Journal',
+    icon: <g><path d="M12 6.6C10.2 5.3 7.6 4.7 3.6 4.9v13.4c4-.2 6.6.4 8.4 1.7 1.8-1.3 4.4-1.9 8.4-1.7V4.9c-4-.2-6.6.4-8.4 1.7z" /><path d="M12 6.8v12.6" /></g>,
+  },
+  {
     route: '/economic-calendar', label: 'Economic Calendar',
     icon: <g><rect x="3.8" y="5.4" width="16.4" height="14.4" rx="3" /><path d="M8 3.4v3.6M16 3.4v3.6M3.8 10h16.4" /><path d="M7.8 13.6h2.4M13.8 13.6h2.4M7.8 16.8h2.4" /></g>,
   },

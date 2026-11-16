@@ -29,6 +29,9 @@ interface Fake {
   /** HTTP status the Auth admin delete answers next (a queue; the last one repeats). */
   authAnswers: number[];
   rpcMissing: boolean;
+  /** The Trading Journal rows the fake holds, and whether reading them fails. */
+  journal: { id: string; user_id: string; screenshot_key: string | null }[];
+  journalFails: boolean;
 }
 
 let fake: Fake;
@@ -41,7 +44,13 @@ async function listen(app: express.Express): Promise<string> {
 }
 
 beforeEach(async () => {
-  fake = { rpc: [], authDeletes: [], audit: [], rpcAnswers: [{ ok: true, already: false, avatar_key: null, counts: { devices: 1 } }], authAnswers: [200], rpcMissing: false };
+  fake = { rpc: [], authDeletes: [], audit: [], rpcAnswers: [{ ok: true, already: false, avatar_key: null, counts: { devices: 1 } }], authAnswers: [200], rpcMissing: false,
+    journal: [
+      { id: 'aaaaaaaa-0000-4000-8000-000000000001', user_id: TARGET, screenshot_key: null },
+      { id: 'aaaaaaaa-0000-4000-8000-000000000002', user_id: TARGET, screenshot_key: null },
+      { id: 'bbbbbbbb-0000-4000-8000-000000000001', user_id: STUDENT, screenshot_key: null },
+    ],
+    journalFails: false };
   const supa = express();
   supa.use(express.json());
   supa.get('/auth/v1/user', (req, res) => {
@@ -67,6 +76,16 @@ beforeEach(async () => {
     return res.status(status).json({ code: status, msg: status === 404 ? 'User not found' : 'Database error deleting user' });
   });
   supa.post('/rest/v1/admin_audit_events', (req, res) => { fake.audit.push(req.body); return res.status(201).json([]); });
+  const owner = (req: express.Request) => new URL(req.originalUrl, 'http://fake').searchParams.get('user_id')?.replace(/^eq\./, '');
+  supa.get('/rest/v1/journal_trades', (req, res) => {
+    if (fake.journalFails) return res.status(500).json({ code: 'XX000', message: 'fake failure' });
+    return res.json(fake.journal.filter(row => row.user_id === owner(req)));
+  });
+  supa.delete('/rest/v1/journal_trades', (req, res) => {
+    const gone = fake.journal.filter(row => row.user_id === owner(req));
+    fake.journal = fake.journal.filter(row => row.user_id !== owner(req));
+    return res.json(gone);
+  });
   const url = await listen(supa);
   Object.assign(process.env, { SUPABASE_URL: url, VITE_SUPABASE_URL: url, SUPABASE_SERVICE_ROLE_KEY: 'service-role-fixture' });
   resetClientsForTests();
@@ -149,6 +168,26 @@ describe('deleting a member', () => {
     expect(again.status).toBe(200);
     expect(again.body).toMatchObject({ ok: true, already: true });
     expect(fake.authDeletes.map(d => d.soft)).toEqual([true, true]);
+  });
+
+  test('their private Trading Journal goes with them, and nobody else\'s', async () => {
+    const res = await remove(TARGET, 'admin-token');
+    expect(res.status).toBe(200);
+    expect(res.body.counts).toMatchObject({ journalTrades: 2 });
+    expect(fake.journal.map(row => row.user_id)).toEqual([STUDENT]);
+  });
+
+  test('if the journal cannot be removed yet, says so, and a second press finishes the job', async () => {
+    fake.journalFails = true;
+    fake.rpcAnswers = [{ ok: true, already: false, avatar_key: null }, { ok: true, already: true }];
+    const first = await remove(TARGET, 'admin-token');
+    expect(first.status).toBe(502);
+    expect(first.body).toMatchObject({ stage: 'journal', removedFromApp: true });
+    expect(fake.journal).toHaveLength(3);
+    fake.journalFails = false;
+    const again = await remove(TARGET, 'admin-token');
+    expect(again.status).toBe(200);
+    expect(fake.journal.map(row => row.user_id)).toEqual([STUDENT]);
   });
 
   test('a sign-in Auth no longer knows counts as closed', async () => {

@@ -12,6 +12,7 @@ import { chatMediaRouter } from "./chat-media.js";
 import { postMediaRouter } from "./post-media.js";
 import { adminAuthRouter } from "./admin-auth.js";
 import { memberAdminRouter } from "./member-admin.js";
+import { journalMediaRouter } from "./journal-media.js";
 import { profileMediaRouter } from "./profile-media.js";
 import { fxRouter } from "./fx.js";
 import { pushRouter } from "./push.js";
@@ -29,6 +30,7 @@ app.use("/api/chat", chatMediaRouter());
 // R2-backed community post attachments + the 6-month retention sweep.
 app.use("/api/posts", postMediaRouter());
 // Admin-only member management (deleting a member). Checked on the server and in the database.
+app.use("/api/journal", journalMediaRouter());
 app.use("/api/admin/members", memberAdminRouter());
 // The single admin's username/password sign-in. Credentials stay server-side.
 app.use("/api/admin", adminAuthRouter());

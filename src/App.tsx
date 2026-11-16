@@ -34,6 +34,9 @@ const CommunityPage = lazyWithRetry(() => import('./screens/CommunityPage').then
 const CreatePostScreen = lazyWithRetry(() => import('./screens/CreatePostScreen').then(module => ({ default: module.CreatePostScreen })));
 const RiskCalculatorScreen = lazyWithRetry(() => import('./screens/RiskCalculatorScreen').then(module => ({ default: module.RiskCalculatorScreen })));
 const EconomicCalendarScreen = lazyWithRetry(() => import('./screens/EconomicCalendarScreen').then(module => ({ default: module.EconomicCalendarScreen })));
+const JournalScreen = lazyWithRetry(() => import('./screens/JournalScreen').then(module => ({ default: module.JournalScreen })));
+const JournalTradeFormScreen = lazyWithRetry(() => import('./screens/JournalTradeFormScreen').then(module => ({ default: module.JournalTradeFormScreen })));
+const JournalTradeScreen = lazyWithRetry(() => import('./screens/JournalTradeScreen').then(module => ({ default: module.JournalTradeScreen })));
 const AdminChatRoute = lazyWithRetry(() => import('./screens/AdminChatScreen').then(module => ({ default: module.AdminChatRoute })));
 const PostDetailScreen = lazyWithRetry(() => import('./screens/PostDetailScreen').then(module => ({ default: module.PostDetailScreen })));
 const NotificationsScreen = lazyWithRetry(() => import('./screens/NotificationsScreen').then(module => ({ default: module.NotificationsScreen })));
@@ -51,7 +54,7 @@ function LocationResetBoundary({ children }: { children: ReactNode }) {
 
 /** Fetched ahead of time once a member is signed in (RoutePreloader). */
 const MEMBER_SCREENS = [HomeScreen, CommunityPage, ChatListScreen, NotificationsScreen, PostDetailScreen, AdminChatRoute,
-  CreatePostScreen, RiskCalculatorScreen, EconomicCalendarScreen, HapticsScreen, PersonalInformationScreen];
+  CreatePostScreen, RiskCalculatorScreen, EconomicCalendarScreen, JournalScreen, HapticsScreen, PersonalInformationScreen];
 const ADMIN_SCREENS = [AdminInboxScreen, AdminMembershipRequestsScreen, AdminActivationCodesScreen];
 /** The screens each `data-prefetch` intent opens (IntentPrefetch fetches their code as the member reaches for them). */
 const INTENT_SCREENS = {
@@ -100,6 +103,11 @@ export default function App() {
                 on the feature that survived it. */}
             <Route path="/economic-calendar" element={<RequireActivated><EconomicCalendarScreen /></RequireActivated>} />
             <Route path="/news" element={<Navigate to="/economic-calendar" replace />} />
+            {/* The Trading Journal: private to each member (journal_trades RLS). */}
+            <Route path="/journal" element={<RequireActivated><JournalScreen /></RequireActivated>} />
+            <Route path="/journal/new" element={<RequireActivated><JournalTradeFormScreen /></RequireActivated>} />
+            <Route path="/journal/trade/:id" element={<RequireActivated><JournalTradeScreen /></RequireActivated>} />
+            <Route path="/journal/trade/:id/edit" element={<RequireActivated><JournalTradeFormScreen /></RequireActivated>} />
             <Route path="/chat" element={<RequireActivated><ChatListScreen /></RequireActivated>} />
             <Route path="/chat/admin" element={<RequireActivated><AdminChatRoute /></RequireActivated>} />
             <Route path="/profile" element={<RequireActivated><ProfileScreen /></RequireActivated>} />

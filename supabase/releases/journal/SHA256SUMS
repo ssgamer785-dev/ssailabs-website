@@ -1,0 +1,6 @@
+# Run from the supabase/ folder:  sha256sum -c releases/journal/SHA256SUMS
+618e949783bd75fe5f5c25a6010675b054d6baca7fae625a667d2512057ee41a  releases/journal/preflight.sql
+eb97daf6570e49650fea14450fdafe69e2a6bcec94011004d24735c7636900ee  releases/journal/apply.sql
+f9d78933b972d305bd3820daf345ed02d23bec657546e6ee52326e4ba94681e2  releases/journal/verify.sql
+74ef6b1c159bd37e0cb4d12a5d89012c224c1f4bd6b9db6c0019f7a76d51b01c  migrations/20261116090000_trading_journal.sql
+fed1a460077619ecff74d34b787a60b5f53ae9183fc80bda833c4cb2be692497  rollbacks/20261116090000_trading_journal.rollback.sql

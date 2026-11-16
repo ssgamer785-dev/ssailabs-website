@@ -27,6 +27,7 @@
 import { Router } from 'express';
 import { asyncRoute, authenticate, bucket, deleteObjects, getAdmin, getS3 } from './r2.js';
 import { avatarObjectKey } from './profile-media.js';
+import { removeMemberJournal } from './journal-media.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -107,7 +108,19 @@ export function memberAdminRouter(): Router {
         .catch(cause => console.warn('[members] profile picture not removed:', cause instanceof Error ? cause.message.slice(0, 120) : 'unknown'));
     }
 
-    res.json({ ok: true, already: !!result.already, counts: result.counts ?? null });
+    // 4. Their Trading Journal: private, so no one may read it any more. Pictures, then rows; safe to run again.
+    let journal: { trades: number; pictures: number };
+    try {
+      journal = await removeMemberJournal(db, target);
+    } catch (cause) {
+      console.error('[members] removing the private journal failed:', cause instanceof Error ? cause.message.slice(0, 120) : 'unknown');
+      return res.status(502).json({
+        error: 'The member was deleted, but their private trading journal could not be removed yet. Tap Delete again to finish.',
+        stage: 'journal', removedFromApp: true,
+      });
+    }
+
+    res.json({ ok: true, already: !!result.already, counts: result.counts ? { ...result.counts, journalTrades: journal.trades } : null });
   }, 'Member management is temporarily unavailable. Please try again.'));
 
   return router;

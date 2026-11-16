@@ -345,6 +345,65 @@ export interface Database {
         };
         Relationships: [];
       };
+      /** Trading Journal: a member's own trades (20261116090000_trading_journal.sql). Private to the owner by RLS. */
+      journal_trades: {
+        Row: {
+          id: string;
+          user_id: string;
+          trade_date: string;
+          symbol: string;
+          direction: 'buy' | 'sell';
+          risk_reward: number;
+          result: 'profit' | 'loss' | 'breakeven';
+          pnl_amount: number | null;
+          pnl_currency: string | null;
+          strategy: string | null;
+          mistakes: string[];
+          followed_plan: boolean | null;
+          notes: string | null;
+          screenshot_key: string | null;
+          screenshot_mime: string | null;
+          screenshot_width: number | null;
+          screenshot_height: number | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          trade_date: string;
+          symbol: string;
+          direction: 'buy' | 'sell';
+          risk_reward: number;
+          result: 'profit' | 'loss' | 'breakeven';
+          pnl_amount?: number | null;
+          pnl_currency?: string | null;
+          strategy?: string | null;
+          mistakes?: string[];
+          followed_plan?: boolean | null;
+          notes?: string | null;
+          screenshot_key?: string | null;
+          screenshot_mime?: string | null;
+          screenshot_width?: number | null;
+          screenshot_height?: number | null;
+        };
+        Update: {
+          trade_date?: string;
+          symbol?: string;
+          direction?: 'buy' | 'sell';
+          risk_reward?: number;
+          result?: 'profit' | 'loss' | 'breakeven';
+          pnl_amount?: number | null;
+          pnl_currency?: string | null;
+          strategy?: string | null;
+          mistakes?: string[];
+          followed_plan?: boolean | null;
+          notes?: string | null;
+          screenshot_key?: string | null;
+          screenshot_mime?: string | null;
+          screenshot_width?: number | null;
+          screenshot_height?: number | null;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -453,6 +512,11 @@ export interface Database {
           author_name: string;
           is_mine: boolean;
         }[];
+      };
+      /** The Trading Journal's figures over the caller's own trades (jsonb; see the migration for each field). */
+      journal_summary: {
+        Args: Record<string, never>;
+        Returns: unknown;
       };
       my_unread_notification_count: {
         Args: Record<string, never>;
