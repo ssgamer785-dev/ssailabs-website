@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   DISCIPLINE_MIN_ANSWERS, EMPTY_SUMMARY, disciplineScore, draftFromTrade, emptyDraft, formatMoney, formatRiskReward, fromRow, localDateString,
-  parseAmount, parseRiskReward, parseSummary, rangeDates, rangeShowing, screenshotProblem, shortDate, symbolSuggestions, validateDraft, winRate,
+  parseAmount, parseRiskReward, parseSummary, rangeDates, rangeShowing, screenshotProblem, shortDate, validateDraft, winRate,
   type TradeDraft,
 } from './model';
 
@@ -110,14 +110,6 @@ describe('dates and filters', () => {
     expect(rangeShowing('2026-10-20', 'month', TODAY)).toBe('last_month');
     expect(rangeShowing('2026-03-01', 'month', TODAY)).toBe('year');
     expect(rangeShowing('2024-03-01', 'month', TODAY)).toBe('all');
-  });
-});
-
-describe('symbol suggestions', () => {
-  it('the member\'s own symbols first, then common ones, matching what is typed', () => {
-    expect(symbolSuggestions('', ['us30'], 3)).toEqual(['US30', 'XAUUSD', 'XAGUSD']);
-    expect(symbolSuggestions('gbp', [], 3)).toEqual(['GBPUSD', 'GBPJPY']);
-    expect(symbolSuggestions('xauusd', [], 3)).toEqual([]);
   });
 });
 

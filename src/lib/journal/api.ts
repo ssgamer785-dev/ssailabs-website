@@ -104,23 +104,70 @@ async function readError(res: Response, fallback: string): Promise<string> {
   try { const body = await res.json(); return typeof body?.error === 'string' ? body.error : fallback; } catch { return fallback; }
 }
 
-export async function requestScreenshotUpload(file: Blob): Promise<{ uploadUrl: string; storageKey: string }> {
-  const res = await fetch('/api/journal/upload-url', {
-    method: 'POST', headers: await authHeaders(), body: JSON.stringify({ mimeType: file.type, sizeBytes: file.size }),
-  });
-  if (!res.ok) throw new Error(await readError(res, 'Could not start the screenshot upload.'));
-  return res.json();
+/** Step 1 of an upload: the app server signs an address in the caller's own folder for exactly this type and size. */
+export async function requestScreenshotUpload(file: Blob, signal?: AbortSignal): Promise<{ uploadUrl: string; storageKey: string }> {
+  let res: Response;
+  try {
+    res = await fetch('/api/journal/upload-url', {
+      method: 'POST', headers: await authHeaders(), body: JSON.stringify({ mimeType: file.type, sizeBytes: file.size }), signal,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw new UploadCancelledError();
+    if (error instanceof Error && /signed out/i.test(error.message)) throw error;
+    throw new Error('Could not reach the app to start the upload. Your picture is still here — tap Retry.');
+  }
+  if (res.status === 401) throw new Error('Your session has ended. Please log in again, then retry the picture.');
+  if (!res.ok) throw new Error(await readError(res, 'Could not start the picture upload. Tap Retry.'));
+  const body = await res.json() as { uploadUrl?: unknown; storageKey?: unknown };
+  if (typeof body.uploadUrl !== 'string' || typeof body.storageKey !== 'string') throw new Error('Could not start the picture upload. Tap Retry.');
+  return { uploadUrl: body.uploadUrl, storageKey: body.storageKey };
 }
 
-/** XHR rather than fetch: upload progress. */
-export function uploadScreenshot(uploadUrl: string, file: Blob, onProgress: (fraction: number) => void): Promise<void> {
+/** An upload that was cancelled on purpose (the picture was replaced or removed): not an error to show. */
+export class UploadCancelledError extends Error {
+  constructor() { super('Upload cancelled.'); this.name = 'UploadCancelledError'; }
+}
+
+/** What the member is told when the picture's bytes do not reach storage, by what actually happened. */
+export function uploadFailureMessage(status: number, online: boolean): string {
+  if (status === 0) {
+    return online
+      ? 'Could not reach picture storage. Your picture is still here — tap Retry.'
+      : 'You are offline. Your picture is still here — tap Retry when you are back online.';
+  }
+  if (status === 403) return 'The upload link expired before the picture arrived. Tap Retry for a new one.';
+  if (status === 413 || status === 400) return 'Picture storage refused this file. Try another screenshot.';
+  return `The picture upload failed (error ${status}). Tap Retry.`;
+}
+
+/**
+ * XHR rather than fetch: upload progress. Straight to R2 with the signed
+ * address; the type sent must be the one the address was signed for.
+ */
+export function uploadScreenshot(uploadUrl: string, file: Blob, onProgress: (fraction: number) => void, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new UploadCancelledError()); return; }
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', uploadUrl, true);
     xhr.setRequestHeader('Content-Type', file.type);
-    xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
-    xhr.onload = () => { if (xhr.status >= 200 && xhr.status < 300) { onProgress(1); resolve(); } else reject(new Error(`The screenshot upload failed (${xhr.status}). Try again.`)); };
-    xhr.onerror = () => reject(new Error('The screenshot upload failed — check your connection and try again.'));
+    xhr.timeout = 180_000;
+    const cancel = () => xhr.abort();
+    signal?.addEventListener('abort', cancel, { once: true });
+    const done = () => signal?.removeEventListener('abort', cancel);
+    xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(Math.min(0.99, e.loaded / e.total)); };
+    xhr.onload = () => {
+      done();
+      if (xhr.status >= 200 && xhr.status < 300) { onProgress(1); resolve(); return; }
+      reject(new Error(uploadFailureMessage(xhr.status, navigator.onLine !== false)));
+    };
+    xhr.onerror = () => {
+      done();
+      // A browser reports a storage CORS refusal exactly like a dropped connection (status 0): say where it happened.
+      console.warn(`[journal] the screenshot did not reach storage (status 0) from ${window.location.origin}. If this address is a Preview, storage CORS must allow it.`);
+      reject(new Error(uploadFailureMessage(0, navigator.onLine !== false)));
+    };
+    xhr.ontimeout = () => { done(); reject(new Error('The picture upload took too long. Your picture is still here — tap Retry.')); };
+    xhr.onabort = () => { done(); reject(new UploadCancelledError()); };
     xhr.send(file);
   });
 }

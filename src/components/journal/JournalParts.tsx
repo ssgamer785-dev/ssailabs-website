@@ -4,7 +4,9 @@ import { css } from '../../lib/css';
 import { ImageViewer } from '../media/ImageViewer';
 import { MediaShimmer } from '../media/MediaPicture';
 import { screenshotUrl } from '../../lib/journal/api';
-import { formatMoney, resultLabel, type Direction, type JournalTrade, type TradeResult } from '../../lib/journal/model';
+import type { Direction, JournalTrade, TradeResult } from '../../lib/journal/model';
+import { previewRatio } from '../../lib/journal/screenshot';
+import { symbolLabel } from '../../lib/journal/symbols';
 
 /** BUY / SELL, in the colours a trader expects. */
 export function DirectionBadge({ direction, size = 'small' }: { direction: Direction; size?: 'small' | 'large' }) {
@@ -22,18 +24,6 @@ export function DirectionBadge({ direction, size = 'small' }: { direction: Direc
 
 export function resultColor(result: TradeResult): string {
   return result === 'profit' ? 'var(--success-ink)' : result === 'loss' ? 'var(--danger-ink)' : 'var(--text-muted)';
-}
-
-/** The result, with the money where it was recorded: "+$210" over "Profit". */
-export function ResultValue({ trade, align = 'right' }: { trade: Pick<JournalTrade, 'result' | 'pnlAmount' | 'pnlCurrency'>; align?: 'left' | 'right' }) {
-  const color = resultColor(trade.result);
-  const money = trade.pnlAmount !== null && trade.pnlCurrency ? formatMoney(trade.pnlAmount, trade.pnlCurrency) : null;
-  return (
-    <div style={{ ...css('display:flex;flex-direction:column;gap:2px;min-width:0'), alignItems: align === 'right' ? 'flex-end' : 'flex-start' }}>
-      <span style={{ ...css('font-size:13px;font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums'), color }}>{money ?? resultLabel[trade.result]}</span>
-      {money && <span style={css('font-size:10px;color:var(--text-faint);white-space:nowrap')}>{resultLabel[trade.result]}</span>}
-    </div>
-  );
 }
 
 /** A small dialog over the page: a question and two answers. */
@@ -74,8 +64,37 @@ export function ConfirmDialog({ title, body, confirmLabel, cancelLabel = 'Cancel
 }
 
 /**
- * A trade's chart screenshot at a comfortable size, from a short-lived signed
- * address for the owner's own trade. Tap to open it full screen (pinch/zoom).
+ * The frame a chart screenshot sits in: the picture's own proportions (very
+ * tall or very wide ones letterboxed, never cropped), shown whole with
+ * object-fit: contain, and a tap opens it full screen.
+ */
+export function ScreenshotFrame({ src, alt, width, height, onOpen, loaded, onLoad, onError, testId, children }: {
+  src: string | null; alt: string; width: number | null; height: number | null; onOpen?: () => void; loaded: boolean;
+  onLoad?: () => void; onError?: () => void; testId?: string; children?: ReactNode;
+}) {
+  return (
+    <div data-testid="screenshot-frame" style={{ ...css('position:relative;width:100%;border-radius:14px;overflow:hidden;background:var(--surface-sunken-2);border:1px solid var(--border-4)'),
+      aspectRatio: String(previewRatio(width, height)) }}>
+      <button type="button" onClick={onOpen} disabled={!onOpen || !src} aria-label="Open the full screenshot"
+        style={css('position:absolute;inset:0;width:100%;height:100%;padding:0;border:0;background:transparent;cursor:zoom-in;display:block')}>
+        {!loaded && <MediaShimmer />}
+        {src && <img src={src} alt={alt} data-testid={testId} draggable={false} onLoad={onLoad} onError={onError}
+          style={{ ...css('position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;-webkit-touch-callout:none;user-select:none'),
+            opacity: loaded ? 1 : 0, transition: 'opacity .2s ease' }} />}
+      </button>
+      {src && loaded && onOpen && (
+        <span aria-hidden="true" style={css('position:absolute;right:8px;bottom:8px;width:30px;height:30px;border-radius:9px;background:rgba(7,15,31,.55);color:#fff;display:flex;align-items:center;justify-content:center;pointer-events:none')}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" /></svg>
+        </span>
+      )}
+      {children}
+    </div>
+  );
+}
+
+/**
+ * A saved trade's chart screenshot, from a short-lived signed address issued
+ * for the owner's own trade only. Tap to open it full screen (pinch and zoom).
  */
 export function JournalScreenshot({ trade }: { trade: JournalTrade }) {
   const shot = trade.screenshot!;
@@ -88,45 +107,48 @@ export function JournalScreenshot({ trade }: { trade: JournalTrade }) {
   useEffect(() => {
     let live = true;
     setFailed(null);
+    setLoaded(false);
     screenshotUrl(trade.id, shot.key, attempt > 0)
       .then(next => { if (live) setUrl(next); })
       .catch(error => { if (live) setFailed(error instanceof Error ? error.message : 'Could not load the screenshot.'); });
     return () => { live = false; };
   }, [trade.id, shot.key, attempt]);
 
-  const ratio = shot.width && shot.height ? `${shot.width} / ${shot.height}` : '16 / 10';
   const getUrl = (_key: string, force?: boolean) => screenshotUrl(trade.id, shot.key, !!force);
 
+  if (failed) {
+    return (
+      <div role="alert" style={{ ...css('width:100%;border-radius:14px;background:var(--surface-sunken-2);border:1px solid var(--border-4);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:20px;text-align:center;font-size:12.5px;color:var(--text-muted)'),
+        aspectRatio: String(previewRatio(shot.width, shot.height)) }}>
+        {failed}
+        <button type="button" onClick={() => { setUrl(null); setAttempt(n => n + 1); }} className="jr-chip pressable">Try again</button>
+      </div>
+    );
+  }
   return (
     <>
-      <div style={{ ...css('position:relative;width:100%;border-radius:14px;overflow:hidden;background:var(--surface-sunken-2);border:1px solid var(--border-4)'),
-        aspectRatio: ratio, maxHeight: 'min(420px, 60vh)' }}>
-        {failed ? (
-          <div role="alert" style={css('position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:16px;text-align:center;font-size:12px;color:var(--text-muted)')}>
-            {failed}
-            <button type="button" onClick={() => setAttempt(n => n + 1)} style={css('font-size:12.5px;font-weight:700;color:var(--accent-ink);cursor:pointer')}>Try again</button>
-          </div>
-        ) : (
-          <button type="button" onClick={() => url && setOpen(true)} aria-label="Open the full screenshot" disabled={!url}
-            style={css('position:absolute;inset:0;display:block;width:100%;height:100%;padding:0;border:0;background:transparent;cursor:zoom-in')}>
-            {!loaded && <MediaShimmer />}
-            {url && <img src={url} alt={`Chart screenshot for ${trade.symbol}`} data-testid="journal-screenshot"
-              onLoad={() => setLoaded(true)} onError={() => { setLoaded(false); setFailed('Could not load the screenshot.'); }}
-              style={{ ...css('width:100%;height:100%;object-fit:contain;display:block'), opacity: loaded ? 1 : 0, transition: 'opacity .2s ease' }} />}
-          </button>
-        )}
-      </div>
+      <ScreenshotFrame src={url} alt={`Chart screenshot for ${symbolLabel(trade.symbol)}`} width={shot.width} height={shot.height} loaded={loaded}
+        testId="journal-screenshot" onOpen={() => setOpen(true)} onLoad={() => setLoaded(true)}
+        onError={() => { setLoaded(false); setFailed('Could not load the screenshot.'); }} />
       {open && <ImageViewer storageKey={shot.key} fileName={`${trade.symbol}-chart`} getUrl={getUrl} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-/** One labelled fact on the trade page. */
-export function Fact({ label, children }: { label: string; children: ReactNode }) {
+/** A short confirmation over the screen ("Trade saved"), above the bottom bar; it goes by itself. */
+export function JournalToast({ message, tone = 'good', aboveNav }: { message: string | null; tone?: 'good' | 'neutral'; aboveNav?: boolean }) {
+  if (!message) return null;
   return (
-    <div style={css('display:flex;flex-direction:column;gap:5px;min-width:0;padding:12px 13px;border-radius:13px;background:var(--surface-secondary)')}>
-      <div style={css('font-size:10.5px;font-weight:600;color:var(--text-muted);letter-spacing:.02em')}>{label}</div>
-      <div style={css('font-size:14px;font-weight:700;color:var(--text-primary);min-width:0;overflow-wrap:anywhere')}>{children}</div>
+    <div role="status" aria-live="polite" data-testid="journal-toast"
+      style={{ ...css('position:absolute;left:16px;right:16px;z-index:30;display:flex;justify-content:center;pointer-events:none'),
+        bottom: aboveNav ? 'calc(var(--nav-space) + 12px)' : 'calc(20px + env(safe-area-inset-bottom, 0px))' }}>
+      <span style={css('display:inline-flex;align-items:center;gap:8px;max-width:100%;padding:11px 16px;border-radius:999px;background:var(--text-primary);color:var(--surface);font-size:13px;font-weight:600;box-shadow:0 10px 30px rgba(var(--shadow-rgb),.25)')}>
+        <span aria-hidden="true" style={{ ...css('width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex:none'),
+          background: tone === 'good' ? 'var(--success)' : 'var(--text-muted)', color: '#fff' }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round"><path d={tone === 'good' ? 'M5 12.5l4.5 4.5L19 7.5' : 'M6 12h12'} /></svg>
+        </span>
+        {message}
+      </span>
     </div>
   );
 }

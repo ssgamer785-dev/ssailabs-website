@@ -33,10 +33,6 @@ export type MistakeTag = (typeof MISTAKES)[number][0];
 const MISTAKE_LABEL = new Map<string, string>(MISTAKES);
 export function mistakeLabel(tag: string): string { return MISTAKE_LABEL.get(tag) ?? tag; }
 
-/** Offered while typing a symbol, after the member's own recent ones. Any other symbol can be typed. */
-export const COMMON_SYMBOLS = ['XAUUSD', 'XAGUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'GBPJPY', 'EURJPY', 'AUDUSD', 'NZDUSD', 'USDCAD',
-  'USDCHF', 'US30', 'NAS100', 'SPX500', 'BTCUSD', 'ETHUSD', 'NIFTY', 'BANKNIFTY', 'SENSEX', 'CRUDEOIL'];
-
 export const SYMBOL_MAX = 24;
 export const STRATEGY_MAX = 80;
 export const NOTES_MAX = 2000;
@@ -202,14 +198,6 @@ export function normalizeSymbol(input: string): string {
   return input.trim().replace(/\s+/g, ' ').toUpperCase();
 }
 
-/** What the symbol suggestions show for what has been typed so far: the member's own first, then common ones. */
-export function symbolSuggestions(typed: string, recent: string[], limit = 8): string[] {
-  const query = normalizeSymbol(typed).replace(/[^A-Z0-9]/g, '');
-  const pool = [...new Set([...recent.map(normalizeSymbol), ...COMMON_SYMBOLS])];
-  const plain = (s: string) => s.replace(/[^A-Z0-9]/g, '');
-  const matches = query ? pool.filter(s => plain(s).includes(query) && plain(s) !== query) : pool;
-  return matches.sort((a, b) => (query ? Number(!plain(a).startsWith(query)) - Number(!plain(b).startsWith(query)) : 0)).slice(0, limit);
-}
 
 // ---------------------------------------------------------------------------------------------------------------
 // The form
@@ -262,7 +250,7 @@ export function validateDraft(draft: TradeDraft, today: Date = new Date()): { pr
   else if (draft.tradeDate < '2000-01-01') problems.tradeDate = 'Choose a date from 2000 onwards.';
 
   const symbol = normalizeSymbol(draft.symbol);
-  if (!symbol) problems.symbol = 'Enter the symbol you traded, e.g. XAUUSD.';
+  if (!symbol) problems.symbol = 'Choose the symbol you traded.';
   else if (symbol.length > SYMBOL_MAX) problems.symbol = `A symbol is at most ${SYMBOL_MAX} characters.`;
   else if (!/^[A-Z0-9][A-Z0-9 ._/!&-]*$/.test(symbol)) problems.symbol = 'Use letters, numbers and . / - _ only.';
 

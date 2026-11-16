@@ -684,15 +684,90 @@ textarea {
 @media (prefers-reduced-motion: reduce) { .msg-jump-flash { animation: none; outline: 2px solid var(--accent); } }
 
 /* ==========================================================================
-   Trading Journal: four figures in a row, two on the narrowest phones; the
-   trade list's columns tighten there too, so the symbol always has room.
+   Trading Journal. One set of controls for all three screens: fields with a
+   clear focus ring, segmented choices whose selected state is unmistakable,
+   cards on the app's own surfaces. Transitions are colour and border only
+   (cheap on any phone); the press scale comes from .pressable.
    ========================================================================== */
-.journal-grid { flex: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.journal-row-grid { display: grid; grid-template-columns: 52px minmax(0, 1fr) 44px 92px 14px; gap: 8px; }
-.journal-segment { font-size: 11.5px; }
-@media (max-width: 359px) {
-  .journal-segment { font-size: 10.5px; padding: 0 2px !important; }
-  .journal-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .journal-row-grid { grid-template-columns: 44px minmax(0, 1fr) 36px 76px 10px; gap: 5px; }
-  .journal-add-label { display: none; }
+.jr-card { flex: none; min-width: 0; border: 1px solid var(--border-4); border-radius: 18px; background: var(--surface); }
+.jr-label { font-size: 12.5px; font-weight: 600; color: var(--text-secondary); letter-spacing: -.05px; }
+.jr-hint { font-size: 11.5px; line-height: 1.45; color: var(--text-faint); }
+.jr-problem { font-size: 11.5px; line-height: 1.45; color: var(--danger-ink); display: flex; gap: 5px; align-items: flex-start; }
+
+.jr-control {
+  width: 100%; min-width: 0; height: 48px; border-radius: 12px; border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--text-primary); font-size: 16px; padding: 0 14px;
+  transition: border-color .15s var(--ease-out), box-shadow .15s var(--ease-out), background-color .15s var(--ease-out);
+}
+textarea.jr-control { height: auto; min-height: 104px; padding: 12px 14px; line-height: 1.5; resize: vertical; }
+.jr-control::placeholder { color: var(--text-placeholder); }
+.jr-control:hover { border-color: var(--text-faint); }
+.jr-control:focus, .jr-control:focus-within { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft-2); }
+.jr-control[aria-invalid="true"], .jr-control.is-invalid { border-color: var(--danger); }
+.jr-control:disabled, .jr-control.is-disabled { background: var(--surface-secondary); color: var(--text-muted); }
+.jr-control > input, .jr-control > select { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: transparent; color: inherit; font: inherit; font-size: 16px; }
+
+/* Segmented choice: equal columns that always fit; the chosen one fills with its colour. */
+.jr-seg { display: grid; grid-template-columns: repeat(var(--jr-n, 2), minmax(0, 1fr)); gap: 8px; }
+.jr-seg-btn {
+  min-width: 0; min-height: 48px; padding: 6px 4px; border-radius: 12px; border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--text-secondary); font-size: clamp(12px, 3.5vw, 13.5px); font-weight: 600; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 6px; text-align: center; line-height: 1.2;
+  transition: background-color .15s var(--ease-out), border-color .15s var(--ease-out), color .15s var(--ease-out), box-shadow .15s var(--ease-out);
+}
+/* A choice's label never breaks inside a word: the font scales with the screen so every label fits on one line. */
+.jr-seg-btn > span { min-width: 0; white-space: nowrap; }
+.jr-seg-btn:hover { border-color: var(--text-faint); }
+.jr-seg-btn[aria-checked="true"] { border-width: 1.5px; font-weight: 700; box-shadow: 0 1px 2px rgba(var(--shadow-rgb), .06); }
+.jr-seg-btn[data-tone="up"][aria-checked="true"] { background: var(--success-soft); border-color: var(--success-ink); color: var(--success-ink); }
+.jr-seg-btn[data-tone="down"][aria-checked="true"] { background: var(--danger-soft); border-color: var(--danger-ink); color: var(--danger-ink); }
+.jr-seg-btn[data-tone="neutral"][aria-checked="true"], .jr-seg-btn:not([data-tone])[aria-checked="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.jr-seg-btn .jr-dot { width: 22px; height: 22px; flex: none; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--surface-secondary); color: var(--text-muted); transition: background-color .15s var(--ease-out), color .15s var(--ease-out); }
+.jr-seg-btn[aria-checked="true"] .jr-dot { color: inherit; background: currentColor; }
+.jr-seg-btn[aria-checked="true"] .jr-dot > svg { color: var(--surface); }
+.jr-seg.is-invalid .jr-seg-btn:not([aria-checked="true"]) { border-color: var(--danger-border); }
+/* The result choice stacks icon over label: three always fit, even at 320px. */
+.jr-seg.is-tiles .jr-seg-btn { flex-direction: column; min-height: 64px; gap: 5px; font-size: clamp(11.5px, 3.4vw, 13px); }
+
+.jr-chip {
+  height: 34px; padding: 0 13px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface);
+  color: var(--text-secondary); font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  transition: background-color .15s var(--ease-out), border-color .15s var(--ease-out), color .15s var(--ease-out);
+}
+.jr-chip[aria-pressed="true"], .jr-chip[aria-checked="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.jr-chip[data-tone="good"][aria-pressed="true"] { background: var(--success-soft); border-color: var(--success-ink); color: var(--success-ink); }
+.jr-chip[data-tone="warn"][aria-pressed="true"] { background: var(--warning-soft); border-color: var(--warning-ink); color: var(--warning-ink); }
+
+/* Rows and tiles that open something: a soft wash on press, no scale (it would read as a glitch on a full-width row). */
+.jr-tap { -webkit-tap-highlight-color: transparent; transition: background-color .15s var(--ease-out); }
+.jr-tap:hover { background-color: var(--surface-hover); }
+.jr-tap:active { background-color: var(--tap-wash-strong); }
+
+.jr-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.jr-insights { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+@media (min-width: 720px) {
+  .jr-stats, .jr-insights { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.jr-filter { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; padding: 3px; border-radius: 12px; background: var(--surface-secondary); }
+.jr-filter > button { min-width: 0; height: 36px; border: 0; border-radius: 9px; background: transparent; color: var(--text-muted); font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 4px; transition: background-color .15s var(--ease-out), color .15s var(--ease-out), box-shadow .15s var(--ease-out); }
+.jr-filter > button[aria-checked="true"] { background: var(--surface); color: var(--accent-ink); font-weight: 700; box-shadow: 0 1px 3px rgba(var(--shadow-rgb), .12); }
+@media (max-width: 359px) { .jr-filter > button { font-size: 11px; } .jr-add-label { display: none; } }
+
+/* Spinner and the progress bar on a picture being uploaded. */
+@keyframes jr-spin { to { transform: rotate(360deg); } }
+.jr-spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: jr-spin .8s linear infinite; flex: none; }
+.jr-progress { height: 4px; border-radius: 999px; background: var(--surface-track); overflow: hidden; }
+.jr-progress > i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width .2s linear; }
+
+/* Bottom sheet (symbol picker) and the saved/deleted toast. */
+@keyframes jr-sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes jr-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.jr-sheet { animation: jr-sheet-in .2s var(--ease-out) both; }
+.jr-scrim { animation: jr-fade-in .15s linear both; }
+@keyframes jr-toast-in { from { transform: translate(-50%, 10px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+.jr-toast { animation: jr-toast-in .2s var(--ease-out) both; }
+@media (prefers-reduced-motion: reduce) {
+  .jr-sheet, .jr-scrim, .jr-toast { animation: none; }
+  .jr-spinner { animation-duration: 2.4s; }
+  .jr-control, .jr-seg-btn, .jr-chip, .jr-tap, .jr-filter > button { transition-duration: 1ms; }
 }
